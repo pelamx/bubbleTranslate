@@ -1,4 +1,4 @@
-//! bubbleTranslate — a bubble translator for macOS.
+//! bubbleTranslate — a bubble translator for macOS and Linux.
 //!
 //! Select text in any app that lets you select text — a PDF, a terminal, a
 //! browser, a code editor — and a small bubble appears at the cursor with the
@@ -7,25 +7,26 @@
 //!
 //! Threads:
 //!   main      — the egui bubble viewport
-//!   monitor   — a CGEventTap run loop watching for finished selections
+//!   monitor   — watches for finished selections, however this system reports
+//!               them; see [`platform`]
 //!   engine    — capture + HTTP, kept off the UI thread
 
-mod capture;
 mod config;
 mod engine;
 mod main_window;
-mod monitor;
-mod status_item;
+mod platform;
 mod trace;
 mod translate;
 mod ui;
+
+/// The platform boundary, re-exported so the rest of the crate can say
+/// `capture::` and `shell::` without caring which implementation it got.
+pub(crate) use platform::{capture, monitor, shell};
 
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 
 use eframe::egui;
-use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
-use objc2_foundation::MainThreadMarker;
 
 use crate::config::Config;
 use crate::engine::{Engine, Request};
@@ -44,16 +45,21 @@ fn main() -> eframe::Result<()> {
 
     let config = Arc::new(Mutex::new(Config::load()));
 
-    // Both capture strategies are dead without this, so ask for it up front;
-    // the system shows its "Open System Settings" dialog at most once.
-    let has_permission = capture::request_accessibility_permission();
-    if !has_permission {
-        eprintln!(
-            "bubbleTranslate: Accessibility permission not granted yet.\n\
-             Enable it in System Settings › Privacy & Security › Accessibility, \
-             then restart bubbleTranslate."
-        );
+    // Whether to come up with no interface at all. The flag is for autostart
+    // entries and for trying it once without committing; the setting is for
+    // making it the habit. Either is enough — this is the kind of switch a
+    // desktop file should be able to set without the config agreeing.
+    let background =
+        args.iter().any(|a| a == "--background") || config.lock().unwrap().start_in_background;
+
+    // Asked up front because the answer shapes the whole session: on macOS
+    // this is what pops the permission dialog, at most once, and on Linux it
+    // is where the compositor's protocols are probed.
+    let readiness = capture::readiness();
+    if !readiness.ok {
+        eprintln!("bubbleTranslate: {}", readiness.detail);
     }
+    let warning = (!readiness.ok).then(|| readiness.summary.clone());
 
     let (ui_tx, ui_rx) = channel();
 
@@ -69,7 +75,10 @@ fn main() -> eframe::Result<()> {
         // Never take focus. The app being read must stay frontmost, or its
         // selection would be dropped the moment we appeared.
         .with_active(false)
-        .with_taskbar(false);
+        .with_taskbar(false)
+        // The X11 `WM_CLASS` and the Wayland app id, so a window manager can
+        // be told about the bubble by name.
+        .with_app_id("bubbleTranslate");
 
     let options = eframe::NativeOptions {
         viewport,
@@ -80,7 +89,7 @@ fn main() -> eframe::Result<()> {
         "bubbleTranslate",
         options,
         Box::new(move |cc| {
-            hide_from_dock();
+            shell::run_in_background();
 
             let engine = Engine::start(config.clone(), ui_tx, {
                 let ctx = cc.egui_ctx.clone();
@@ -89,18 +98,17 @@ fn main() -> eframe::Result<()> {
 
             // Feed the monitor's triggers into the engine, honouring the
             // auto-translate switch without tearing the tap down.
-            let main = Arc::new(Mutex::new(MainState::new(engine.sender(), has_permission)));
+            let main = Arc::new(Mutex::new(MainState::new(
+                engine.sender(),
+                readiness,
+                !background,
+            )));
 
-            // The status item is what makes closing the main window safe:
-            // without a Dock icon it is the only way back to the window, and
-            // the only Quit affordance.
-            if let Some(mtm) = MainThreadMarker::new() {
-                if let Some(item) = status_item::install(mtm, cc.egui_ctx.clone()) {
-                    // Dropping it would remove the icon; it lives as long as
-                    // the process.
-                    std::mem::forget(item);
-                }
-            }
+            // On macOS this is the status item, and it is what makes closing
+            // the main window safe: with no Dock icon it is the only way back
+            // to the window, and the only Quit affordance. On Linux there is
+            // nothing yet, which is why closing the window quits instead.
+            shell::install(cc.egui_ctx.clone());
 
             let requests = engine.sender();
             let monitor_config = config.clone();
@@ -113,12 +121,7 @@ fn main() -> eframe::Result<()> {
             }
 
             Ok(Box::new(BubbleApp::new(
-                cc,
-                config,
-                engine,
-                ui_rx,
-                !has_permission,
-                main,
+                cc, config, engine, ui_rx, warning, main, background,
             )))
         }),
     )
@@ -209,13 +212,4 @@ fn check_providers() -> i32 {
 
     println!("\n{healthy}/3 providers responding");
     if healthy == 0 { 1 } else { 0 }
-}
-
-/// Runs as an accessory app: no Dock icon, no menu bar, and showing a window
-/// does not activate us over whatever the user is reading.
-fn hide_from_dock() {
-    if let Some(mtm) = MainThreadMarker::new() {
-        let app = NSApplication::sharedApplication(mtm);
-        app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
-    }
 }

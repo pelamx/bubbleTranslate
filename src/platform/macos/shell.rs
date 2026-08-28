@@ -1,4 +1,4 @@
-//! Menu bar icon.
+//! macOS shell integration: the menu bar icon and the activation policy.
 //!
 //! The app runs as an accessory (no Dock icon, so the bubble never steals
 //! focus), which means closing the main window would otherwise leave no way
@@ -28,9 +28,31 @@ static OPEN_REQUESTED: AtomicBool = AtomicBool::new(false);
 /// window would not appear until something else happened.
 static WAKE: OnceLock<eframe::egui::Context> = OnceLock::new();
 
+/// Whether something outside the app's own windows can bring it back.
+///
+/// True here: the menu bar item survives the main window being closed, which
+/// is what makes closing it mean "get out of the way" rather than "quit".
+pub fn has_indicator() -> bool {
+    true
+}
+
 /// True exactly once per click on "Open Bubble Translate".
 pub fn take_open_request() -> bool {
     OPEN_REQUESTED.swap(false, Ordering::SeqCst)
+}
+
+/// Always settled: the status item is installed synchronously and AppKit does
+/// not refuse it, so there is never a moment where its presence is in doubt.
+pub fn indicator_settled() -> bool {
+    true
+}
+
+/// Never true here: the menu bar's Quit item is wired straight to
+/// `NSApplication`'s own `terminate:`, so nothing has to be relayed through
+/// the UI loop. The Linux tray has no such thing and does relay it, which is
+/// why this exists on both.
+pub fn take_quit_request() -> bool {
+    false
 }
 
 /// Asks the UI to show and raise the main window.
@@ -55,7 +77,10 @@ fn request_open() {
 /// main window is open, and drops back to accessory when it closes. Accessory
 /// is the important state: it is what stops the bubble from stealing focus
 /// from whatever is being read.
-pub fn show_in_dock(mtm: MainThreadMarker, visible: bool) {
+pub fn set_foreground(visible: bool) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
     let app = NSApplication::sharedApplication(mtm);
     let wanted = if visible {
         NSApplicationActivationPolicy::Regular
@@ -105,7 +130,10 @@ extern "C-unwind" fn handle_reopen(
 ///
 /// Returns false while the delegate does not exist yet, so the caller can
 /// retry on a later frame.
-pub fn hook_reopen(mtm: MainThreadMarker) -> bool {
+pub fn hook_reopen() -> bool {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return false;
+    };
     let app = NSApplication::sharedApplication(mtm);
     let Some(delegate) = app.delegate() else {
         return false;
@@ -162,12 +190,23 @@ impl StatusTarget {
     }
 }
 
-/// Installs the menu bar item. Returns the status item, which the caller must
-/// keep alive — dropping it removes the icon.
-pub fn install(
-    mtm: MainThreadMarker,
-    ctx: eframe::egui::Context,
-) -> Option<Retained<NSStatusItem>> {
+/// Installs the menu bar item.
+pub fn install(ctx: eframe::egui::Context) {
+    // Dropping the status item removes the icon, so it is deliberately leaked:
+    // it has to live exactly as long as the process.
+    if let Some(item) = install_status_item(ctx) {
+        std::mem::forget(item);
+    }
+}
+
+/// Runs as an accessory app: no Dock icon, no menu bar of our own, and showing
+/// a window does not activate us over whatever the user is reading.
+pub fn run_in_background() {
+    set_foreground(false);
+}
+
+fn install_status_item(ctx: eframe::egui::Context) -> Option<Retained<NSStatusItem>> {
+    let mtm = MainThreadMarker::new()?;
     let _ = WAKE.set(ctx);
 
     let bar = NSStatusBar::systemStatusBar();

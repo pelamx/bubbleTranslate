@@ -7,9 +7,9 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::capture::{self, CaptureSource};
+use crate::capture;
 use crate::config::{Config, Provider};
-use crate::monitor::Trigger;
+use crate::platform::{CaptureSource, Trigger};
 use crate::translate::{TranslateError, Translation, Translator};
 
 /// How long an identical selection is treated as a repeat of the one just
@@ -32,7 +32,9 @@ pub enum Request {
 pub enum UiEvent {
     /// A translation is in flight, so the bubble can anchor itself and spin.
     Working {
-        at: (f64, f64),
+        /// `None` where the session will not say where the pointer is; the
+        /// bubble then picks a corner instead of the cursor.
+        at: Option<(f64, f64)>,
         via: CaptureSource,
     },
     /// The captured text rides along for the main window's Recent list only.
@@ -86,7 +88,8 @@ impl Engine {
 fn run(rx: Receiver<Request>, config: Arc<Mutex<Config>>, ui: Sender<UiEvent>, wake_ui: impl Fn()) {
     let translator = Translator::new();
     let mut last_text = String::new();
-    let mut last_at = (0.0, 0.0);
+    let mut last_at = None;
+    let mut last_via = CaptureSource::PrimarySelection;
     let mut last_started = Instant::now() - REPEAT_WINDOW;
 
     // Holds a request that arrived mid-debounce and superseded the gesture
@@ -156,7 +159,10 @@ fn run(rx: Receiver<Request>, config: Arc<Mutex<Config>>, ui: Sender<UiEvent>, w
                 if last_text.is_empty() {
                     continue;
                 }
-                (last_text.clone(), last_at, CaptureSource::Accessibility)
+                // Re-shown where and how the original capture was, so
+                // switching languages does not move the bubble or change what
+                // it says about where the text came from.
+                (last_text.clone(), last_at, last_via)
             }
             Request::Selection(trigger) => {
                 let Some(capture) = capture::selected_text(cfg.clipboard_fallback) else {
@@ -194,6 +200,7 @@ fn run(rx: Receiver<Request>, config: Arc<Mutex<Config>>, ui: Sender<UiEvent>, w
 
         last_text = text.clone();
         last_at = at;
+        last_via = via;
 
         let _ = ui.send(UiEvent::Working { at, via });
         wake_ui();

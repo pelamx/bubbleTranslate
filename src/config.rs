@@ -51,11 +51,38 @@ pub struct Config {
     pub debounce_ms: u64,
     /// Allow synthesizing Cmd+C when the Accessibility API returns nothing.
     pub clipboard_fallback: bool,
+    /// Also translate whatever gets copied, not only what gets selected.
+    ///
+    /// Selecting text publishes it to the desktop by itself, which is what
+    /// makes the bubble work without any cooperation from the application
+    /// being read. A few applications never publish a selection — anything
+    /// drawing its own text, this app's own window included — and for those,
+    /// copying is the one gesture that always reaches the desktop. Off by
+    /// default, because with it on every copy pops a bubble.
+    pub watch_clipboard: bool,
+    /// Start with no interface: no main window, just the bubble and whatever
+    /// indicator the desktop gives us.
+    ///
+    /// What a translator is for most of the time — it watches selections and
+    /// stays out of the way, and the settings window is somewhere you visit,
+    /// not somewhere you live. Off by default so a first run shows the app
+    /// exists. Ignored where nothing can bring the window back: starting
+    /// invisible with no indicator would be starting unreachable.
+    pub start_in_background: bool,
     /// Seconds of no interaction before the bubble hides itself. 0 keeps it up
     /// until it is closed or replaced. The countdown pauses while the pointer
     /// is over the bubble.
     pub auto_hide_secs: u64,
     pub font_size: f32,
+    /// Scales the whole interface, on top of whatever the display's own
+    /// scaling works out to.
+    ///
+    /// Exists because there is no way to ask a desktop how large its text is.
+    /// The display's scale can be read and matched — and is, see
+    /// `platform::preferred_zoom` — but that only settles what a point is
+    /// worth in pixels, not how big a desktop's own applications choose to
+    /// draw. Some run denser than others, and this is the dial for it.
+    pub ui_scale: f32,
 }
 
 impl Default for Config {
@@ -71,8 +98,16 @@ impl Default for Config {
             max_chars: 4000,
             debounce_ms: 180,
             clipboard_fallback: true,
+            watch_clipboard: false,
+            start_in_background: false,
             auto_hide_secs: 12,
             font_size: 16.0,
+            // The type scale here was drawn against macOS, whose system
+            // interface runs looser than most Linux desktops do; matching the
+            // display's scaling alone still leaves the app noticeably larger
+            // than its neighbours. This is a starting point, not a verdict —
+            // the slider in the main window is the real answer.
+            ui_scale: if cfg!(target_os = "linux") { 0.85 } else { 1.0 },
         }
     }
 }

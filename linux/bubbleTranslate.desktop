@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=bubbleTranslate
+GenericName=Bubble Translator
+Comment=Select text anywhere and a bubble appears with the translation
+Exec=bubbleTranslate
+Icon=bubbleTranslate
+Terminal=false
+Categories=Utility;Education;Languages;
+Keywords=translate;translation;language;dictionary;selection;
+StartupNotify=false
+# The bubble is drawn as an X11 client on every session, XWayland included,
+# because a Wayland toplevel cannot place itself at the cursor. Selections
+# still come over Wayland's own protocol — see src/platform/linux/mod.rs.
+X-GNOME-UsesNotifications=false

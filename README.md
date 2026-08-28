@@ -1,11 +1,20 @@
 # bubbleTranslate
 
-Select text anywhere on macOS — a PDF, a terminal, a browser, an editor — and a
-small bubble appears at the cursor with the translation.
+Select text anywhere — a PDF, a terminal, a browser, an editor — and a small
+bubble appears at the cursor with the translation. Runs on macOS and Linux.
+
+The translator, the provider chain and the interface are the same code on both.
+What differs is how a desktop lets an application find out what is selected,
+which is a surprisingly large difference: see
+[How it reads the selection](#how-it-reads-the-selection).
 
 ## Install
 
-### From the DMG
+Each platform has its own download and they do not collide: macOS gets an app
+bundle in a DMG, Linux gets a single executable. Building from source works on
+both and is covered below each.
+
+### macOS — from the DMG
 
 [**Download bubbleTranslate.dmg**](https://github.com/o0pelamx/bubbleTranslate/raw/main/bubbleTranslate.dmg)
 — no Rust toolchain needed. Open it and drag **bubbleTranslate.app** onto the
@@ -32,14 +41,64 @@ xattr -dr com.apple.quarantine /Applications/bubbleTranslate.app
 This step is only needed once, and only for a build downloaded from the
 internet. Building from source skips it entirely.
 
-### From source
+### macOS — from source
 
 ```sh
 ./bundle.sh
 open bubbleTranslate.app
 ```
 
-### Granting Accessibility
+### Linux — from the binary
+
+[**Download bubbleTranslate-linux-x86_64**](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate-linux-x86_64)
+— a single x86-64 executable, no Rust toolchain needed. Nothing is signed or
+quarantined on Linux, so there is no Gatekeeper equivalent to get past; it just
+needs the executable bit.
+
+```sh
+chmod +x bubbleTranslate-linux-x86_64
+./bubbleTranslate-linux-x86_64
+```
+
+To put it where the application menu can find it, move it onto your `PATH` and
+take the launcher and icon from this repo:
+
+```sh
+install -Dm755 bubbleTranslate-linux-x86_64 ~/.local/bin/bubbleTranslate
+install -Dm644 linux/bubbleTranslate.desktop ~/.local/share/applications/bubbleTranslate.desktop
+install -Dm644 linux/bubbleTranslate.svg ~/.local/share/icons/hicolor/scalable/apps/bubbleTranslate.svg
+```
+
+### Linux — from source
+
+```sh
+./linux/install.sh
+```
+
+Builds with `cargo`, then installs into `~/.local` — the binary, a `.desktop`
+launcher and an icon. No root, and nothing outside the XDG directories. Run it
+with `bubbleTranslate`.
+
+### What Linux needs
+
+- **XWayland**, on a Wayland session. The interface is drawn as an X11 client
+  on every desktop, because a Wayland window is not allowed to choose its own
+  position and the bubble has to appear at the cursor. Reading the selection
+  does *not* go through X11 — see below.
+- **A tray**, if you want to close the window without stopping the translator.
+  Any StatusNotifierItem host will do, which is what waybar, quickshell, KDE
+  and XFCE all expose a tray through; GNOME needs the AppIndicator extension.
+  Without one the app still works, but the main window *is* the app and closing
+  it quits — see [Running with no window](#running-with-no-window).
+- A font with coverage past Latin, if you translate into Chinese, Japanese,
+  Korean, Arabic or Cyrillic. Any Noto CJK package will do; `fc-match` is asked
+  where it went.
+
+Nothing needs to be granted, configured or permitted: on Linux the desktop
+publishes the selection itself, so there is no equivalent of the macOS
+Accessibility step below.
+
+### Granting Accessibility (macOS)
 
 Either route, the first launch asks for **Accessibility** permission. Grant it
 in System Settings › Privacy & Security › Accessibility, then **quit and
@@ -84,18 +143,45 @@ the toggle:
 tccutil reset Accessibility com.pelamx.bubbleTranslate
 ```
 
-The main window opens on launch, centred and sized to fit your display. Reopen
-it any time from the **menu bar** (🌐) or by launching the app again — either
-brings it to the front.
-
-Closing the main window does not stop the translator; it keeps watching for
-selections in the background. Quit from the menu bar icon.
-
 The app shows a Dock icon only while the main window is open. That is not
 cosmetic: macOS will not bring a background-only app to the front, so the app
 becomes a regular one for as long as it has a window, and drops back to
 background when you close it — which is what keeps the bubble from stealing
 focus from whatever you are reading.
+
+## Running with no window
+
+A translator spends nearly all its time waiting, so the window is somewhere to
+visit rather than somewhere to live. Both platforms put a globe in the desktop's
+own strip of indicators — the **menu bar** (🌐) on macOS, the **tray** on Linux
+— and that icon is what the app is when its window is closed.
+
+- **Closing the window does not quit.** It puts the interface away; the
+  translator carries on watching selections. Close it however your desktop
+  closes windows — the red button, `Super+W`, whatever you use.
+- **Clicking the icon brings the window back.** On macOS, launching the app
+  again does the same.
+- **Quit lives in the icon's menu**, and nowhere else. That is deliberate: a
+  window you can dismiss by reflex should not also be the thing that stops the
+  app.
+
+To skip the window entirely at startup, tick **Start without the window** in
+the main window's Behaviour section, or pass the flag:
+
+```sh
+bubbleTranslate --background
+```
+
+The setting is for making it the habit; the flag is for an autostart entry that
+should not depend on the config agreeing. Add `--background` to `Exec=` in
+`bubbleTranslate.desktop` and the app comes up as nothing but its tray icon.
+
+There is one safeguard. On Linux the tray is a negotiation with the desktop and
+it can fail — a session with no StatusNotifierItem host has nowhere to put the
+icon. Where that happens the app says so on stderr and falls back to the older
+arrangement: the main window *is* the app, and closing it quits. An app you have
+started invisibly and cannot reach is worse than an unwanted window, so
+`--background` opens one rather than leaving you with neither.
 
 ## The main window
 
@@ -137,6 +223,63 @@ sandboxed build would launch and capture nothing. Direct distribution is the
 route for a tool that reads other applications.
 
 ## How it reads the selection
+
+This is the part that is genuinely different per platform, and the differences
+are worth knowing about because they decide which applications work.
+
+### Linux
+
+Nothing is captured and nothing is synthesized: selecting text already
+publishes it, and the desktop is asked for it.
+
+| Session | How | Works? |
+|---|---|---|
+| X11, any desktop | The primary selection, watched with XFixes | Yes |
+| Wayland — Hyprland, sway, KDE, COSMIC, river | `wlr-data-control` | Yes |
+| Wayland — GNOME | Nothing available | No |
+
+Wayland ties clipboard access to keyboard focus on purpose, and a translator
+that watches selections in *other* windows is never the focused client. The
+`wlr-data-control` protocol exists for exactly this case — it is what clipboard
+managers use — and every compositor above implements it except GNOME's. On
+GNOME's Wayland session no application can read another's selection at all;
+bubbleTranslate says so in its window rather than appearing to work, and the
+translate box and the command line still do.
+
+Note that the session type decides this, not the toolkit: running as an X11
+client under XWayland does *not* work around it, because the compositor guards
+the bridged selection behind the same focus rule.
+
+**Applications that publish nothing.** GTK, Qt, Firefox, Chromium, Electron,
+terminals and PDF viewers all publish a primary selection. A few programs draw
+their own text and publish none — bubbleTranslate's own window among them. For
+those, turn on **Also translate on copy (Ctrl+C)** under Behaviour: copying is
+the one gesture that always reaches the desktop.
+
+**Workspaces.** The bubble asks to appear on every workspace with
+`_NET_WM_STATE_STICKY`, which X11 window managers honour. wlroots compositors
+do not implement it for X11 clients: there the equivalent is a *pin*, a state
+the compositor holds rather than a property a window can set on itself. So on
+Hyprland the app asks over `hyprctl` instead, once per time the bubble is shown
+— the pin does not survive the window being hidden, and a bubble that only
+appears on the workspace it was first shown on is the kind of failure that
+looks like the translator has simply stopped working.
+
+Nothing to configure; it happens on its own. If it ever cannot — the trace says
+so with `BUBBLETRANSLATE_DEBUG=1` — the same thing in config form is:
+
+```
+windowrule = pin, class:^(bubbleTranslate)$, floating:1
+```
+
+**Scaling.** On a scaled display the compositor and the X server describe the
+same screen differently — 2× against 2.33× on the laptop this was written on —
+which would make the text larger than every other window and put the bubble
+somewhere other than the cursor. The two are measured and reconciled at
+startup. **Interface scale** in the main window is the dial on top of that, for
+desktops that simply run denser than macOS.
+
+### macOS
 
 Two strategies, in order:
 
@@ -193,7 +336,8 @@ the provider chain.
 
 ## Config
 
-`~/Library/Application Support/bubbleTranslate/config.toml`, written on first run.
+`~/Library/Application Support/bubbleTranslate/config.toml` on macOS,
+`~/.config/bubbleTranslate/config.toml` on Linux. Written on first run.
 
 ```toml
 target_lang = "en"          # what to translate into
@@ -205,9 +349,11 @@ auto_translate = true       # bubble on selection
 min_chars = 2
 max_chars = 4000            # keeps a stray Cmd+A out of the queue
 debounce_ms = 180           # settle time before reading the selection
-clipboard_fallback = true
+clipboard_fallback = true   # macOS only: synthesize Cmd+C when AX is empty
+watch_clipboard = false     # also translate on copy, for apps with no selection
 auto_hide_secs = 12         # 0 = stay until closed; pauses while hovered
 font_size = 15.0
+ui_scale = 1.0              # whole-interface scale, on top of the display's
 ```
 
 Target language, auto-translate and the DeepL key are also editable from the
@@ -215,6 +361,9 @@ bubble's ⚙ menu. Changing the language re-translates the text already captured
 
 ## Known limits
 
+- GNOME's Wayland session cannot be watched at all; see above.
+- A Linux session with no StatusNotifierItem host gets no tray icon, and there
+  the main window is the only way back to the app, so closing it quits.
 - Restoring the clipboard after a synthetic copy only preserves text.
 - The bubble never takes keyboard focus (by design — otherwise the source app
   would drop its selection), so it cannot be dismissed with Esc. Close it with

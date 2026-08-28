@@ -23,6 +23,8 @@ use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
 use objc2_foundation::NSString;
 
+use crate::platform::{Capture, CaptureSource, Readiness};
+
 type AXUIElementRef = *mut c_void;
 const AX_SUCCESS: i32 = 0;
 
@@ -60,25 +62,24 @@ pub fn is_synthesizing() -> bool {
 /// dialog if they have not. Without the permission both capture strategies
 /// silently return nothing: AX refuses to answer and posted events are
 /// dropped.
-pub fn request_accessibility_permission() -> bool {
-    unsafe {
+pub fn readiness() -> Readiness {
+    let trusted = unsafe {
         let key = CFString::wrap_under_get_rule(kAXTrustedCheckOptionPrompt);
         let value = core_foundation::boolean::CFBoolean::true_value();
         let options = CFDictionary::from_CFType_pairs(&[(key.as_CFType(), value.as_CFType())]);
         AXIsProcessTrustedWithOptions(options.as_CFTypeRef() as *const c_void)
+    };
+    if trusted {
+        return Readiness::ready();
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CaptureSource {
-    Accessibility,
-    Clipboard,
-}
-
-#[derive(Debug, Clone)]
-pub struct Capture {
-    pub text: String,
-    pub via: CaptureSource,
+    Readiness::blocked(
+        "Accessibility permission is off — selections cannot be read. Enable \
+         bubbleTranslate in System Settings › Privacy & Security › Accessibility, \
+         then restart.",
+        "Selections cannot be read. Enable bubbleTranslate in System Settings › \
+         Privacy & Security › Accessibility, then restart the app — the event tap \
+         is installed at startup.",
+    )
 }
 
 /// Grabs the current selection, or `None` when there isn't one.
@@ -263,7 +264,10 @@ fn write_pasteboard_string(pasteboard: &NSPasteboard, value: &str) {
 }
 
 /// Puts text on the general pasteboard, for the bubble's copy button.
-pub fn set_clipboard(text: &str) {
+///
+/// The context goes unused here — AppKit owns the pasteboard directly — but it
+/// is what the Linux side needs on an X11 session, so the signature is shared.
+pub fn set_clipboard(_ctx: &eframe::egui::Context, text: &str) {
     let pasteboard = NSPasteboard::generalPasteboard();
     write_pasteboard_string(&pasteboard, text);
 }

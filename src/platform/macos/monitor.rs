@@ -20,7 +20,8 @@ use core_graphics::event::{
     CGEventType, CallbackResult, EventField,
 };
 
-use crate::capture;
+use crate::platform::Trigger;
+use crate::platform::capture;
 
 /// Minimum drag distance, in points, before a mouse-up counts as a selection
 /// rather than a click.
@@ -43,14 +44,13 @@ const KEYCODE_A: i64 = 0;
 /// window never kicks off another capture of the app behind it.
 static PAUSED: AtomicBool = AtomicBool::new(false);
 
+/// No second source here: on macOS the clipboard is a way of *reading* a
+/// selection, not a way of noticing one, and that is already what
+/// `clipboard_fallback` controls.
+pub fn set_watch_clipboard(_watch: bool) {}
+
 pub fn set_paused(paused: bool) {
     PAUSED.store(paused, Ordering::Relaxed);
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Trigger {
-    /// Where to anchor the bubble: global display points, top-left origin.
-    pub at: (f64, f64),
 }
 
 /// Starts the tap on a dedicated thread and returns immediately.
@@ -109,7 +109,7 @@ fn run(on_trigger: impl Fn(Trigger) + Send + 'static) {
                     },
                 );
                 if dragged || multi_click {
-                    on_trigger(Trigger { at: (p.x, p.y) });
+                    on_trigger(Trigger { at: Some((p.x, p.y)) });
                 }
             }
             CGEventType::KeyUp => {
@@ -123,7 +123,7 @@ fn run(on_trigger: impl Fn(Trigger) + Send + 'static) {
                 if shift_select || select_all {
                     crate::trace!("key-up    keycode={keycode} -> TRIGGER");
                     let p = event.location();
-                    on_trigger(Trigger { at: (p.x, p.y) });
+                    on_trigger(Trigger { at: Some((p.x, p.y)) });
                 }
             }
             _ => {}

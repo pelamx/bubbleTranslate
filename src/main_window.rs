@@ -11,6 +11,7 @@ use eframe::egui;
 
 use crate::config::{Config, LANGUAGES, Provider, language_name};
 use crate::engine::Request;
+use crate::platform::Readiness;
 use crate::translate::{TranslateError, Translation};
 
 /// Narrow and tall: the panels are a single column of short rows, so height
@@ -28,6 +29,9 @@ const SCREEN_MARGIN_Y: f32 = 120.0;
 /// that has already scrolled away, not a persistent history.
 const MAX_RECENT: usize = 25;
 
+/// The window's own background, matching the bubble's panel so the two read as
+/// one application.
+const WINDOW_BG: egui::Color32 = egui::Color32::from_rgb(30, 31, 34);
 const TEXT_PRIMARY: egui::Color32 = egui::Color32::from_gray(240);
 const TEXT_SECONDARY: egui::Color32 = egui::Color32::from_gray(186);
 const TEXT_MUTED: egui::Color32 = egui::Color32::from_gray(155);
@@ -45,7 +49,10 @@ pub struct MainState {
     /// gets raised instead of quietly staying behind other apps.
     pub focus_requested: bool,
     pub requests: Sender<Request>,
-    pub permission_ok: bool,
+    /// Whether selections can be watched at all here, and why not when they
+    /// cannot. The reason is platform-specific, so it travels with the verdict
+    /// rather than being written into this window.
+    pub readiness: Readiness,
 
     // Scratch translate box.
     pub input: String,
@@ -67,13 +74,13 @@ pub struct RecentEntry {
 }
 
 impl MainState {
-    pub fn new(requests: Sender<Request>, permission_ok: bool) -> Self {
+    pub fn new(requests: Sender<Request>, readiness: Readiness, open: bool) -> Self {
         Self {
-            open: true,
+            open,
             sized: false,
             focus_requested: false,
             requests,
-            permission_ok,
+            readiness,
             input: String::new(),
             translating: false,
             result: None,
@@ -106,6 +113,22 @@ pub fn draw(ui: &mut egui::Ui, state: &Arc<Mutex<MainState>>, config: &Arc<Mutex
         state.sized = true;
     }
 
+    // Paint the background before anything else.
+    //
+    // The bubble's viewport is transparent so its rounded corners sit on the
+    // desktop rather than on a grey rectangle, and that clear colour belongs
+    // to the renderer, not to one window — every viewport the app owns starts
+    // fully transparent. On macOS the window server puts an opaque window
+    // behind this one anyway; elsewhere nothing does, and the desktop shows
+    // through everywhere a widget has not painted.
+    let window_rect = ui
+        .ctx()
+        .input(|i| i.raw.screen_rect)
+        .unwrap_or_else(|| ui.max_rect());
+    ui.ctx()
+        .layer_painter(egui::LayerId::background())
+        .rect_filled(window_rect, 0.0, WINDOW_BG);
+
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -128,11 +151,7 @@ pub fn draw(ui: &mut egui::Ui, state: &Arc<Mutex<MainState>>, config: &Arc<Mutex
             }
 
             ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new(format!("Settings file: {}", Config::path().display()))
-                    .size(10.5)
-                    .color(TEXT_MUTED),
-            );
+            footer(ui);
             ui.add_space(8.0);
         });
 
@@ -187,6 +206,34 @@ fn section(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
     ui.add_space(14.0);
 }
 
+/// Where the settings file lives, and what closing this window means.
+///
+/// Worth spelling out, because closing it does not do what closing a window
+/// usually does. Wherever the app has an indicator — the menu bar on macOS, a
+/// tray icon on Linux — closing puts the interface away and the translator
+/// carries on watching selections, and quitting is deliberately somewhere
+/// else: the indicator's own menu. A window that can be dismissed by reflex
+/// should not also be the thing that stops the app.
+fn footer(ui: &mut egui::Ui) {
+    ui.label(
+        egui::RichText::new(format!("Settings file: {}", Config::path().display()))
+            .size(10.5)
+            .color(TEXT_MUTED),
+    );
+
+    if crate::shell::has_indicator() {
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(
+                "Closing this window leaves the translator running in the background. \
+                 To stop it, use Quit in the tray icon's menu.",
+            )
+            .size(10.5)
+            .color(TEXT_MUTED),
+        );
+    }
+}
+
 fn header(ui: &mut egui::Ui, state: &MainState) {
     ui.horizontal(|ui| {
         ui.label(
@@ -203,7 +250,7 @@ fn header(ui: &mut egui::Ui, state: &MainState) {
     });
     ui.add_space(2.0);
 
-    if state.permission_ok {
+    if state.readiness.ok {
         ui.label(
             egui::RichText::new("● Watching for selections")
                 .size(12.5)
@@ -219,18 +266,14 @@ fn header(ui: &mut egui::Ui, state: &MainState) {
         );
     } else {
         ui.label(
-            egui::RichText::new("● Accessibility permission not granted")
+            egui::RichText::new("● Not watching for selections")
                 .size(12.5)
                 .color(ERR_RED),
         );
         ui.label(
-            egui::RichText::new(
-                "Selections cannot be read. Enable bubbleTranslate in System Settings › \
-                 Privacy & Security › Accessibility, then restart the app — the \
-                 event tap is installed at startup.",
-            )
-            .size(12.0)
-            .color(WARN_AMBER),
+            egui::RichText::new(&state.readiness.detail)
+                .size(12.0)
+                .color(WARN_AMBER),
         );
     }
 }
@@ -293,7 +336,7 @@ fn translate_box(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
                     .color(TEXT_MUTED),
                 );
                 if ui.small_button("Copy").clicked() {
-                    crate::capture::set_clipboard(&result.text);
+                    crate::capture::set_clipboard(ui.ctx(), &result.text);
                 }
             });
         }
@@ -531,15 +574,60 @@ fn behaviour(ui: &mut egui::Ui, cfg: &mut Config) -> bool {
         .changed();
     dirty |= ui
         .checkbox(
-            &mut cfg.clipboard_fallback,
-            "Use copy fallback when a app hides its selection",
+            &mut cfg.watch_clipboard,
+            "Also translate on copy (Ctrl+C)",
         )
         .on_hover_text(
-            "Needed for terminals and PDF viewers, which expose nothing over the \
-             Accessibility API. Briefly borrows the clipboard and restores the \
-             text afterwards.",
+            "Selecting text publishes it to the desktop by itself, which is how the \
+             bubble works without the other application's help. A few — anything \
+             drawing its own text, this window included — publish nothing, and \
+             copying is the one gesture that always gets through.",
         )
         .changed();
+
+    // Only macOS has a capture strategy to fall back to. Elsewhere the
+    // desktop hands over the selection directly, so there is no second route
+    // to switch on and the setting would be a control over nothing.
+    if cfg!(target_os = "macos") {
+        dirty |= ui
+            .checkbox(
+                &mut cfg.clipboard_fallback,
+                "Use copy fallback when an app hides its selection",
+            )
+            .on_hover_text(
+                "Needed for terminals and PDF viewers, which expose nothing over the \
+                 Accessibility API. Briefly borrows the clipboard and restores the \
+                 text afterwards.",
+            )
+            .changed();
+    }
+
+    // Only offered where the window can be got back: without an indicator
+    // this would be a switch that makes the app unreachable on its next start.
+    if crate::shell::has_indicator() {
+        dirty |= ui
+            .checkbox(&mut cfg.start_in_background, "Start without the window")
+            .on_hover_text(
+                "Launches straight into the background: no settings window, just the \
+                 tray icon and the bubble. The window is one click on that icon away.",
+            )
+            .changed();
+    }
+
+    ui.add_space(8.0);
+    let mut scale = cfg.ui_scale * 100.0;
+    if slider(ui, "Interface scale", &mut scale, 60.0..=140.0, "%") {
+        cfg.ui_scale = scale / 100.0;
+        dirty = true;
+    }
+    ui.label(
+        egui::RichText::new(
+            "Sizes the whole app. The display's own scaling is already matched; \
+             this is for desktops that run denser or looser than that.",
+        )
+        .size(11.0)
+        .color(TEXT_MUTED),
+    );
 
     ui.add_space(8.0);
     dirty |= slider(
@@ -627,7 +715,7 @@ fn recent(ui: &mut egui::Ui, state: &MainState) {
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.small_button("Copy").clicked() {
-                    crate::capture::set_clipboard(&entry.translated);
+                    crate::capture::set_clipboard(ui.ctx(), &entry.translated);
                 }
                 ui.label(
                     egui::RichText::new(entry.provider.label())
