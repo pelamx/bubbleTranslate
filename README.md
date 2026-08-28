@@ -233,6 +233,11 @@ Every change saves immediately to the config file.
 
 ## Building an installer
 
+Only macOS needs one. Linux ships as the executable itself — `cargo build
+--release` produces it, `linux/install.sh` puts it and its launcher under
+`~/.local`, and there is no signing, notarization or store to satisfy on the
+way. Everything below is about the DMG.
+
 ```sh
 ./release.sh          # -> bubbleTranslate.dmg
 ```
