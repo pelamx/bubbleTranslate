@@ -10,15 +10,18 @@ which is a surprisingly large difference: see
 
 ## Install
 
-Each platform has its own download and they do not collide: macOS gets an app
-bundle in a DMG, Linux gets a single executable. Building from source works on
-both and is covered below each.
+| | Download | What you get |
+|---|---|---|
+| **macOS** | [`bubbleTranslate.dmg`](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate.dmg) (7 MB) | An app bundle to drag into Applications |
+| **Linux** | [`bubbleTranslate-linux-x86_64`](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate-linux-x86_64) (15 MB) | One executable to `chmod +x` and run |
+
+The two never collide, so this repo carries both. Neither download needs a Rust
+toolchain; building from source is covered under each and is the better route
+on Linux if your distribution is not a recent one — see the note on glibc.
 
 ### macOS — from the DMG
 
-[**Download bubbleTranslate.dmg**](https://github.com/o0pelamx/bubbleTranslate/raw/main/bubbleTranslate.dmg)
-— no Rust toolchain needed. Open it and drag **bubbleTranslate.app** onto the
-Applications folder.
+Open the DMG and drag **bubbleTranslate.app** onto the Applications folder.
 
 The app is ad-hoc signed rather than notarized, so macOS blocks the first
 launch with *"Apple could not verify bubbleTranslate is free of malware."*
@@ -41,6 +44,10 @@ xattr -dr com.apple.quarantine /Applications/bubbleTranslate.app
 This step is only needed once, and only for a build downloaded from the
 internet. Building from source skips it entirely.
 
+Then grant Accessibility — the one permission the app needs, and the subject of
+[the next section](#granting-accessibility-macos). Without it macOS will not
+tell the app what is selected, and no bubble ever appears.
+
 ### macOS — from source
 
 ```sh
@@ -48,20 +55,45 @@ internet. Building from source skips it entirely.
 open bubbleTranslate.app
 ```
 
+`bundle.sh` builds and assembles `bubbleTranslate.app` in place. Run
+`./setup-signing.sh` first if you expect to rebuild often; it is what keeps the
+Accessibility grant from going stale, explained below.
+
 ### Linux — from the binary
 
-[**Download bubbleTranslate-linux-x86_64**](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate-linux-x86_64)
-— a single x86-64 executable, no Rust toolchain needed. Nothing is signed or
-quarantined on Linux, so there is no Gatekeeper equivalent to get past; it just
-needs the executable bit.
+One statically-named, dynamically-linked x86-64 executable. Nothing is signed
+or quarantined on Linux, so there is no Gatekeeper equivalent to get past and
+no permission to grant — the desktop publishes the selection itself. It just
+needs the executable bit:
 
 ```sh
 chmod +x bubbleTranslate-linux-x86_64
+./bubbleTranslate-linux-x86_64 --check     # confirms the backends answer
 ./bubbleTranslate-linux-x86_64
 ```
 
-To put it where the application menu can find it, move it onto your `PATH` and
-take the launcher and icon from this repo:
+`--check` runs one translation through each provider and prints the result
+without opening a window, which separates "the app is broken" from "the network
+is" on a first run.
+
+**It needs a recent distribution.** The binary is built on Arch and links
+against glibc 2.43 or newer — `atan2f@GLIBC_2.43` and friends, pulled in by the
+maths in the bubble's layout. On anything older the loader refuses it outright:
+
+```
+version `GLIBC_2.43' not found (required by ./bubbleTranslate-linux-x86_64)
+```
+
+Ubuntu 24.04 (glibc 2.39) and Debian 13 (2.41) are both below that line. If you
+see that error, build from source instead — it takes a couple of minutes and
+produces a binary matched to your own system.
+
+Everything else it needs is already on any desktop that can run a GUI, and is
+loaded at runtime rather than linked: `libGL`, `libxkbcommon`, and
+`libwayland-client` on a Wayland session.
+
+To install it properly — on your `PATH`, in the application menu, with an icon
+— take the launcher and icon from this repo alongside it:
 
 ```sh
 install -Dm755 bubbleTranslate-linux-x86_64 ~/.local/bin/bubbleTranslate
@@ -69,15 +101,24 @@ install -Dm644 linux/bubbleTranslate.desktop ~/.local/share/applications/bubbleT
 install -Dm644 linux/bubbleTranslate.svg ~/.local/share/icons/hicolor/scalable/apps/bubbleTranslate.svg
 ```
 
+No root, nothing outside the XDG user directories. Uninstalling is deleting
+those three files. To update later, download the executable again and repeat
+the first line.
+
 ### Linux — from source
+
+The recommended route on any distribution that the prebuilt binary refuses, and
+the one that keeps working as your system moves:
 
 ```sh
 ./linux/install.sh
 ```
 
-Builds with `cargo`, then installs into `~/.local` — the binary, a `.desktop`
-launcher and an icon. No root, and nothing outside the XDG directories. Run it
-with `bubbleTranslate`.
+Builds with `cargo`, then installs exactly the three files above into
+`~/.local`. Run it with `bubbleTranslate`, or find it in the application menu.
+It also checks your session first and says which selection backend you will
+get, which is worth reading — see [How it reads the
+selection](#how-it-reads-the-selection).
 
 ### What Linux needs
 
@@ -93,10 +134,6 @@ with `bubbleTranslate`.
 - A font with coverage past Latin, if you translate into Chinese, Japanese,
   Korean, Arabic or Cyrillic. Any Noto CJK package will do; `fc-match` is asked
   where it went.
-
-Nothing needs to be granted, configured or permitted: on Linux the desktop
-publishes the selection itself, so there is no equivalent of the macOS
-Accessibility step below.
 
 ### Granting Accessibility (macOS)
 
@@ -202,7 +239,7 @@ Every change saves immediately to the config file.
 
 Drag-to-Applications layout. Without an Apple developer account the app is
 ad-hoc signed, so the DMG installs fine but Gatekeeper blocks the first launch
-and the user has to clear it once — see [From the DMG](#from-the-dmg).
+and the user has to clear it once — see [macOS — from the DMG](#macos--from-the-dmg).
 
 With a `Developer ID Application` certificate ($99/year Apple Developer
 Program) the same script produces a release that opens with no warning:
@@ -362,6 +399,8 @@ bubble's ⚙ menu. Changing the language re-translates the text already captured
 ## Known limits
 
 - GNOME's Wayland session cannot be watched at all; see above.
+- The prebuilt Linux binary needs glibc 2.43 or newer, which rules out the
+  current Debian and Ubuntu releases. Build from source there.
 - A Linux session with no StatusNotifierItem host gets no tray icon, and there
   the main window is the only way back to the app, so closing it quits.
 - Restoring the clipboard after a synthetic copy only preserves text.
