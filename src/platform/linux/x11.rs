@@ -17,7 +17,7 @@ use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::xfixes;
 use x11rb::protocol::xproto::{
-    AtomEnum, ConnectionExt as _, CreateWindowAux, EventMask, WindowClass,
+    AtomEnum, ConnectionExt as _, CreateWindowAux, EventMask, KeyButMask, WindowClass,
 };
 use x11rb::rust_connection::RustConnection;
 
@@ -128,6 +128,60 @@ pub fn watch(mut on_change: impl FnMut(String) + Send + 'static) -> Result<(), S
             on_change(text);
         }
     }
+}
+
+/// Blocks while a mouse button is held down, so a selection being dragged out
+/// is not acted on until the user lets go.
+///
+/// X11 reports the selection the moment it changes, and a toolkit that updates
+/// the primary selection as a drag grows sends one change per word. Waiting
+/// out a quiet period would guess at the end of that gesture; the button mask
+/// says it outright, which is the same thing the macOS tap keys off.
+///
+/// Best effort in both directions: it gives up after `timeout` so a wedged
+/// button — or one held for a reason of its own, a game or a scrollbar — can
+/// never stop the bubble for good, and it returns immediately if X will not
+/// answer, leaving [`crate::engine`]'s settle window as the only filter.
+pub fn wait_while_dragging(timeout: Duration) {
+    /// Fast enough to feel like the bubble follows the mouse-up, cheap enough
+    /// to be nothing next to the round trip a translation costs.
+    const POLL: Duration = Duration::from_millis(15);
+
+    // The wheel is deliberately not in here: it presses and releases in the
+    // same instant, so waiting on it would be waiting on nothing.
+    let buttons = KeyButMask::BUTTON1 | KeyButMask::BUTTON2 | KeyButMask::BUTTON3;
+
+    let Ok((conn, screen_num)) = x11rb::connect(None) else {
+        return;
+    };
+    let Some(root) = conn.setup().roots.get(screen_num).map(|screen| screen.root) else {
+        return;
+    };
+
+    let deadline = Instant::now() + timeout;
+    let mut waited = false;
+    while Instant::now() < deadline {
+        let held = conn
+            .query_pointer(root)
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+            .map(|reply| reply.mask.intersects(buttons));
+        match held {
+            Some(true) => {
+                waited = true;
+                std::thread::sleep(POLL);
+            }
+            // Either the button is up or X would not say; both mean stop
+            // waiting, and only the first is worth a line.
+            _ => {
+                if waited {
+                    crate::trace!("x11: the drag ended; taking the selection");
+                }
+                return;
+            }
+        }
+    }
+    crate::trace!("x11: a button is still down after {timeout:?}; taking the selection anyway");
 }
 
 /// Where the pointer is, in root-window coordinates.

@@ -1,21 +1,33 @@
 //! Noticing that a selection just finished.
 //!
-//! There is no gesture filtering here, and that absence is the point. On macOS
-//! the tap has to guess when a selection is *complete* — drags past a
-//! threshold, double and triple clicks — because guessing wrong means posting
-//! a stray Cmd+C into whatever app is in front. Here the desktop itself
-//! decides: a primary selection changes when, and only when, the user has
-//! selected something. What arrives is already the answer.
+//! Nothing here has to guess *what* was selected, the way the macOS tap does:
+//! the desktop publishes a primary selection when, and only when, the user has
+//! selected something, so the text that arrives is already the answer. What is
+//! left to work out is *when the user is done*, because a selection is
+//! published as it grows — drag a sentence out and a toolkit sends one change
+//! per word — and translating the first two of them would put a bubble over
+//! text still being swept.
 //!
-//! What remains is the debounce, which the engine does: X11 clients commonly
-//! re-assert ownership as a drag grows, so a single sweep of the mouse can
-//! land several changes in a row.
+//! Two filters answer that, in the order of how much they know:
+//!
+//!   * on X11, waiting for the mouse button to come up. That is the gesture
+//!     ending, not an inference about it, and no delay guesses at it.
+//!   * everywhere, the engine's settle window, which now waits for the
+//!     selection to stop changing rather than counting from its first sign.
+//!     On Wayland it is the only filter there can be: no protocol will say
+//!     whether a button is down, so quiet is the only evidence available.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use crate::platform::Trigger;
 
 use super::{Backend, backend, capture, cursor, wayland, x11};
+
+/// How long a held button may hold the bubble off. Longer than any sweep of a
+/// paragraph, short enough that a button held for some other reason entirely
+/// does not silence the translator.
+const MAX_DRAG: Duration = Duration::from_secs(10);
 
 /// Whether a copy should be treated like a selection.
 ///
@@ -56,7 +68,15 @@ pub fn spawn(on_trigger: impl Fn(Trigger) + Send + 'static) -> std::io::Result<(
     std::thread::Builder::new()
         .name("selection-monitor".into())
         .spawn(move || {
+            let dragging = matches!(backend, Backend::X11Primary);
             let handler = move |text: String| {
+                // Nothing is worth reporting until the gesture is over: the
+                // selection is still growing, and the pointer is not yet where
+                // the user means to leave it. Waiting here rather than in the
+                // engine is what puts the anchor at the end of the sweep.
+                if dragging {
+                    x11::wait_while_dragging(MAX_DRAG);
+                }
                 // The text has to be latched before the trigger goes out: the
                 // engine reads it back the moment it stops debouncing.
                 capture::latch(text);

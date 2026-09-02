@@ -46,8 +46,11 @@ pub struct Config {
     /// keeps a stray Cmd+A out of the translation queue.
     pub min_chars: usize,
     pub max_chars: usize,
-    /// How long to wait after the mouse/key release before reading the
-    /// selection, letting the source app finish updating it.
+    /// How long the selection has to hold still before it counts as finished.
+    ///
+    /// The window slides, so this is a quiet period rather than a delay: a
+    /// selection that is still growing keeps restarting it, and the bubble
+    /// waits for the sweep to end instead of appearing partway through it.
     pub debounce_ms: u64,
     /// Allow synthesizing Cmd+C when the Accessibility API returns nothing.
     pub clipboard_fallback: bool,

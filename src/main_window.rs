@@ -657,7 +657,10 @@ fn behaviour(ui: &mut egui::Ui, cfg: &mut Config) -> bool {
         dirty = true;
     }
     ui.label(
-        egui::RichText::new("Raise this if a slow app returns a stale selection.")
+        egui::RichText::new(
+            "How still the selection must be to count as finished. Raise it if the \
+             bubble appears mid-sweep or an app returns a stale selection.",
+        )
             .size(10.5)
             .color(TEXT_MUTED),
     );

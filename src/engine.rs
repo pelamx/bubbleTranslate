@@ -16,6 +16,11 @@ use crate::translate::{TranslateError, Translation, Translator};
 /// handled rather than a fresh request.
 const REPEAT_WINDOW: Duration = Duration::from_secs(2);
 
+/// How long [`settle`] will keep deferring to a selection that will not stop
+/// changing. Longer than any hand-made gesture, short enough that a client
+/// stuck re-asserting its selection still produces a bubble.
+const MAX_SETTLE: Duration = Duration::from_secs(5);
+
 pub enum Request {
     /// The monitor saw a selection gesture finish.
     Selection(Trigger),
@@ -241,24 +246,113 @@ enum Settled {
     Superseded(Request),
 }
 
-/// Waits out the debounce window, returning the most recent trigger seen.
+/// Waits for the selection to stop changing, returning the last trigger seen.
 ///
-/// Two things happen here: the source app gets a moment to finish updating its
-/// selection, and the burst of triggers a fast double- or triple-click emits
-/// collapses into a single capture.
+/// The window slides: every trigger that arrives restarts it, so what is
+/// waited for is a moment of quiet *after* the gesture rather than a fixed
+/// delay after its first sign. That is the difference between a bubble that
+/// waits for the sentence and one that pops up over the second word of it.
+///
+/// It matters because a trigger does not mean the same thing on every system.
+/// On macOS the tap already only fires on a completed gesture, so the window
+/// closes on the first timeout and nothing here changes. On Linux a trigger is
+/// "the selection changed", and dragging a sentence out emits one per word as
+/// it grows — there, the quiet is the only sign the user has let go.
+///
+/// Capped, because sliding forever would let a client that re-asserts its
+/// selection on a timer hold the bubble off for good. Past the cap the newest
+/// trigger is taken as the answer.
 fn settle(rx: &Receiver<Request>, mut latest: Trigger, window: Duration) -> Settled {
-    let deadline = Instant::now() + window;
+    let started = Instant::now();
+    let mut deadline = started + window;
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             return Settled::Trigger(latest);
         }
         match rx.recv_timeout(remaining) {
-            Ok(Request::Selection(next)) => latest = next,
+            Ok(Request::Selection(next)) => {
+                latest = next;
+                if started.elapsed() >= MAX_SETTLE {
+                    crate::trace!("settle    still changing after {MAX_SETTLE:?}; taking it");
+                    return Settled::Trigger(latest);
+                }
+                deadline = Instant::now() + window;
+            }
             Ok(other) => return Settled::Superseded(other),
             Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => {
                 return Settled::Trigger(latest);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn selection(x: f64) -> Request {
+        Request::Selection(Trigger { at: Some((x, 0.0)) })
+    }
+
+    /// A selection that keeps growing must not settle while it is growing.
+    ///
+    /// This is the bubble appearing mid-sweep, expressed as a test: five
+    /// changes 40ms apart, against a 100ms window that a fixed deadline would
+    /// have let expire after the first two.
+    #[test]
+    fn a_growing_selection_settles_only_once_it_stops() {
+        let (tx, rx) = channel();
+        let started = Instant::now();
+        std::thread::spawn(move || {
+            for step in 1..=5 {
+                std::thread::sleep(Duration::from_millis(40));
+                let _ = tx.send(selection(f64::from(step)));
+            }
+            // Held so the channel does not disconnect and end the wait early.
+            std::thread::sleep(Duration::from_millis(500));
+        });
+
+        let settled = settle(&rx, Trigger { at: Some((0.0, 0.0)) }, Duration::from_millis(100));
+        let elapsed = started.elapsed();
+
+        match settled {
+            // The last change, not the first: what the user ended up selecting.
+            Settled::Trigger(trigger) => assert_eq!(trigger.at, Some((5.0, 0.0))),
+            Settled::Superseded(_) => panic!("nothing should have superseded the gesture"),
+        }
+        assert!(
+            elapsed >= Duration::from_millis(300),
+            "settled after {elapsed:?}, i.e. while the selection was still changing",
+        );
+    }
+
+    /// The window still closes when nothing more arrives.
+    #[test]
+    fn a_finished_selection_settles_after_the_window() {
+        let (tx, rx) = channel();
+        let started = Instant::now();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            drop(tx);
+        });
+
+        let settled = settle(&rx, Trigger { at: Some((7.0, 0.0)) }, Duration::from_millis(50));
+        assert!(started.elapsed() < Duration::from_millis(250));
+        assert!(matches!(settled, Settled::Trigger(t) if t.at == Some((7.0, 0.0))));
+    }
+
+    /// Another kind of request mid-window takes over rather than being lost.
+    #[test]
+    fn another_request_supersedes_the_gesture() {
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            let _ = tx.send(Request::Retranslate);
+            std::thread::sleep(Duration::from_millis(200));
+        });
+
+        let settled = settle(&rx, Trigger { at: None }, Duration::from_millis(100));
+        assert!(matches!(settled, Settled::Superseded(Request::Retranslate)));
     }
 }
