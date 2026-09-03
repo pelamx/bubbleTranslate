@@ -36,6 +36,17 @@ pub fn has_indicator() -> bool {
     true
 }
 
+/// Opens a URL in whatever the user's browser is.
+///
+/// The one outward link the app has. Buying happens in a browser and nowhere
+/// else: 3-D Secure needs one, and an app that never asks for a card number is
+/// an app with nothing to leak.
+pub fn open_url(url: &str) {
+    if let Err(err) = std::process::Command::new("/usr/bin/open").arg(url).spawn() {
+        eprintln!("bubbleTranslate: could not open {url}: {err}");
+    }
+}
+
 /// True exactly once per click on "Open Bubble Translate".
 pub fn take_open_request() -> bool {
     OPEN_REQUESTED.swap(false, Ordering::SeqCst)

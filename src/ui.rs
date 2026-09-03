@@ -14,6 +14,7 @@ use eframe::egui;
 use crate::capture;
 use crate::config::{Config, LANGUAGES, Provider, language_name};
 use crate::engine::{Engine, Request, UiEvent};
+use crate::license::{self, Licensing};
 use crate::main_window::{self, MainState};
 use crate::monitor;
 use crate::platform::CaptureSource;
@@ -93,6 +94,12 @@ enum State {
     Failed {
         errors: Vec<(Provider, TranslateError)>,
     },
+    /// The day's free translations are gone. The one screen in the app whose
+    /// job is to sell something, so it appears exactly where a translation
+    /// would have and says when the allowance comes back.
+    Capped {
+        limit: u32,
+    },
 }
 
 pub struct BubbleApp {
@@ -151,6 +158,8 @@ pub struct BubbleApp {
     /// `Send + Sync + 'static` and so cannot borrow from here.
     main: Arc<Mutex<MainState>>,
     config_for_main: Arc<Mutex<Config>>,
+    /// Read by the settings window, written by the engine.
+    licensing: Licensing,
     reopen_hooked: bool,
     /// Mirrors the current activation policy so it is only set when it changes.
     dock_visible: bool,
@@ -161,6 +170,7 @@ pub struct BubbleApp {
 }
 
 impl BubbleApp {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         config: Arc<Mutex<Config>>,
@@ -168,6 +178,7 @@ impl BubbleApp {
         events: Receiver<UiEvent>,
         readiness_warning: Option<String>,
         main: Arc<Mutex<MainState>>,
+        licensing: Licensing,
         started_hidden: bool,
     ) -> Self {
         install_fonts(&cc.egui_ctx);
@@ -183,6 +194,7 @@ impl BubbleApp {
         Self {
             config_for_main: config.clone(),
             main,
+            licensing,
             config,
             engine,
             events,
@@ -246,6 +258,22 @@ impl BubbleApp {
                     let mut main = self.main.lock().unwrap();
                     main.testing = false;
                     main.statuses = statuses;
+                }
+                UiEvent::Capped { at, limit } => {
+                    self.anchor = at;
+                    self.state = State::Capped { limit };
+                    self.settings_open = false;
+                    self.copied_at = None;
+                    self.show(ctx);
+                    // Nothing follows this the way `Done` follows `Working`,
+                    // so the auto-hide countdown has to start here.
+                    self.shown_at = Instant::now();
+                }
+                UiEvent::ManualCapped { used, limit } => {
+                    let mut main = self.main.lock().unwrap();
+                    main.translating = false;
+                    main.result = None;
+                    main.capped = Some((used, limit));
                 }
             }
         }
@@ -488,13 +516,14 @@ impl BubbleApp {
 
         let state = self.main.clone();
         let config = self.config_for_main.clone();
+        let licensing = self.licensing.clone();
         ctx.show_viewport_deferred(id, builder, move |ui, _class| {
             // Closing the window must not take the translator down with it;
             // the app keeps running and the menu bar item brings it back.
             if ui.ctx().input(|i| i.viewport().close_requested()) {
                 state.lock().unwrap().open = false;
             }
-            main_window::draw(ui, &state, &config);
+            main_window::draw(ui, &state, &config, &licensing);
         });
 
         // Keep the parent painting so the viewport above is re-registered.
@@ -697,6 +726,38 @@ impl BubbleApp {
                                 .color(TEXT_PRIMARY),
                         );
                     });
+            }
+            State::Capped { limit } => {
+                let limit = *limit;
+                ui.label(
+                    egui::RichText::new(format!("You have used today's {limit} free translations"))
+                        .size(14.0)
+                        .color(TEXT_PRIMARY),
+                );
+                ui.add_space(3.0);
+                ui.label(
+                    egui::RichText::new(
+                        "The allowance resets at midnight. Pro removes the daily limit.",
+                    )
+                    .size(12.0)
+                    .color(TEXT_MUTED),
+                );
+                ui.add_space(9.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Upgrade to Pro").clicked() {
+                        shell::open_url(&format!("{}?src=bubble", license::BUY_URL));
+                        dismiss = true;
+                    }
+                    if ui
+                        .add(
+                            egui::Button::new(egui::RichText::new("Not now").size(12.0))
+                                .frame(false),
+                        )
+                        .clicked()
+                    {
+                        dismiss = true;
+                    }
+                });
             }
             State::Failed { errors, .. } => {
                 ui.label(

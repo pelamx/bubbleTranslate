@@ -40,6 +40,10 @@ pub struct Config {
     /// Optional contact address for MyMemory. Anonymous use is capped at ~5k
     /// chars/day; supplying an address raises it to ~50k.
     pub mymemory_email: String,
+    /// Licence key, as mailed after purchase. It is exchanged once for a
+    /// signed token, which lives in the data directory rather than here —
+    /// see [`crate::license`]. Empty on the free tier.
+    pub license_key: String,
     /// Pop the bubble automatically when a selection is made.
     pub auto_translate: bool,
     /// Selections shorter/longer than these bounds are ignored. The upper bound
@@ -96,6 +100,7 @@ impl Default for Config {
             providers: vec![Provider::Google, Provider::MyMemory, Provider::DeepL],
             deepl_api_key: String::new(),
             mymemory_email: String::new(),
+            license_key: String::new(),
             auto_translate: true,
             min_chars: 2,
             max_chars: 4000,

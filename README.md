@@ -226,10 +226,58 @@ started invisibly and cannot reach is worse than an unwanted window, so
 - **Languages** — target and source language
 - **Providers** — reorder the chain with ↑↓, set the DeepL key and MyMemory
   email, and **Test providers** to see which backends answer right now
+- **Account** — the plan, what is left of today's allowance, and the box to
+  paste a licence key into
 - **Behaviour** — bubble text size, auto-hide delay, settle delay, length cap
 - **Recent** — what the bubble has translated this session, with copy buttons
 
 Every change saves immediately to the config file.
+
+## The free allowance
+
+Five translations a day. After that the bubble still appears where the
+translation would have, and says the allowance is spent and when it comes
+back — it does not fail silently and it does not stop responding to the
+gesture. Pro removes the limit.
+
+What counts is deliberately narrow, because five is a small number and the
+bubble fires on every finished selection:
+
+| Counted | Not counted |
+|---|---|
+| A translation you asked for that came back | Anything that failed, or that no provider could translate |
+| The first reading of a piece of text | Re-selecting text already translated today |
+| | Switching the target language on text already on screen |
+| | A selection too short or too long to translate at all |
+
+The counter resets at your local midnight, not UTC's, and winding the system
+clock backwards does not hand out a second allowance. **An install that
+predates the limit keeps unlimited use** — the limit applies to installs that
+meet it for the first time, and taking something away from people who already
+have it is the one thing this cannot undo.
+
+There are no accounts and no passwords. A purchase produces a licence key,
+which is exchanged once for a signed token that is then checked locally
+against a key compiled into the binary. The licence service is never on the
+path of a translation and never sees one: Pro only lifts a counter, so the
+text you select goes to the providers exactly as it does on the free tier.
+The token is good offline for about 30 days between checks.
+
+The count itself is a day number and a total. What you have translated is
+never written to disk, not even hashed — an app that reads whatever you
+highlight has no business leaving a record of it behind.
+
+To see where an install stands without opening a window:
+
+```sh
+./bubbleTranslate --license
+```
+
+which prints the plan, the device id, and how much of today's allowance is
+left. It is the counterpart to `--check`: that one separates "the app is
+broken" from "the network is", and this one separates either from "the
+allowance is spent", which from the outside looks identical — no bubble
+appears.
 
 ## Building an installer
 
@@ -387,6 +435,7 @@ source_lang = "auto"        # or a fixed code
 providers = ["google", "mymemory", "deepl"]
 deepl_api_key = ""
 mymemory_email = ""         # raises the MyMemory quota
+license_key = ""            # Pro key; the signed token it buys lives elsewhere
 auto_translate = true       # bubble on selection
 min_chars = 2
 max_chars = 4000            # keeps a stray Cmd+A out of the queue

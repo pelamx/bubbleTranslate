@@ -9,7 +9,9 @@ use std::time::{Duration, Instant};
 
 use crate::capture;
 use crate::config::{Config, Provider};
+use crate::license::{self, Licensing};
 use crate::platform::{CaptureSource, Trigger};
+use crate::quota::Verdict;
 use crate::translate::{TranslateError, Translation, Translator};
 
 /// How long an identical selection is treated as a repeat of the one just
@@ -32,6 +34,13 @@ pub enum Request {
     Manual(String),
     /// Probe every backend independently for the main window's status panel.
     TestProviders,
+    /// Exchange a licence key for a signed entitlement token.
+    ActivateLicense(String),
+    /// Renew the token before it expires. Fired at startup when the cached one
+    /// is inside its refresh window, and never surfaced to the user.
+    RefreshLicense,
+    /// Release this device and drop the local licence.
+    DeactivateLicense,
 }
 
 pub enum UiEvent {
@@ -57,6 +66,16 @@ pub enum UiEvent {
     ManualFailed(Vec<(Provider, TranslateError)>),
     /// Per-provider health, in the order they were probed.
     ProviderStatus(Vec<(Provider, Result<String, String>)>),
+    /// The day's free translations are spent. Carries the anchor so the
+    /// upgrade prompt appears exactly where the translation would have.
+    Capped {
+        at: Option<(f64, f64)>,
+        limit: u32,
+    },
+    /// The same, for the main window's translate box. Not throttled the way
+    /// the bubble is: the user pressed a button and is owed an answer every
+    /// time they press it.
+    ManualCapped { used: u32, limit: u32 },
 }
 
 /// Phrase used to probe the backends. Short, unambiguously non-English, and
@@ -70,13 +89,14 @@ pub struct Engine {
 impl Engine {
     pub fn start(
         config: Arc<Mutex<Config>>,
+        licensing: Licensing,
         ui: Sender<UiEvent>,
         wake_ui: impl Fn() + Send + 'static,
     ) -> Self {
         let (tx, rx) = channel();
         std::thread::Builder::new()
             .name("translate-engine".into())
-            .spawn(move || run(rx, config, ui, wake_ui))
+            .spawn(move || run(rx, config, licensing, ui, wake_ui))
             .expect("failed to spawn translation engine");
         Self { tx }
     }
@@ -90,8 +110,24 @@ impl Engine {
     }
 }
 
-fn run(rx: Receiver<Request>, config: Arc<Mutex<Config>>, ui: Sender<UiEvent>, wake_ui: impl Fn()) {
+fn run(
+    rx: Receiver<Request>,
+    config: Arc<Mutex<Config>>,
+    licensing: Licensing,
+    ui: Sender<UiEvent>,
+    wake_ui: impl Fn(),
+) {
     let translator = Translator::new();
+    // Separate from the translator's agent: licence calls are rare, want a
+    // longer timeout, and have no business sharing a connection pool or a
+    // browser user-agent with the scraped Google endpoint.
+    let licence_agent = ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(15)))
+            .http_status_as_error(false)
+            .user_agent(concat!("bubbleTranslate/", env!("CARGO_PKG_VERSION")))
+            .build(),
+    );
     let mut last_text = String::new();
     let mut last_at = None;
     let mut last_via = CaptureSource::PrimarySelection;
@@ -119,11 +155,72 @@ fn run(rx: Receiver<Request>, config: Arc<Mutex<Config>>, ui: Sender<UiEvent>, w
         // through to the selection pipeline below.
         request = match request {
             Request::Manual(text) => {
-                let event = match translator.translate(&text, &cfg) {
-                    Ok(result) => UiEvent::ManualDone(result),
-                    Err(errors) => UiEvent::ManualFailed(errors),
+                let entitlement = licensing.license.lock().unwrap().entitlement.clone();
+                let verdict = licensing.quota.lock().unwrap().verdict(&text, &entitlement);
+                let event = if let Verdict::Capped { used, limit, .. } = verdict {
+                    UiEvent::ManualCapped { used, limit }
+                } else {
+                    match translator.translate(&text, &cfg) {
+                        Ok(result) => {
+                            // Only a first reading is charged; a repeat of
+                            // something already translated today is not.
+                            if verdict == Verdict::Allow {
+                                licensing.quota.lock().unwrap().record(&text);
+                            }
+                            UiEvent::ManualDone(result)
+                        }
+                        Err(errors) => UiEvent::ManualFailed(errors),
+                    }
                 };
                 let _ = ui.send(event);
+                wake_ui();
+                continue;
+            }
+            Request::ActivateLicense(key) => {
+                licensing.license.lock().unwrap().busy = true;
+                wake_ui();
+
+                // The lock is deliberately not held across the round trip —
+                // the settings window redraws while this is in flight.
+                let outcome = license::activate(&licence_agent, &key)
+                    .and_then(|grant| licensing.license.lock().unwrap().accept(grant));
+
+                let mut licence = licensing.license.lock().unwrap();
+                licence.busy = false;
+                match outcome {
+                    Ok(()) => crate::trace!("licence   activated"),
+                    Err(err) => {
+                        crate::trace!("licence   refused: {err}");
+                        licence.status = license::Status::Problem(err);
+                    }
+                }
+                drop(licence);
+                wake_ui();
+                continue;
+            }
+            Request::RefreshLicense => {
+                let token = licensing.license.lock().unwrap().token().map(str::to_string);
+                if let Some(token) = token {
+                    match license::refresh(&licence_agent, &token) {
+                        Ok(grant) => {
+                            let _ = licensing.license.lock().unwrap().accept(grant);
+                            crate::trace!("licence   refreshed");
+                        }
+                        // Silent on purpose. A refresh that could not reach the
+                        // service is our problem, not the subscriber's, and the
+                        // token they already hold is good for weeks yet.
+                        Err(err) => crate::trace!("licence   refresh failed: {err}"),
+                    }
+                    wake_ui();
+                }
+                continue;
+            }
+            Request::DeactivateLicense => {
+                let token = licensing.license.lock().unwrap().token().map(str::to_string);
+                if let Some(token) = token {
+                    license::deactivate(&licence_agent, &token);
+                }
+                licensing.license.lock().unwrap().forget();
                 wake_ui();
                 continue;
             }
@@ -157,9 +254,16 @@ fn run(rx: Receiver<Request>, config: Arc<Mutex<Config>>, ui: Sender<UiEvent>, w
             }
         }
 
-        let (text, at, via) = match request {
+        // The last element is whether the allowance applies. Re-reading the
+        // same selection in another language is the same translation, so
+        // switching target language must never cost anything.
+        let (text, at, via, metered) = match request {
             // Already handled above; the compiler cannot see that.
-            Request::Manual(_) | Request::TestProviders => continue,
+            Request::Manual(_)
+            | Request::TestProviders
+            | Request::ActivateLicense(_)
+            | Request::RefreshLicense
+            | Request::DeactivateLicense => continue,
             Request::Retranslate => {
                 if last_text.is_empty() {
                     continue;
@@ -167,7 +271,7 @@ fn run(rx: Receiver<Request>, config: Arc<Mutex<Config>>, ui: Sender<UiEvent>, w
                 // Re-shown where and how the original capture was, so
                 // switching languages does not move the bubble or change what
                 // it says about where the text came from.
-                (last_text.clone(), last_at, last_via)
+                (last_text.clone(), last_at, last_via, false)
             }
             Request::Selection(trigger) => {
                 let Some(capture) = capture::selected_text(cfg.clipboard_fallback) else {
@@ -197,9 +301,30 @@ fn run(rx: Receiver<Request>, config: Arc<Mutex<Config>>, ui: Sender<UiEvent>, w
                     crate::trace!("skip      same text within repeat window");
                     continue;
                 }
-                (text, trigger.at, capture.via)
+                (text, trigger.at, capture.via, true)
             }
         };
+
+        // The meter, and the only place a translation is refused for a reason
+        // that is not technical. It sits after the capture so a selection too
+        // short to translate never costs anything, and before the request so
+        // nothing is spent on a provider that may fail anyway.
+        let mut chargeable = false;
+        if metered {
+            let entitlement = licensing.license.lock().unwrap().entitlement.clone();
+            match licensing.quota.lock().unwrap().verdict(&text, &entitlement) {
+                Verdict::Allow => chargeable = true,
+                Verdict::Repeat => crate::trace!("quota     repeat of today's text; free"),
+                Verdict::Capped { used, limit, prompt } => {
+                    crate::trace!("quota     {used}/{limit} used; capped (prompt={prompt})");
+                    if prompt {
+                        let _ = ui.send(UiEvent::Capped { at, limit });
+                        wake_ui();
+                    }
+                    continue;
+                }
+            }
+        }
 
         last_started = Instant::now();
 
@@ -212,6 +337,11 @@ fn run(rx: Receiver<Request>, config: Arc<Mutex<Config>>, ui: Sender<UiEvent>, w
 
         let event = match translator.translate(&text, &cfg) {
             Ok(result) => {
+                // Counted here rather than above: a translation nobody
+                // received is not one the user should have paid for.
+                if chargeable {
+                    licensing.quota.lock().unwrap().record(&text);
+                }
                 crate::trace!(
                     "translate [{}] {} -> {:?}",
                     result.provider.label(),

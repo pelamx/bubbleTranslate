@@ -11,6 +11,7 @@ use eframe::egui;
 
 use crate::config::{Config, LANGUAGES, Provider, language_name};
 use crate::engine::Request;
+use crate::license::{self, Licensing, Status};
 use crate::platform::Readiness;
 use crate::translate::{TranslateError, Translation};
 
@@ -65,6 +66,17 @@ pub struct MainState {
 
     /// What the bubble has translated this session, newest first.
     pub recent: Vec<RecentEntry>,
+
+    // Account.
+    /// Set when the translate box was refused for want of allowance, as
+    /// (used, limit). Cleared on the next attempt.
+    pub capped: Option<(u32, u32)>,
+    /// The licence key being typed. Separate from the saved one in the config
+    /// so a half-typed key is never written to disk, but seeded from it at
+    /// startup: a key whose activation could not reach the service is still
+    /// the user's key, and it should be waiting for them to try again rather
+    /// than sending them back to the email it came in.
+    pub key_input: String,
 }
 
 pub struct RecentEntry {
@@ -74,7 +86,12 @@ pub struct RecentEntry {
 }
 
 impl MainState {
-    pub fn new(requests: Sender<Request>, readiness: Readiness, open: bool) -> Self {
+    pub fn new(
+        requests: Sender<Request>,
+        readiness: Readiness,
+        open: bool,
+        license_key: String,
+    ) -> Self {
         Self {
             open,
             sized: false,
@@ -87,6 +104,8 @@ impl MainState {
             testing: false,
             statuses: Vec::new(),
             recent: Vec::new(),
+            capped: None,
+            key_input: license_key,
         }
     }
 
@@ -103,7 +122,12 @@ impl MainState {
     }
 }
 
-pub fn draw(ui: &mut egui::Ui, state: &Arc<Mutex<MainState>>, config: &Arc<Mutex<Config>>) {
+pub fn draw(
+    ui: &mut egui::Ui,
+    state: &Arc<Mutex<MainState>>,
+    config: &Arc<Mutex<Config>>,
+    licensing: &Licensing,
+) {
     let mut state = state.lock().unwrap();
     let mut cfg = config.lock().unwrap();
     let mut dirty = false;
@@ -142,6 +166,9 @@ pub fn draw(ui: &mut egui::Ui, state: &Arc<Mutex<MainState>>, config: &Arc<Mutex
             });
             section(ui, "Providers", |ui| {
                 dirty |= providers(ui, &mut state, &mut cfg);
+            });
+            section(ui, "Account", |ui| {
+                dirty |= account(ui, &mut state, &mut cfg, licensing);
             });
             section(ui, "Behaviour", |ui| {
                 dirty |= behaviour(ui, &mut cfg);
@@ -295,11 +322,13 @@ fn translate_box(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
         {
             state.translating = true;
             state.result = None;
+            state.capped = None;
             let _ = state.requests.send(Request::Manual(state.input.clone()));
         }
         if ui.button("Clear").clicked() {
             state.input.clear();
             state.result = None;
+            state.capped = None;
         }
         if state.translating {
             ui.spinner();
@@ -310,6 +339,24 @@ fn translate_box(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
                 .color(TEXT_MUTED),
         );
     });
+
+    if let Some((_, limit)) = state.capped {
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(format!("Today's {limit} free translations are used"))
+                .size(13.0)
+                .color(WARN_AMBER),
+        );
+        ui.label(
+            egui::RichText::new("The allowance resets at midnight.")
+                .size(11.5)
+                .color(TEXT_MUTED),
+        );
+        ui.add_space(4.0);
+        if ui.button("Upgrade to Pro").clicked() {
+            crate::shell::open_url(&format!("{}?src=window", license::BUY_URL));
+        }
+    }
 
     match &state.result {
         None => {}
@@ -562,6 +609,190 @@ fn providers(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Config) -> bool
             });
         }
     }
+
+    dirty
+}
+
+/// The licence panel: what this install may do, and how to change it.
+///
+/// Deliberately the plainest section in the window. Everything here is either
+/// a fact about the account or a button that opens a browser — the app itself
+/// never asks for a card, an address, or an email.
+fn account(
+    ui: &mut egui::Ui,
+    state: &mut MainState,
+    cfg: &mut Config,
+    licensing: &Licensing,
+) -> bool {
+    let mut dirty = false;
+
+    // The two locks are taken one after the other, never together: the engine
+    // reads them in this same order while a translation is in flight.
+    let (is_pro, plan, status, busy, entitlement) = {
+        let licence = licensing.license.lock().unwrap();
+        (
+            licence.entitlement.is_pro(),
+            licence.entitlement.plan,
+            licence.status.clone(),
+            licence.busy,
+            licence.entitlement.clone(),
+        )
+    };
+    let (used, limit, grandfathered) = {
+        let quota = licensing.quota.lock().unwrap();
+        (
+            quota.used_today(),
+            quota.limit(&entitlement),
+            quota.is_grandfathered(),
+        )
+    };
+
+    // -- where this install stands ----------------------------------------
+    match limit {
+        None => {
+            ui.label(
+                egui::RichText::new(if grandfathered {
+                    "● Unlimited translations".to_string()
+                } else {
+                    format!("● {} — unlimited translations", plan.label())
+                })
+                .size(13.0)
+                .color(OK_GREEN),
+            );
+            if grandfathered {
+                ui.label(
+                    egui::RichText::new(
+                        "This install predates the daily limit, so the limit does not \
+                         apply to it.",
+                    )
+                    .size(11.0)
+                    .color(TEXT_MUTED),
+                );
+            }
+            ui.label(
+                egui::RichText::new(format!("{used} translated today"))
+                    .size(11.5)
+                    .color(TEXT_MUTED),
+            );
+        }
+        Some(limit) => {
+            let spent = used >= limit;
+            ui.label(
+                egui::RichText::new(format!(
+                    "● Free — {used} of {limit} translations used today",
+                ))
+                .size(13.0)
+                .color(if spent { WARN_AMBER } else { TEXT_SECONDARY }),
+            );
+            ui.label(
+                egui::RichText::new(if spent {
+                    "The allowance resets at midnight."
+                } else {
+                    "Re-reading something already translated today does not count."
+                })
+                .size(11.0)
+                .color(TEXT_MUTED),
+            );
+        }
+    }
+
+    // -- anything the licence needs to say --------------------------------
+    match &status {
+        Status::None => {}
+        Status::Active { renews } => {
+            if let Some(renews) = renews {
+                ui.label(
+                    egui::RichText::new(format!("Renews {renews}"))
+                        .size(11.5)
+                        .color(TEXT_MUTED),
+                );
+            }
+            ui.label(
+                egui::RichText::new(format!(
+                    "Checked online about every {} days; works offline in between.",
+                    license::TOKEN_TTL_HINT / 86_400,
+                ))
+                .size(11.0)
+                .color(TEXT_MUTED),
+            );
+        }
+        Status::Lapsed => {
+            ui.label(
+                egui::RichText::new("Your licence has expired.")
+                    .size(11.5)
+                    .color(WARN_AMBER),
+            );
+        }
+        Status::Problem(why) => {
+            ui.label(egui::RichText::new(why).size(11.5).color(ERR_RED));
+        }
+    }
+
+    ui.add_space(8.0);
+
+    // -- what can be done about it ----------------------------------------
+    if is_pro {
+        ui.horizontal(|ui| {
+            if ui.button("Manage subscription").clicked() {
+                crate::shell::open_url(&format!("{}?src=window", license::MANAGE_URL));
+            }
+            if ui
+                .button("Remove from this device")
+                .on_hover_text(
+                    "Frees the device slot so the licence can be used on another machine.",
+                )
+                .clicked()
+            {
+                state.key_input.clear();
+                cfg.license_key.clear();
+                dirty = true;
+                let _ = state.requests.send(Request::DeactivateLicense);
+            }
+        });
+    } else {
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut state.key_input)
+                    .hint_text("BT-XXXXX-XXXXX-XXXXX")
+                    .desired_width(190.0),
+            );
+            let ready = !state.key_input.trim().is_empty() && !busy;
+            if ui.add_enabled(ready, egui::Button::new("Activate")).clicked() {
+                // Saved before the exchange, not after: a key that the service
+                // could not be reached about is still the key the user owns,
+                // and they should not have to find the email again.
+                cfg.license_key = state.key_input.trim().to_string();
+                dirty = true;
+                let _ = state
+                    .requests
+                    .send(Request::ActivateLicense(cfg.license_key.clone()));
+            }
+            if busy {
+                ui.spinner();
+            }
+        });
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            if ui.button("Get Pro").clicked() {
+                crate::shell::open_url(&format!("{}?src=window", license::BUY_URL));
+            }
+            ui.label(
+                egui::RichText::new("Unlimited translations, three devices.")
+                    .size(11.0)
+                    .color(TEXT_MUTED),
+            );
+        });
+    }
+
+    ui.add_space(4.0);
+    ui.label(
+        egui::RichText::new(format!(
+            "Device {} · translations are never sent through our servers",
+            &license::device_id()[..8],
+        ))
+        .size(10.5)
+        .color(TEXT_MUTED),
+    );
 
     dirty
 }

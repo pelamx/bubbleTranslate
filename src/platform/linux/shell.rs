@@ -55,6 +55,17 @@ pub fn has_indicator() -> bool {
     INDICATOR.load(Ordering::SeqCst)
 }
 
+/// Opens a URL in whatever the user's browser is.
+///
+/// The one outward link the app has. Buying happens in a browser and nowhere
+/// else: 3-D Secure needs one, and an app that never asks for a card number is
+/// an app with nothing to leak.
+pub fn open_url(url: &str) {
+    if let Err(err) = std::process::Command::new("xdg-open").arg(url).spawn() {
+        eprintln!("bubbleTranslate: could not open {url}: {err}");
+    }
+}
+
 /// Whether [`has_indicator`] is a final answer yet.
 ///
 /// False only for the first moments of a session, while the tray is still

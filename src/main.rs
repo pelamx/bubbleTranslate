@@ -13,8 +13,10 @@
 
 mod config;
 mod engine;
+mod license;
 mod main_window;
 mod platform;
+mod quota;
 mod trace;
 mod translate;
 mod ui;
@@ -30,7 +32,9 @@ use eframe::egui;
 
 use crate::config::Config;
 use crate::engine::{Engine, Request};
+use crate::license::{License, Licensing};
 use crate::main_window::MainState;
+use crate::quota::Quota;
 use crate::ui::{BUBBLE_WIDTH, BubbleApp};
 
 fn main() -> eframe::Result<()> {
@@ -42,8 +46,25 @@ fn main() -> eframe::Result<()> {
     if args.iter().any(|a| a == "--check") {
         std::process::exit(check_providers());
     }
+    if args.iter().any(|a| a == "--license") {
+        std::process::exit(license_status());
+    }
+    #[cfg(debug_assertions)]
+    if let Some(pos) = args.iter().position(|a| a == "--dev-license") {
+        std::process::exit(mint_dev_license(args.get(pos + 1).map(String::as_str)));
+    }
+
+    // Sampled before the config is loaded, because loading it creates the
+    // file when it is missing — and whether it existed a moment ago is the
+    // only way to tell an install that predates metering from a new one. That
+    // install keeps unlimited use; see `quota::Counter::legacy_unlimited`.
+    let config_existed = Config::path().exists();
 
     let config = Arc::new(Mutex::new(Config::load()));
+    let licensing = Licensing {
+        license: Arc::new(Mutex::new(License::load())),
+        quota: Arc::new(Mutex::new(Quota::load(config_existed))),
+    };
 
     // Whether to come up with no interface at all. The flag is for autostart
     // entries and for trying it once without committing; the setting is for
@@ -91,10 +112,17 @@ fn main() -> eframe::Result<()> {
         Box::new(move |cc| {
             shell::run_in_background();
 
-            let engine = Engine::start(config.clone(), ui_tx, {
+            let engine = Engine::start(config.clone(), licensing.clone(), ui_tx, {
                 let ctx = cc.egui_ctx.clone();
                 move || ctx.request_repaint()
             });
+
+            // Renew a token that is nearing its expiry. Off the UI thread, and
+            // silent either way: a subscriber whose refresh fails today still
+            // has weeks of validity in the token they are holding.
+            if licensing.license.lock().unwrap().wants_refresh() {
+                engine.request(Request::RefreshLicense);
+            }
 
             // Feed the monitor's triggers into the engine, honouring the
             // auto-translate switch without tearing the tap down.
@@ -102,6 +130,7 @@ fn main() -> eframe::Result<()> {
                 engine.sender(),
                 readiness,
                 !background,
+                config.lock().unwrap().license_key.clone(),
             )));
 
             // On macOS this is the status item, and it is what makes closing
@@ -121,10 +150,84 @@ fn main() -> eframe::Result<()> {
             }
 
             Ok(Box::new(BubbleApp::new(
-                cc, config, engine, ui_rx, warning, main, background,
+                cc, config, engine, ui_rx, warning, main, licensing, background,
             )))
         }),
     )
+}
+
+/// `bubbleTranslate --license`: says what this install is entitled to and how
+/// much of today's allowance is left, without opening a window.
+///
+/// The counterpart to `--check`. That one separates "the app is broken" from
+/// "the network is"; this one separates either from "the allowance is spent",
+/// which otherwise looks identical from the outside — no bubble appears.
+fn license_status() -> i32 {
+    let config_existed = Config::path().exists();
+    let licence = License::load();
+    let quota = Quota::load(config_existed);
+
+    println!("device    {}", license::device_id());
+    println!("plan      {}", licence.entitlement.plan.label());
+
+    match quota.limit(&licence.entitlement) {
+        None => {
+            println!(
+                "allowance unlimited{}",
+                if quota.is_grandfathered() {
+                    " (install predates the daily limit)"
+                } else {
+                    ""
+                },
+            );
+            println!("today     {} translated", quota.used_today());
+        }
+        Some(limit) => {
+            println!("allowance {limit} translations a day");
+            println!(
+                "today     {} used, {} left",
+                quota.used_today(),
+                limit.saturating_sub(quota.used_today()),
+            );
+        }
+    }
+
+    match &licence.status {
+        license::Status::None => println!("licence   none entered"),
+        license::Status::Active { renews } => {
+            let days = licence.entitlement.exp.saturating_sub(license::now()) / 86_400;
+            println!("licence   active, revalidates in {days} days");
+            if let Some(renews) = renews {
+                println!("renews    {renews}");
+            }
+        }
+        license::Status::Lapsed => println!("licence   expired"),
+        license::Status::Problem(why) => println!("licence   {why}"),
+    }
+
+    0
+}
+
+/// `bubbleTranslate --dev-license [pro|free]`: signs a licence for this machine
+/// with a locally generated key and installs it.
+///
+/// The whole point of P1 being buildable before the licence service is: this
+/// exercises the real verification path, the real device binding and the real
+/// cache file, against a key that only this machine has. Debug builds only.
+#[cfg(debug_assertions)]
+fn mint_dev_license(plan: Option<&str>) -> i32 {
+    let plan = plan.unwrap_or("pro");
+    if plan != "pro" && plan != "free" {
+        eprintln!("usage: bubbleTranslate --dev-license [pro|free]");
+        return 2;
+    }
+    let public_key = license::dev::mint(plan, 30);
+    println!("Signed a 30-day {plan} licence for this device.");
+    println!("  device      {}", license::device_id());
+    println!("  licence     {}", license::path().display());
+    println!("\nRun the app with the matching key, or it will not verify:\n");
+    println!("  BUBBLETRANSLATE_LICENSE_PUBKEY={public_key} cargo run\n");
+    0
 }
 
 /// `bubbleTranslate --translate <text>`: runs the provider chain once and prints the
