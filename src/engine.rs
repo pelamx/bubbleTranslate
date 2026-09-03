@@ -67,10 +67,12 @@ pub enum UiEvent {
     /// Per-provider health, in the order they were probed.
     ProviderStatus(Vec<(Provider, Result<String, String>)>),
     /// The day's free translations are spent. Carries the anchor so the
-    /// upgrade prompt appears exactly where the translation would have.
+    /// bubble appears exactly where the translation would have, and `prompt`
+    /// for whether to make the case for Pro or only say what happened.
     Capped {
         at: Option<(f64, f64)>,
         limit: u32,
+        prompt: bool,
     },
     /// The same, for the main window's translate box. Not throttled the way
     /// the bubble is: the user pressed a button and is owed an answer every
@@ -312,15 +314,13 @@ fn run(
         let mut chargeable = false;
         if metered {
             let entitlement = licensing.license.lock().unwrap().entitlement.clone();
-            match licensing.quota.lock().unwrap().verdict(&text, &entitlement) {
-                Verdict::Allow => chargeable = true,
-                Verdict::Repeat => crate::trace!("quota     repeat of today's text; free"),
-                Verdict::Capped { used, limit, prompt } => {
-                    crate::trace!("quota     {used}/{limit} used; capped (prompt={prompt})");
-                    if prompt {
-                        let _ = ui.send(UiEvent::Capped { at, limit });
-                        wake_ui();
-                    }
+            let verdict = licensing.quota.lock().unwrap().verdict(&text, &entitlement);
+            crate::trace!("quota     {verdict}");
+            match gate(verdict, at) {
+                Gate::Translate { charge } => chargeable = charge,
+                Gate::Refuse(event) => {
+                    let _ = ui.send(event);
+                    wake_ui();
                     continue;
                 }
             }
@@ -417,12 +417,93 @@ fn settle(rx: &Receiver<Request>, mut latest: Trigger, window: Duration) -> Sett
     }
 }
 
+/// What a meter verdict means for the selection that produced it.
+///
+/// Pulled out of the loop for one reason: it is the only decision in there
+/// that can be tested. Everything around it needs a screen to capture from.
+enum Gate {
+    /// Translate it. `charge` is false for a repeat of text already read
+    /// today, which is free.
+    Translate { charge: bool },
+    /// Do not translate it, and show this instead. Deliberately not an
+    /// `Option`: a gesture that produces nothing at all is what a broken app
+    /// looks like from the outside, so a refusal always says so.
+    Refuse(UiEvent),
+}
+
+fn gate(verdict: Verdict, at: Option<(f64, f64)>) -> Gate {
+    match verdict {
+        Verdict::Allow => Gate::Translate { charge: true },
+        Verdict::Repeat => Gate::Translate { charge: false },
+        // `prompt` rides along to the bubble rather than deciding whether
+        // there is one. The throttle is on the pitch, not on the answer.
+        Verdict::Capped { limit, prompt, .. } => {
+            Gate::Refuse(UiEvent::Capped { at, limit, prompt })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn selection(x: f64) -> Request {
         Request::Selection(Trigger { at: Some((x, 0.0)) })
+    }
+
+    /// The regression this seam exists for: a spent allowance still answers.
+    ///
+    /// `quota` throttles `prompt` so the upgrade pitch cannot appear more than
+    /// once an hour, and this decision used to read that as permission to send
+    /// nothing at all — so for 59 minutes out of every 60, selecting text did
+    /// visibly nothing. That is indistinguishable from a broken app, and is
+    /// reported as one.
+    #[test]
+    fn a_spent_allowance_still_answers_the_gesture() {
+        let throttled = Verdict::Capped {
+            used: 5,
+            limit: 5,
+            prompt: false,
+        };
+        match gate(throttled, Some((120.0, 340.0))) {
+            Gate::Refuse(UiEvent::Capped { at, limit, prompt }) => {
+                // Where the translation would have appeared, not wherever the
+                // bubble last happened to sit.
+                assert_eq!(at, Some((120.0, 340.0)));
+                assert_eq!(limit, 5);
+                assert!(!prompt, "the pitch is the part the throttle silences");
+            }
+            _ => panic!("a spent allowance produced no bubble at all"),
+        }
+    }
+
+    /// ...and when the throttle does allow it, the pitch rides along.
+    #[test]
+    fn the_pitch_rides_on_the_bubble_when_it_is_due() {
+        let due = Verdict::Capped {
+            used: 5,
+            limit: 5,
+            prompt: true,
+        };
+        match gate(due, None) {
+            Gate::Refuse(UiEvent::Capped { prompt, .. }) => {
+                assert!(prompt, "an hour has passed; the case for Pro is due")
+            }
+            _ => panic!("expected the upgrade bubble"),
+        }
+    }
+
+    /// A first reading is charged, a re-reading is not, and both translate.
+    #[test]
+    fn only_a_first_reading_is_charged() {
+        assert!(matches!(
+            gate(Verdict::Allow, None),
+            Gate::Translate { charge: true },
+        ));
+        assert!(matches!(
+            gate(Verdict::Repeat, None),
+            Gate::Translate { charge: false },
+        ));
     }
 
     /// A selection that keeps growing must not settle while it is growing.

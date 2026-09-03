@@ -94,11 +94,13 @@ enum State {
     Failed {
         errors: Vec<(Provider, TranslateError)>,
     },
-    /// The day's free translations are gone. The one screen in the app whose
-    /// job is to sell something, so it appears exactly where a translation
-    /// would have and says when the allowance comes back.
+    /// The day's free translations are gone. Appears exactly where a
+    /// translation would have and says when the allowance comes back;
+    /// `prompt` adds the case for Pro, which is throttled when the answer
+    /// is not.
     Capped {
         limit: u32,
+        prompt: bool,
     },
 }
 
@@ -259,9 +261,9 @@ impl BubbleApp {
                     main.testing = false;
                     main.statuses = statuses;
                 }
-                UiEvent::Capped { at, limit } => {
+                UiEvent::Capped { at, limit, prompt } => {
                     self.anchor = at;
-                    self.state = State::Capped { limit };
+                    self.state = State::Capped { limit, prompt };
                     self.settings_open = false;
                     self.copied_at = None;
                     self.show(ctx);
@@ -727,8 +729,8 @@ impl BubbleApp {
                         );
                     });
             }
-            State::Capped { limit } => {
-                let limit = *limit;
+            State::Capped { limit, prompt } => {
+                let (limit, prompt) = (*limit, *prompt);
                 ui.label(
                     egui::RichText::new(format!("You have used today's {limit} free translations"))
                         .size(14.0)
@@ -736,28 +738,35 @@ impl BubbleApp {
                 );
                 ui.add_space(3.0);
                 ui.label(
-                    egui::RichText::new(
-                        "The allowance resets at midnight. Pro removes the daily limit.",
-                    )
+                    egui::RichText::new(if prompt {
+                        "The allowance resets at midnight. Pro removes the daily limit."
+                    } else {
+                        "The allowance resets at midnight."
+                    })
                     .size(12.0)
                     .color(TEXT_MUTED),
                 );
-                ui.add_space(9.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Upgrade to Pro").clicked() {
-                        shell::open_url(&format!("{}?src=bubble", license::BUY_URL));
-                        dismiss = true;
-                    }
-                    if ui
-                        .add(
-                            egui::Button::new(egui::RichText::new("Not now").size(12.0))
-                                .frame(false),
-                        )
-                        .clicked()
-                    {
-                        dismiss = true;
-                    }
-                });
+                // Only the pitch is throttled. Select something else a minute
+                // later and the bubble still says why nothing was translated,
+                // it just does not ask for money twice in an hour.
+                if prompt {
+                    ui.add_space(9.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Upgrade to Pro").clicked() {
+                            shell::open_url(&format!("{}?src=bubble", license::BUY_URL));
+                            dismiss = true;
+                        }
+                        if ui
+                            .add(
+                                egui::Button::new(egui::RichText::new("Not now").size(12.0))
+                                    .frame(false),
+                            )
+                            .clicked()
+                        {
+                            dismiss = true;
+                        }
+                    });
+                }
             }
             State::Failed { errors, .. } => {
                 ui.label(

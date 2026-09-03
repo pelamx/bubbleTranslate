@@ -238,7 +238,8 @@ Every change saves immediately to the config file.
 Five translations a day. After that the bubble still appears where the
 translation would have, and says the allowance is spent and when it comes
 back — it does not fail silently and it does not stop responding to the
-gesture. Pro removes the limit.
+gesture. The offer to upgrade rides along at most once an hour; the bubble
+itself answers every time. Pro removes the limit.
 
 What counts is deliberately narrow, because five is a small number and the
 bubble fires on every finished selection:

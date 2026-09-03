@@ -46,6 +46,18 @@ pub enum Verdict {
     Capped { used: u32, limit: u32, prompt: bool },
 }
 
+impl std::fmt::Display for Verdict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Allow => write!(f, "allowed"),
+            Self::Repeat => write!(f, "repeat of today's text; free"),
+            Self::Capped { used, limit, prompt } => {
+                write!(f, "{used}/{limit} used; capped (prompt={prompt})")
+            }
+        }
+    }
+}
+
 /// The persisted half. Nothing here is derived from anything the user
 /// selected, which is what keeps this file uninteresting if it is ever read.
 #[derive(Debug, Serialize, Deserialize)]
