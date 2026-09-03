@@ -1,0 +1,16 @@
+{
+  "name": "bubbletranslate-licence",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "schema": "wrangler d1 execute bubbletranslate-licence --local --file=schema.sql",
+    "schema:remote": "wrangler d1 execute bubbletranslate-licence --remote --file=schema.sql",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260831.1",
+    "typescript": "^5.7.0",
+    "wrangler": "^4.0.0"
+  }
+}

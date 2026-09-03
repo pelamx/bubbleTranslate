@@ -280,6 +280,9 @@ broken" from "the network is", and this one separates either from "the
 allowance is spent", which from the outside looks identical — no bubble
 appears.
 
+The service that issues and renews those tokens lives in [`service/`](service/).
+It runs locally with no domain and no payment processor — see its README.
+
 ## Building an installer
 
 Only macOS needs one. Linux ships as the executable itself — `cargo build

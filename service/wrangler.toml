@@ -1,0 +1,17 @@
+name = "bubbletranslate-licence"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+# Local `wrangler dev` ignores database_id and uses a SQLite file under
+# .wrangler/. Replace it with the real one from `wrangler d1 create` before
+# the first `wrangler deploy`.
+[[d1_databases]]
+binding = "DB"
+database_name = "bubbletranslate-licence"
+database_id = "local-development-placeholder"
+
+# Opens /v1/pubkey and /v1/dev/issue, and lets the service generate and keep
+# its own signing key. Never set in production: there the key arrives as a
+# secret and licences are created only by the payment processor's webhook.
+[vars]
+DEV_MODE = "1"
