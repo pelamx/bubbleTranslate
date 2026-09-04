@@ -1,2 +1,8 @@
 node_modules/
 .wrangler/
+
+# Local secrets for `wrangler dev`. Production secrets live in
+# `wrangler secret put`, never in the repo — and a file that is one typo away
+# from holding a live PayTR merchant key should not be committable at all.
+.dev.vars
+.dev.vars.*

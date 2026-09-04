@@ -1,196 +1,54 @@
-// The licence service: three endpoints the app calls, and one the payment
-// processor calls.
+// The licence service: the routes the app calls, the routes a buyer's browser
+// calls, and the two a payment processor calls.
 //
-// It is deliberately not on the path of a translation and never sees one.
-// All it does is decide whether a licence key still entitles a machine to
-// have its counter lifted, and say so in a token the app can check on its
-// own for the next thirty days. If this service is down, every install
-// degrades to the free tier rather than to a broken app.
+// It is deliberately not on the path of a translation and never sees one. All
+// it does is decide whether a licence key still entitles a machine to have its
+// counter lifted, and say so in a token the app can check on its own for up to
+// thirty days. If this service is down, every install degrades to the free
+// trial rather than to a broken app.
+//
+// Two processors, split by where the buyer is: PayTR settles in lira for
+// Turkey, Paddle acts as merchant of record everywhere else. Which one a
+// visitor sees is decided in `/buy` and nowhere else — past that point the
+// difference is a `provider` column and a webhook.
 
-export interface Env {
-  DB: D1Database;
-  /** Opens the dev-only routes and lets the service keep its own key. */
-  DEV_MODE?: string;
-  /** Production signing key: base64url PKCS#8, set with `wrangler secret put`. */
-  SIGNING_KEY_PKCS8?: string;
-  /** Its public half, 32 bytes as hex. This is what goes in PUBLIC_KEY_HEX. */
-  SIGNING_KEY_PUBLIC?: string;
-  LEMONSQUEEZY_WEBHOOK_SECRET?: string;
-}
-
-/** Matches the client's TOKEN_TTL_HINT. Long enough that a service outage is
- *  invisible to a paying user, short enough that a refund lapses on its own. */
-const TOKEN_TTL = 30 * 86_400;
-const DEFAULT_SEATS = 3;
-
-const enc = new TextEncoder();
-const now = () => Math.floor(Date.now() / 1000);
-
-// -- encodings ---------------------------------------------------------------
-
-const b64url = {
-  encode(bytes: Uint8Array): string {
-    let s = "";
-    for (const b of bytes) s += String.fromCharCode(b);
-    return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  },
-  decode(text: string): Uint8Array {
-    const b64 = text.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
-    return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
-  },
-};
-
-const toHex = (bytes: Uint8Array) =>
-  [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-
-const fromHex = (hex: string) =>
-  Uint8Array.from(hex.trim().match(/.{1,2}/g) ?? [], (b) => parseInt(b, 16));
-
-async function sha256Hex(text: string): Promise<string> {
-  return toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(text))));
-}
-
-// -- signing -----------------------------------------------------------------
-
-/** Workers has renamed its Ed25519 identifier once already, so ask rather
- *  than assume, and ask only once per isolate. */
-let algoName: string | null = null;
-async function algo(): Promise<string> {
-  if (algoName) return algoName;
-  for (const name of ["Ed25519", "NODE-ED25519"]) {
-    try {
-      await crypto.subtle.generateKey({ name, namedCurve: "Ed25519" } as any, true, [
-        "sign",
-        "verify",
-      ]);
-      return (algoName = name);
-    } catch {
-      // try the other spelling
-    }
-  }
-  throw new Error("this runtime has no Ed25519 in WebCrypto");
-}
-
-interface Keys {
-  sign: CryptoKey;
-  verify: CryptoKey;
-  publicHex: string;
-}
-
-let cached: Keys | null = null;
-
-async function keys(env: Env): Promise<Keys> {
-  if (cached) return cached;
-  const name = await algo();
-
-  let pkcs8: Uint8Array;
-  let publicHex: string;
-
-  if (env.SIGNING_KEY_PKCS8 && env.SIGNING_KEY_PUBLIC) {
-    pkcs8 = b64url.decode(env.SIGNING_KEY_PKCS8);
-    publicHex = env.SIGNING_KEY_PUBLIC.trim();
-  } else {
-    if (!env.DEV_MODE) {
-      throw new Error("no signing key: set SIGNING_KEY_PKCS8 and SIGNING_KEY_PUBLIC");
-    }
-    // Development: mint one on first use and keep it, so the public key the
-    // app was started with still verifies tomorrow's tokens.
-    const row = await env.DB.prepare("SELECT pkcs8, public_hex FROM service_keys WHERE id = 1")
-      .first<{ pkcs8: string; public_hex: string }>();
-    if (row) {
-      pkcs8 = b64url.decode(row.pkcs8);
-      publicHex = row.public_hex;
-    } else {
-      const pair = (await crypto.subtle.generateKey(
-        { name, namedCurve: "Ed25519" } as any,
-        true,
-        ["sign", "verify"],
-      )) as CryptoKeyPair;
-      pkcs8 = new Uint8Array((await crypto.subtle.exportKey("pkcs8", pair.privateKey)) as ArrayBuffer);
-      publicHex = toHex(
-        new Uint8Array((await crypto.subtle.exportKey("raw", pair.publicKey)) as ArrayBuffer),
-      );
-      await env.DB.prepare(
-        "INSERT OR REPLACE INTO service_keys (id, pkcs8, public_hex) VALUES (1, ?, ?)",
-      )
-        .bind(b64url.encode(pkcs8), publicHex)
-        .run();
-    }
-  }
-
-  cached = {
-    sign: await crypto.subtle.importKey("pkcs8", pkcs8, { name, namedCurve: "Ed25519" } as any, false, [
-      "sign",
-    ]),
-    verify: await crypto.subtle.importKey(
-      "raw",
-      fromHex(publicHex),
-      { name, namedCurve: "Ed25519" } as any,
-      false,
-      ["verify"],
-    ),
-    publicHex,
-  };
-  return cached;
-}
-
-interface Claims {
-  lic: string;
-  plan: string;
-  lim: number | null;
-  dev: string;
-  iat: number;
-  exp: number;
-}
-
-/** `b64url(claims).b64url(sig)`, where the signature covers the ASCII bytes of
- *  the encoded payload -- not the raw JSON. The client verifies before it
- *  parses, so this order is not an implementation detail. */
-async function mint(env: Env, claims: Claims): Promise<string> {
-  const { sign } = await keys(env);
-  const payload = b64url.encode(enc.encode(JSON.stringify(claims)));
-  const sig = new Uint8Array(
-    await crypto.subtle.sign({ name: await algo() }, sign, enc.encode(payload)),
-  );
-  return `${payload}.${b64url.encode(sig)}`;
-}
-
-async function open(env: Env, token: string): Promise<Claims | null> {
-  const [payload, sig] = token.split(".");
-  if (!payload || !sig) return null;
-  const { verify } = await keys(env);
-  const ok = await crypto.subtle.verify(
-    { name: await algo() },
-    verify,
-    b64url.decode(sig),
-    enc.encode(payload),
-  );
-  if (!ok) return null;
-  try {
-    return JSON.parse(new TextDecoder().decode(b64url.decode(payload))) as Claims;
-  } catch {
-    return null;
-  }
-}
-
-// -- licence keys ------------------------------------------------------------
-
-/** No I, L, O, 0 or 1: this gets read off an email and typed into a text box. */
-const ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
-
-function newLicenceKey(): string {
-  const out: string[] = [];
-  while (out.length < 15) {
-    for (const b of crypto.getRandomValues(new Uint8Array(24))) {
-      // Rejection sampling: 248 is the largest multiple of 31 under 256, so
-      // every letter stays equally likely.
-      if (b < 248 && out.length < 15) out.push(ALPHABET[b % ALPHABET.length]);
-    }
-  }
-  const g = out.join("");
-  return `BT-${g.slice(0, 5)}-${g.slice(5, 10)}-${g.slice(10, 15)}`;
-}
+import {
+  type Cycle,
+  type Env,
+  USD_PRICE,
+  baseUrl,
+  isCycle,
+  paddleConfigured,
+  paddlePriceId,
+  paytrConfigured,
+  paytrPriceKurus,
+  supportEmail,
+} from "./env";
+import {
+  DEFAULT_SEATS,
+  type Licence,
+  createOrder,
+  deliverKey,
+  endLicence,
+  extendTerm,
+  grantToken,
+  isLive,
+  issueLicence,
+  licenceByKey,
+  licenceById,
+  licenceByProviderRef,
+  markOrderFailed,
+  markOrderPaid,
+  newOrderRef,
+  orderByRef,
+  refusalFor,
+  sweepRevealedKeys,
+} from "./licences";
+import { handleAdmin } from "./admin";
+import { cancelSubscription, customerEmail, cycleFromItems, verifyWebhook } from "./paddle";
+import { accountPage, buyPage, donePage, lira, paytrPage } from "./pages";
+import { createCharge, iframeUrl, readCallback } from "./paytr";
+import { keys, now, open } from "./tokens";
 
 // -- replies -----------------------------------------------------------------
 
@@ -204,29 +62,9 @@ const json = (body: unknown, status = 200) =>
  *  addressed to a person, not a code addressed to a developer. */
 const refuse = (message: string, status = 400) => json({ error: message }, status);
 
-interface Licence {
-  id: string;
-  plan: string;
-  daily_limit: number | null;
-  status: string;
-  seat_limit: number;
-  renews_at: string | null;
-}
+const redirect = (location: string) => new Response(null, { status: 303, headers: { location } });
 
-async function grant(env: Env, licence: Licence, device: string) {
-  const issued = now();
-  const token = await mint(env, {
-    lic: licence.id,
-    plan: licence.plan,
-    lim: licence.daily_limit,
-    dev: device,
-    iat: issued,
-    exp: issued + TOKEN_TTL,
-  });
-  return json({ token, renews: licence.renews_at });
-}
-
-// -- routes ------------------------------------------------------------------
+// -- the routes the app calls ------------------------------------------------
 
 async function activate(env: Env, body: any) {
   const key = String(body.key ?? "").trim().toUpperCase();
@@ -234,16 +72,9 @@ async function activate(env: Env, body: any) {
   if (!key) return refuse("Enter your licence key first.");
   if (!device) return refuse("This copy could not identify the machine it is running on.");
 
-  const licence = await env.DB.prepare(
-    "SELECT id, plan, daily_limit, status, seat_limit, renews_at FROM licences WHERE key_hash = ?",
-  )
-    .bind(await sha256Hex(key))
-    .first<Licence>();
-
+  const licence = await licenceByKey(env, key);
   if (!licence) return refuse("That licence key was not recognised. Check it for typos.", 404);
-  if (licence.status !== "active") {
-    return refuse("This licence is no longer active. Contact support if that is unexpected.", 403);
-  }
+  if (!isLive(licence)) return refuse(refusalFor(licence, env), 403);
 
   const seen = now();
   const held = await env.DB.prepare("SELECT device FROM seats WHERE licence_id = ? AND device = ?")
@@ -264,7 +95,7 @@ async function activate(env: Env, body: any) {
     if (count >= licence.seat_limit) {
       return refuse(
         `This licence is already in use on ${licence.seat_limit} machines. ` +
-          "Open the Account tab on one of them and choose Deactivate, then try again.",
+          "Open the Account tab on one of them and choose Remove from this device, then try again.",
         409,
       );
     }
@@ -275,7 +106,7 @@ async function activate(env: Env, body: any) {
       .run();
   }
 
-  return grant(env, licence, device);
+  return json(await grantToken(env, licence, device));
 }
 
 async function refresh(env: Env, body: any) {
@@ -289,15 +120,9 @@ async function refresh(env: Env, body: any) {
     return refuse("This licence was issued to a different machine.", 403);
   }
 
-  const licence = await env.DB.prepare(
-    "SELECT id, plan, daily_limit, status, seat_limit, renews_at FROM licences WHERE id = ?",
-  )
-    .bind(claims.lic)
-    .first<Licence>();
-
-  if (!licence || licence.status !== "active") {
-    return refuse("This licence is no longer active.", 403);
-  }
+  const licence = await licenceById(env, claims.lic);
+  if (!licence) return refuse("This licence no longer exists.", 403);
+  if (!isLive(licence)) return refuse(refusalFor(licence, env), 403);
 
   const seat = await env.DB.prepare("SELECT device FROM seats WHERE licence_id = ? AND device = ?")
     .bind(licence.id, device)
@@ -310,7 +135,7 @@ async function refresh(env: Env, body: any) {
     .bind(now(), licence.id, device)
     .run();
 
-  return grant(env, licence, device);
+  return json(await grantToken(env, licence, device));
 }
 
 async function deactivate(env: Env, body: any) {
@@ -324,95 +149,416 @@ async function deactivate(env: Env, body: any) {
   return json({ ok: true });
 }
 
-/** Creates a licence and returns the key. In production this is reached only
- *  from the processor's webhook; emailing the key is the operator's step. */
-async function issue(
-  env: Env,
-  opts: { plan?: string; email?: string; orderRef?: string; renewsAt?: string; seats?: number },
-) {
-  const key = newLicenceKey();
-  const id = `lc_${toHex(crypto.getRandomValues(new Uint8Array(8)))}`;
-  await env.DB.prepare(
-    `INSERT INTO licences (id, key_hash, plan, daily_limit, status, seat_limit, renews_at, email, order_ref, created_at)
-     VALUES (?, ?, ?, NULL, 'active', ?, ?, ?, ?, ?)`,
-  )
-    .bind(
-      id,
-      await sha256Hex(key),
-      opts.plan ?? "pro",
-      opts.seats ?? DEFAULT_SEATS,
-      opts.renewsAt ?? null,
-      opts.email ?? null,
-      opts.orderRef ?? null,
-      now(),
-    )
-    .run();
-  return { id, key };
+// -- buying it ---------------------------------------------------------------
+
+/** Turkey gets PayTR, everywhere else gets Paddle — with an escape hatch.
+ *
+ *  `?country=` overrides the header, and both variants of the page link to the
+ *  other one. Geolocation is a guess: a Turkish customer on a VPN, or someone
+ *  living abroad who wants to pay in lira, must not be stuck with the wrong
+ *  processor because Cloudflare read an IP address a certain way. */
+function inTurkey(request: Request, url: URL): boolean {
+  const override = url.searchParams.get("country");
+  if (override) return override.toUpperCase() === "TR";
+  return (request.headers.get("CF-IPCountry") ?? "").toUpperCase() === "TR";
 }
 
-/** Lemon Squeezy signs the raw body with HMAC-SHA256 and sends it as hex. */
-async function webhookIsGenuine(env: Env, raw: string, signature: string): Promise<boolean> {
-  if (!env.LEMONSQUEEZY_WEBHOOK_SECRET || !signature) return false;
-  const mac = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(env.LEMONSQUEEZY_WEBHOOK_SECRET),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["verify"],
-  );
-  return crypto.subtle.verify("HMAC", mac, fromHex(signature), enc.encode(raw));
-}
+function buy(env: Env, request: Request, url: URL): Response {
+  const turkey = inTurkey(request, url);
+  const src = url.searchParams.get("src") ?? "direct";
+  const base = baseUrl(env, request);
+  const otherUrl = `/buy?country=${turkey ? "XX" : "TR"}&src=${encodeURIComponent(src)}`;
 
-async function lemonSqueezy(env: Env, request: Request) {
-  const raw = await request.text();
-  if (!(await webhookIsGenuine(env, raw, request.headers.get("X-Signature") ?? ""))) {
-    return refuse("Bad signature.", 401);
-  }
-  const event = JSON.parse(raw);
-  const name = event?.meta?.event_name as string;
-  const attrs = event?.data?.attributes ?? {};
-  const orderRef = String(event?.data?.id ?? "");
-
-  switch (name) {
-    case "order_created":
-    case "subscription_created": {
-      const { key } = await issue(env, {
-        email: attrs.user_email ?? attrs.customer_email,
-        orderRef,
-        renewsAt: attrs.renews_at ? String(attrs.renews_at).slice(0, 10) : undefined,
+  if (turkey) {
+    const monthly = paytrPriceKurus(env, "monthly");
+    const yearly = paytrPriceKurus(env, "yearly");
+    if (!paytrConfigured(env) || monthly === null || yearly === null) {
+      return buyPage({
+        turkey,
+        configured: false,
+        reason:
+          "PayTR is not configured on this server yet. Set the merchant credentials " +
+          "and the lira prices, or pay in dollars instead.",
+        monthly: "",
+        yearly: "",
+        src,
+        otherUrl,
       });
-      // The customer still has to receive this. Wire it to your mailer here;
-      // until then it is in the licences table against their order.
-      console.log(`issued licence for order ${orderRef}: ${key}`);
+    }
+    return buyPage({
+      turkey,
+      configured: true,
+      monthly: lira(monthly),
+      yearly: lira(yearly),
+      src,
+      otherUrl,
+    });
+  }
+
+  if (!paddleConfigured(env)) {
+    return buyPage({
+      turkey,
+      configured: false,
+      reason: "Paddle is not configured on this server yet.",
+      monthly: "",
+      yearly: "",
+      src,
+      otherUrl,
+    });
+  }
+  return buyPage({
+    turkey,
+    configured: true,
+    monthly: USD_PRICE.monthly,
+    yearly: USD_PRICE.yearly,
+    src,
+    otherUrl,
+    clientToken: env.PADDLE_CLIENT_TOKEN,
+    paddleEnv: env.PADDLE_ENV,
+    priceMonthly: paddlePriceId(env, "monthly") ?? "",
+    priceYearly: paddlePriceId(env, "yearly") ?? "",
+    successUrl: `${base}/done`,
+  });
+}
+
+async function checkoutPaytr(env: Env, request: Request): Promise<Response> {
+  const form = await request.formData();
+  // No default. A missing plan is a bug or a hand-made request, and guessing
+  // which one someone meant to buy is guessing what to charge them.
+  const cycleRaw = String(form.get("cycle") ?? "");
+  const email = String(form.get("email") ?? "").trim();
+
+  if (!isCycle(cycleRaw)) return new Response("Geçersiz plan.", { status: 400 });
+  if (!email.includes("@")) return new Response("Geçerli bir e-posta adresi girin.", { status: 400 });
+  if (!paytrConfigured(env)) return new Response("PayTR yapılandırılmamış.", { status: 503 });
+
+  const amount = paytrPriceKurus(env, cycleRaw);
+  if (amount === null) return new Response("Bu planın fiyatı ayarlanmamış.", { status: 503 });
+
+  const base = baseUrl(env, request);
+  const ref = newOrderRef();
+  // The order row exists before PayTR is told anything, so the callback can
+  // never arrive for an order this service has not heard of.
+  await createOrder(env, { ref, provider: "paytr", cycle: cycleRaw, email, amount, currency: "TRY" });
+
+  const charge = await createCharge(env, {
+    ref,
+    cycle: cycleRaw,
+    email,
+    userIp: request.headers.get("CF-Connecting-IP") ?? "127.0.0.1",
+    okUrl: `${base}/done?ref=${ref}`,
+    failUrl: `${base}/done?ref=${ref}`,
+  });
+
+  if (!charge.ok || !charge.token) {
+    await markOrderFailed(env, ref, charge.error ?? "token request failed");
+    return new Response(charge.error ?? "Ödeme başlatılamadı.", { status: 502 });
+  }
+  return paytrPage(iframeUrl(charge.token), ref);
+}
+
+async function checkoutPaddle(env: Env, request: Request): Promise<Response> {
+  const body: any = await request.json().catch(() => ({}));
+  const cycle = String(body.cycle ?? "");
+  const email = String(body.email ?? "").trim();
+
+  if (!isCycle(cycle)) return json({ error: "Unknown plan." }, 400);
+  if (!paddleConfigured(env)) return json({ error: "Paddle is not configured." }, 503);
+
+  const ref = newOrderRef();
+  await createOrder(env, {
+    ref,
+    provider: "paddle",
+    cycle,
+    email: email || null,
+    // Paddle prices the transaction itself, in the buyer's own currency. The
+    // dollar price is recorded for reconciliation, not to charge against.
+    amount: cycle === "yearly" ? 2000 : 200,
+    currency: "USD",
+  });
+  return json({ ref });
+}
+
+/** What the success page polls. The key is returned for as long as the reveal
+ *  window is open, and the unguessable ref is the only thing guarding it. */
+async function orderStatus(env: Env, ref: string): Promise<Response> {
+  await sweepRevealedKeys(env);
+  const order = await orderByRef(env, ref);
+  if (!order) return json({ error: "Unknown order." }, 404);
+  return json({
+    status: order.status,
+    key: order.reveal_until && order.reveal_until > now() ? order.licence_key : null,
+    failure: order.failure,
+  });
+}
+
+// -- the routes the processors call ------------------------------------------
+
+/** Turns a paid order into a licence, exactly once.
+ *
+ *  Both webhooks funnel through here, and both processors retry: PayTR until
+ *  it is answered `OK`, Paddle on any non-2xx. So the first thing this does is
+ *  ask whether the order has already been paid, because the alternative is
+ *  issuing a second licence — and a second charge's worth of seats — for one
+ *  payment. */
+async function fulfil(
+  env: Env,
+  ref: string,
+  opts: { provider: string; cycle: Cycle; email: string | null; providerRef: string | null },
+): Promise<void> {
+  const order = await orderByRef(env, ref);
+  if (!order) {
+    console.error(`fulfilment for an unknown order ${ref}`);
+    return;
+  }
+  if (order.status === "paid") return;
+
+  const { id, key, expiresAt } = await issueLicence(env, {
+    provider: opts.provider,
+    cycle: opts.cycle,
+    email: opts.email ?? order.email,
+    providerRef: opts.providerRef,
+  });
+  await markOrderPaid(env, ref, id, key);
+  console.log(`issued licence ${id} for order ${ref} via ${opts.provider}`);
+  await deliverKey(env, opts.email ?? order.email, key, opts.cycle, expiresAt);
+}
+
+/** PayTR's callback.
+ *
+ *  It must be answered with the literal string `OK` and nothing else, or PayTR
+ *  keeps retrying and eventually flags the merchant account. That includes the
+ *  cases where we reject it: a callback whose signature does not verify is
+ *  answered `OK` too, because there is nothing PayTR could usefully retry, and
+ *  the refusal has already been logged. */
+async function paytrWebhook(env: Env, request: Request): Promise<Response> {
+  const ok = () => new Response("OK", { headers: { "content-type": "text/plain" } });
+
+  const form = await request.formData().catch(() => null);
+  if (!form) return ok();
+
+  const callback = await readCallback(env, form);
+  if (!callback) return ok();
+
+  const order = await orderByRef(env, callback.ref);
+  if (!order) {
+    console.error(`PayTR callback for unknown order ${callback.ref}`);
+    return ok();
+  }
+
+  if (!callback.paid) {
+    await markOrderFailed(env, callback.ref, callback.reason);
+    return ok();
+  }
+
+  // The amount is checked rather than trusted. A callback that says success
+  // for less than the plan costs is either a misconfiguration or an attempt,
+  // and both should stop here rather than become a licence.
+  if (order.amount !== null && callback.totalAmount < order.amount) {
+    console.error(
+      `PayTR callback for ${callback.ref} paid ${callback.totalAmount}, expected ${order.amount}`,
+    );
+    await markOrderFailed(env, callback.ref, "Ödenen tutar plan bedelinden düşük.");
+    return ok();
+  }
+
+  const cycle: Cycle = isCycle(order.cycle) ? order.cycle : "monthly";
+  await fulfil(env, callback.ref, {
+    provider: "paytr",
+    cycle,
+    email: order.email,
+    providerRef: callback.ref,
+  });
+  return ok();
+}
+
+async function paddleWebhook(env: Env, request: Request): Promise<Response> {
+  const raw = await request.text();
+  const event = await verifyWebhook(env, raw, request.headers.get("Paddle-Signature"));
+  if (!event) return refuse("Bad signature.", 401);
+
+  const data = event.data ?? {};
+
+  switch (event.eventType) {
+    case "transaction.completed": {
+      const cycle = cycleFromItems(env, data.items ?? []) ?? "monthly";
+      const subscriptionId = data.subscription_id ? String(data.subscription_id) : null;
+      const ref = data?.custom_data?.ref ? String(data.custom_data.ref) : null;
+      const email = await customerEmail(env, data);
+
+      // A renewal has the same shape as a first payment, minus our ref: the
+      // subscription already exists, so this extends it rather than selling
+      // another licence.
+      if (subscriptionId) {
+        const existing = await licenceByProviderRef(env, "paddle", subscriptionId);
+        if (existing) {
+          const until = await extendTerm(env, existing, cycle);
+          console.log(`extended licence ${existing.id} to ${until}`);
+          return json({ ok: true });
+        }
+      }
+
+      if (!ref) {
+        console.error("Paddle transaction with no order ref and no known subscription");
+        return json({ ok: true, ignored: "no ref" });
+      }
+      await fulfil(env, ref, { provider: "paddle", cycle, email, providerRef: subscriptionId });
       return json({ ok: true });
     }
-    case "subscription_cancelled":
-    case "subscription_expired":
-    case "order_refunded": {
-      // No revocation list: flipping the status stops the next refresh and
-      // the entitlement lapses on its own within the token's TTL.
-      await env.DB.prepare("UPDATE licences SET status = ? WHERE order_ref = ?")
-        .bind(name === "order_refunded" ? "refunded" : "cancelled", orderRef)
-        .run();
+
+    case "subscription.canceled": {
+      const licence = await licenceByProviderRef(env, "paddle", String(data.id ?? ""));
+      // Cancelling leaves the paid term alone — it has been paid for.
+      if (licence) await endLicence(env, licence, "cancelled");
       return json({ ok: true });
     }
+
+    case "adjustment.created": {
+      // Refunds arrive as adjustments. Only a refund cuts the term short.
+      if (String(data.action ?? "") !== "refund") return json({ ok: true, ignored: data.action });
+      const subscriptionId = data.subscription_id ? String(data.subscription_id) : null;
+      if (!subscriptionId) return json({ ok: true, ignored: "no subscription" });
+      const licence = await licenceByProviderRef(env, "paddle", subscriptionId);
+      if (licence) await endLicence(env, licence, "refunded");
+      return json({ ok: true });
+    }
+
     default:
-      return json({ ok: true, ignored: name });
+      return json({ ok: true, ignored: event.eventType });
   }
 }
+
+// -- managing it -------------------------------------------------------------
+
+async function accountView(env: Env, licence: Licence, key: string, message?: string, error?: string) {
+  const { count } = (await env.DB.prepare("SELECT COUNT(*) AS count FROM seats WHERE licence_id = ?")
+    .bind(licence.id)
+    .first<{ count: number }>())!;
+
+  return accountPage(
+    {
+      key,
+      plan: licence.plan === "pro" ? "bubbleTranslate Pro" : licence.plan,
+      cycle: licence.cycle,
+      status: isLive(licence) ? licence.status : "expired",
+      renews: licence.renews_at,
+      seats: count,
+      seatLimit: licence.seat_limit,
+      provider: licence.provider,
+      // PayTR licences are fixed-term and do not recur, so there is nothing to
+      // cancel — see the note at the top of `paytr.ts`.
+      cancellable: licence.provider === "paddle" && licence.status === "active",
+      message,
+      error,
+    },
+    supportEmail(env),
+  );
+}
+
+async function account(env: Env, request: Request): Promise<Response> {
+  const form = await request.formData();
+  const key = String(form.get("key") ?? "").trim().toUpperCase();
+  if (!key) return accountPage(null, supportEmail(env), "Enter your licence key.");
+
+  const licence = await licenceByKey(env, key);
+  if (!licence) {
+    return accountPage(null, supportEmail(env), "That licence key was not recognised.");
+  }
+  return accountView(env, licence, key);
+}
+
+async function accountCancel(env: Env, request: Request): Promise<Response> {
+  const form = await request.formData();
+  const key = String(form.get("key") ?? "").trim().toUpperCase();
+  const licence = await licenceByKey(env, key);
+  if (!licence) {
+    return accountPage(null, supportEmail(env), "That licence key was not recognised.");
+  }
+  if (licence.provider !== "paddle" || !licence.provider_ref) {
+    return accountView(env, licence, key, undefined, "This licence has no recurring charge to cancel.");
+  }
+
+  const failure = await cancelSubscription(env, licence.provider_ref);
+  if (failure) return accountView(env, licence, key, undefined, failure);
+
+  // Paddle will also send `subscription.canceled`; recording it now means the
+  // page the user is about to see tells the truth without waiting for it.
+  await endLicence(env, licence, "cancelled");
+  const updated = (await licenceById(env, licence.id)) ?? licence;
+  return accountView(
+    env,
+    updated,
+    key,
+    `Cancelled. Pro keeps working until ${updated.renews_at ?? "the end of the paid period"}.`,
+  );
+}
+
+// -- development -------------------------------------------------------------
+
+async function devIssue(env: Env, body: any) {
+  const cycle: Cycle = isCycle(body.cycle) ? body.cycle : "yearly";
+  const { id, key, expiresAt } = await issueLicence(env, {
+    provider: String(body.provider ?? "dev"),
+    cycle,
+    email: body.email ?? null,
+    providerRef: body.provider_ref ?? null,
+    seats: Number(body.seats) || DEFAULT_SEATS,
+    termSeconds: Number(body.term_seconds) || undefined,
+  });
+  return json({ id, key, cycle, expires_at: expiresAt });
+}
+
+// -- the router --------------------------------------------------------------
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const { pathname } = new URL(request.url);
+    const url = new URL(request.url);
+    const { pathname } = url;
     const dev = Boolean(env.DEV_MODE);
 
     try {
-      if (request.method === "GET" && pathname === "/v1/pubkey" && dev) {
-        return json({ public_key_hex: (await keys(env)).publicHex });
+      // The operator's panel owns everything under /admin, including its own
+      // authentication. It answers null for anything else, so this cannot
+      // shadow a route below it.
+      const admin = await handleAdmin(env, request, url);
+      if (admin) return admin;
+
+      if (request.method === "GET") {
+        if (pathname === "/buy") return buy(env, request, url);
+        if (pathname === "/account") return accountPage(null, supportEmail(env));
+        if (pathname === "/done") {
+          const ref = url.searchParams.get("ref") ?? "";
+          if (!ref) return redirect("/buy");
+          return donePage(ref, supportEmail(env));
+        }
+        if (pathname.startsWith("/v1/order/")) {
+          return orderStatus(env, pathname.slice("/v1/order/".length));
+        }
+        if (pathname === "/v1/pubkey" && dev) {
+          return json({ public_key_hex: (await keys(env)).publicHex });
+        }
+        return new Response("Not found.", { status: 404 });
       }
+
       if (request.method !== "POST") return refuse("Not found.", 404);
 
-      if (pathname === "/webhooks/lemonsqueezy") return lemonSqueezy(env, request);
+      // Webhooks and browser form posts read their own bodies — one is signed
+      // over its raw bytes, the others are form-encoded — so they are routed
+      // before anything tries to parse the body as JSON.
+      switch (pathname) {
+        case "/webhooks/paytr":
+          return await paytrWebhook(env, request);
+        case "/webhooks/paddle":
+          return await paddleWebhook(env, request);
+        case "/checkout/paytr":
+          return await checkoutPaytr(env, request);
+        case "/checkout/paddle":
+          return await checkoutPaddle(env, request);
+        case "/account":
+          return await account(env, request);
+        case "/account/cancel":
+          return await accountCancel(env, request);
+      }
 
       const body = await request.json().catch(() => ({}));
       switch (pathname) {
@@ -423,7 +569,7 @@ export default {
         case "/v1/deactivate":
           return await deactivate(env, body);
         case "/v1/dev/issue":
-          return dev ? json(await issue(env, body as any)) : refuse("Not found.", 404);
+          return dev ? await devIssue(env, body) : refuse("Not found.", 404);
         default:
           return refuse("Not found.", 404);
       }

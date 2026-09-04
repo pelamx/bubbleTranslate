@@ -1,4 +1,4 @@
-//! The free daily allowance, and the signed entitlement that lifts it.
+//! The free trial, and the signed entitlement that lifts it.
 //!
 //! There are no accounts here and no passwords. A purchase produces a licence
 //! key, the key is exchanged once for a short-lived token signed by the
@@ -22,18 +22,34 @@ use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Translations a day without a subscription.
+/// Translations before a subscription is needed — once, not per day.
 ///
 /// Deliberately also carried in the token as `lim`, so this is only the
 /// fallback for an install that has never talked to the service. Changing the
 /// number for everyone is a server-side edit, not a release.
-pub const FREE_DAILY_TRANSLATIONS: u32 = 5;
+pub const FREE_TRIAL_TRANSLATIONS: u32 = 10;
+
+/// What Pro costs, as the app says it out loud. Kept here rather than in the
+/// window so the bubble and the account panel cannot drift apart from each
+/// other, or from the checkout page the button opens.
+///
+/// These are the display prices. The amounts actually charged live in the
+/// service, per processor and per currency, because that is where a price can
+/// be changed without cutting a release — and where the Turkish lira price has
+/// to live, since it is not a conversion of this one.
+pub const PRICE_MONTHLY: &str = "$2/month";
+pub const PRICE_YEARLY: &str = "$20/year";
 
 /// Where the app sends someone who wants to subscribe, and where it sends a
 /// subscriber who wants to cancel. Both take a `?src=` so the funnel can be
 /// measured by the surface the click came from.
-pub const BUY_URL: &str = "https://bubbletranslate.app/buy";
-pub const MANAGE_URL: &str = "https://bubbletranslate.app/account";
+///
+/// `/buy` is served by the licence service rather than by a separate site: it
+/// is the one page that has to know the visitor's country, and the service is
+/// already the thing sitting behind Cloudflare that gets told it. Turkey is
+/// routed to PayTR, everywhere else to Paddle — see `service/src/index.ts`.
+pub const BUY_URL: &str = "https://api.bubbletranslate.app/buy";
+pub const MANAGE_URL: &str = "https://api.bubbletranslate.app/account";
 
 /// The licence service. Overridable in debug builds so the client can be
 /// developed against a local server.
@@ -92,12 +108,45 @@ impl Plan {
     }
 }
 
+/// How a Pro subscription is billed. Carried only so the account panel can
+/// say which of the two prices the user is actually on; nothing is enforced
+/// from it, and an unrecognised value displays as plain Pro rather than
+/// failing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cycle {
+    Monthly,
+    Yearly,
+}
+
+impl Cycle {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "monthly" => Some(Cycle::Monthly),
+            "yearly" => Some(Cycle::Yearly),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Cycle::Monthly => "monthly",
+            Cycle::Yearly => "yearly",
+        }
+    }
+}
+
 /// What this install is allowed to do. The one thing the rest of the app reads.
 #[derive(Debug, Clone)]
 pub struct Entitlement {
     pub plan: Plan,
-    /// Translations a day, or `None` for unlimited.
-    pub daily_limit: Option<u32>,
+    /// How Pro is billed, when the service said. `None` on the free tier and
+    /// on a token minted before this claim existed.
+    pub cycle: Option<Cycle>,
+    /// Translations in total on the free trial, or `None` for unlimited.
+    ///
+    /// Not a rate: this is the whole allowance, and it does not come back. See
+    /// [`crate::quota`] for why that is the deliberate shape.
+    pub limit: Option<u32>,
     /// Unix seconds at which the token stops being valid. 0 on the free tier.
     pub exp: u64,
 }
@@ -106,7 +155,8 @@ impl Entitlement {
     pub fn free() -> Self {
         Self {
             plan: Plan::Free,
-            daily_limit: Some(FREE_DAILY_TRANSLATIONS),
+            cycle: None,
+            limit: Some(FREE_TRIAL_TRANSLATIONS),
             exp: 0,
         }
     }
@@ -225,7 +275,12 @@ pub struct Claims {
     /// Licence id — not the key, which never leaves the service in this form.
     pub lic: String,
     pub plan: String,
-    /// Daily translation limit; absent or null means unlimited.
+    /// Billing cycle, for display only. Absent on free tokens and on any token
+    /// minted before this claim existed, which is why it is optional rather
+    /// than defaulted to one of the two.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cyc: Option<String>,
+    /// Total translation allowance; absent or null means unlimited.
     #[serde(default)]
     pub lim: Option<u32>,
     /// The device fingerprint this token was issued to.
@@ -243,13 +298,14 @@ impl Claims {
         };
         Entitlement {
             plan,
+            cycle: self.cyc.as_deref().and_then(Cycle::parse),
             // A pro token with no `lim` is unlimited; a free one falls back to
             // the compiled-in allowance rather than to no limit at all, so a
             // malformed payload can never be a free upgrade.
-            daily_limit: match (plan, self.lim) {
+            limit: match (plan, self.lim) {
                 (_, Some(n)) => Some(n),
                 (Plan::Pro, None) => None,
-                (Plan::Free, None) => Some(FREE_DAILY_TRANSLATIONS),
+                (Plan::Free, None) => Some(FREE_TRIAL_TRANSLATIONS),
             },
             exp: self.exp,
         }
@@ -621,6 +677,7 @@ pub mod dev {
         let claims = Claims {
             lic: "lc_dev".into(),
             plan: plan.to_string(),
+            cyc: (plan == "pro").then(|| "yearly".to_string()),
             lim: None,
             dev: device_id(),
             iat: issued,
@@ -680,19 +737,67 @@ mod tests {
         let claims = |plan: &str| Claims {
             lic: "lc_1".into(),
             plan: plan.into(),
+            cyc: None,
             lim: None,
             dev: "d".into(),
             iat: 0,
             exp: 0,
         };
-        assert_eq!(claims("pro").entitlement().daily_limit, None);
+        assert_eq!(claims("pro").entitlement().limit, None);
         assert_eq!(
-            claims("free").entitlement().daily_limit,
-            Some(FREE_DAILY_TRANSLATIONS),
+            claims("free").entitlement().limit,
+            Some(FREE_TRIAL_TRANSLATIONS),
         );
         assert_eq!(
-            claims("nonsense").entitlement().daily_limit,
-            Some(FREE_DAILY_TRANSLATIONS),
+            claims("nonsense").entitlement().limit,
+            Some(FREE_TRIAL_TRANSLATIONS),
         );
+    }
+
+    /// The billing cycle is display-only, so an unrecognised one must degrade
+    /// to plain Pro rather than costing the user their entitlement.
+    #[test]
+    fn an_unknown_billing_cycle_is_ignored_not_fatal() {
+        let with = |cyc: Option<&str>| Claims {
+            lic: "lc_1".into(),
+            plan: "pro".into(),
+            cyc: cyc.map(str::to_owned),
+            lim: None,
+            dev: "d".into(),
+            iat: 0,
+            exp: 0,
+        };
+        assert_eq!(with(Some("monthly")).entitlement().cycle, Some(Cycle::Monthly));
+        assert_eq!(with(Some("yearly")).entitlement().cycle, Some(Cycle::Yearly));
+
+        for odd in [None, Some(""), Some("Quarterly"), Some("weekly")] {
+            let entitlement = with(odd).entitlement();
+            assert_eq!(entitlement.cycle, None, "{odd:?} should not parse");
+            assert!(entitlement.is_pro(), "{odd:?} cost the user their Pro");
+            assert_eq!(entitlement.limit, None);
+        }
+    }
+
+    /// A token minted before `cyc` existed has no such field, and one minted
+    /// with it round-trips. Both matter: the claim rides inside a signature,
+    /// so a serialisation that changed shape would invalidate live licences.
+    #[test]
+    fn the_cycle_claim_is_omitted_rather_than_written_as_null() {
+        let mut claims = Claims {
+            lic: "lc_1".into(),
+            plan: "pro".into(),
+            cyc: None,
+            lim: None,
+            dev: "d".into(),
+            iat: 0,
+            exp: 0,
+        };
+        let json = serde_json::to_string(&claims).unwrap();
+        assert!(!json.contains("cyc"), "an absent cycle must not be written");
+
+        claims.cyc = Some("yearly".into());
+        let json = serde_json::to_string(&claims).unwrap();
+        let back: Claims = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.cyc.as_deref(), Some("yearly"));
     }
 }

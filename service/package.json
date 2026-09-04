@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "schema": "wrangler d1 execute bubbletranslate-licence --local --file=schema.sql",
+    "schema:reset": "wrangler d1 execute bubbletranslate-licence --local --file=reset.sql && npm run schema",
     "schema:remote": "wrangler d1 execute bubbletranslate-licence --remote --file=schema.sql",
     "deploy": "wrangler deploy"
   },

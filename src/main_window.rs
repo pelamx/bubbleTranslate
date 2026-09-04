@@ -68,7 +68,7 @@ pub struct MainState {
     pub recent: Vec<RecentEntry>,
 
     // Account.
-    /// Set when the translate box was refused for want of allowance, as
+    /// Set when the translate box was refused for want of trial, as
     /// (used, limit). Cleared on the next attempt.
     pub capped: Option<(u32, u32)>,
     /// The licence key being typed. Separate from the saved one in the config
@@ -343,14 +343,18 @@ fn translate_box(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
     if let Some((_, limit)) = state.capped {
         ui.add_space(8.0);
         ui.label(
-            egui::RichText::new(format!("Today's {limit} free translations are used"))
+            egui::RichText::new(format!("All {limit} free translations are used"))
                 .size(13.0)
                 .color(WARN_AMBER),
         );
         ui.label(
-            egui::RichText::new("The allowance resets at midnight.")
-                .size(11.5)
-                .color(TEXT_MUTED),
+            egui::RichText::new(format!(
+                "Pro removes the limit — {} or {}.",
+                license::PRICE_MONTHLY,
+                license::PRICE_YEARLY,
+            ))
+            .size(11.5)
+            .color(TEXT_MUTED),
         );
         ui.add_space(4.0);
         if ui.button("Upgrade to Pro").clicked() {
@@ -638,11 +642,12 @@ fn account(
             licence.entitlement.clone(),
         )
     };
-    let (used, limit, grandfathered) = {
+    let (used, limit, left, grandfathered) = {
         let quota = licensing.quota.lock().unwrap();
         (
-            quota.used_today(),
+            quota.used(),
             quota.limit(&entitlement),
+            quota.remaining(&entitlement),
             quota.is_grandfathered(),
         )
     };
@@ -650,11 +655,19 @@ fn account(
     // -- where this install stands ----------------------------------------
     match limit {
         None => {
+            let cycle = entitlement.cycle;
             ui.label(
                 egui::RichText::new(if grandfathered {
                     "● Unlimited translations".to_string()
                 } else {
-                    format!("● {} — unlimited translations", plan.label())
+                    match cycle {
+                        Some(cycle) => format!(
+                            "● {} ({}) — unlimited translations",
+                            plan.label(),
+                            cycle.label(),
+                        ),
+                        None => format!("● {} — unlimited translations", plan.label()),
+                    }
                 })
                 .size(13.0)
                 .color(OK_GREEN),
@@ -662,7 +675,7 @@ fn account(
             if grandfathered {
                 ui.label(
                     egui::RichText::new(
-                        "This install predates the daily limit, so the limit does not \
+                        "This install predates the free trial, so the trial does not \
                          apply to it.",
                     )
                     .size(11.0)
@@ -670,25 +683,29 @@ fn account(
                 );
             }
             ui.label(
-                egui::RichText::new(format!("{used} translated today"))
+                egui::RichText::new(format!("{used} translated so far"))
                     .size(11.5)
                     .color(TEXT_MUTED),
             );
         }
         Some(limit) => {
-            let spent = used >= limit;
+            let left = left.unwrap_or(0);
+            let spent = left == 0;
             ui.label(
-                egui::RichText::new(format!(
-                    "● Free — {used} of {limit} translations used today",
-                ))
+                egui::RichText::new(if spent {
+                    format!("● Free trial — all {limit} translations used")
+                } else {
+                    format!("● Free trial — {left} of {limit} translations left")
+                })
                 .size(13.0)
                 .color(if spent { WARN_AMBER } else { TEXT_SECONDARY }),
             );
             ui.label(
                 egui::RichText::new(if spent {
-                    "The allowance resets at midnight."
+                    "The trial does not reset. Pro removes the limit."
                 } else {
-                    "Re-reading something already translated today does not count."
+                    "The trial is once, not per day. Re-reading something already \
+                     translated does not count."
                 })
                 .size(11.0)
                 .color(TEXT_MUTED),
@@ -777,9 +794,13 @@ fn account(
                 crate::shell::open_url(&format!("{}?src=window", license::BUY_URL));
             }
             ui.label(
-                egui::RichText::new("Unlimited translations, three devices.")
-                    .size(11.0)
-                    .color(TEXT_MUTED),
+                egui::RichText::new(format!(
+                    "{} or {} — unlimited translations, three devices.",
+                    license::PRICE_MONTHLY,
+                    license::PRICE_YEARLY,
+                ))
+                .size(11.0)
+                .color(TEXT_MUTED),
             );
         });
     }

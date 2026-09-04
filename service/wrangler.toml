@@ -10,8 +10,67 @@ binding = "DB"
 database_name = "bubbletranslate-licence"
 database_id = "local-development-placeholder"
 
+[vars]
 # Opens /v1/pubkey and /v1/dev/issue, and lets the service generate and keep
 # its own signing key. Never set in production: there the key arrives as a
-# secret and licences are created only by the payment processor's webhook.
-[vars]
+# secret and licences are created only by a processor's webhook.
 DEV_MODE = "1"
+
+# Where this service is reachable, without a trailing slash. It cannot be
+# inferred from the request: a PayTR callback arrives from PayTR, not from a
+# browser on the site, and the return URLs are built before either.
+PUBLIC_BASE_URL = "http://localhost:8787"
+
+SUPPORT_EMAIL = "support@bubbletranslate.app"
+
+# -- PayTR, for Turkey --------------------------------------------------------
+#
+# ⚠ SET THESE BEFORE TAKING A LIRA PAYMENT. They are the two numbers in this
+# whole system that cannot be derived from anything else.
+#
+# In kuruş: 4900 is ₺49,00. Kuruş rather than lira because it is the unit PayTR
+# is given, and the unit an integer cannot round wrongly.
+#
+# These are deliberately NOT a conversion of $2 and $20. PayTR settles in lira,
+# and a subscription whose price follows the exchange rate is one no customer
+# can budget for and no accountant can reconcile. Pick a number, and revisit it
+# when you mean to — a price change should be a decision, not a side effect.
+# Until both are set, /buy tells Turkish visitors that checkout is unavailable
+# and offers them the dollar page instead; it never charges zero.
+PAYTR_PRICE_MONTHLY_KURUS = ""
+PAYTR_PRICE_YEARLY_KURUS = ""
+
+# "1" runs PayTR in test mode, where no card is really charged.
+PAYTR_TEST_MODE = "1"
+
+# -- Paddle, for everywhere else ----------------------------------------------
+#
+# "sandbox" until it is "production". This chooses both the API host and the
+# Paddle.js environment, so the two can never disagree.
+PADDLE_ENV = "sandbox"
+
+# From the Paddle catalogue, `pri_...`. The prices themselves ($2/month,
+# $20/year) are set in Paddle, not here — Paddle is the merchant of record and
+# owns what the customer is charged, including tax.
+PADDLE_PRICE_MONTHLY = ""
+PADDLE_PRICE_YEARLY = ""
+
+# The browser-side token Paddle.js is initialised with. Publishable by design —
+# it appears in the page source — and not a secret.
+PADDLE_CLIENT_TOKEN = ""
+
+# Secrets, set with `wrangler secret put` and never written here:
+#
+#   SIGNING_KEY_PKCS8        base64url PKCS#8, the licence signing key
+#   SIGNING_KEY_PUBLIC       its public half as hex — also PUBLIC_KEY_HEX in
+#                            src/license.rs
+#   PAYTR_MERCHANT_ID
+#   PAYTR_MERCHANT_KEY
+#   PAYTR_MERCHANT_SALT
+#   PADDLE_API_KEY           server-side, for cancellations and customer lookup
+#   PADDLE_WEBHOOK_SECRET    the notification destination's signing secret
+#   RESEND_API_KEY           optional; without it the key is shown on the
+#   MAIL_FROM                success page only
+#   ADMIN_PASSWORD           unlocks /admin. Leave it unset and the route does
+#                            not exist -- it answers 404, not 401, so an
+#                            unconfigured deployment advertises no panel.

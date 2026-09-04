@@ -66,13 +66,11 @@ pub enum UiEvent {
     ManualFailed(Vec<(Provider, TranslateError)>),
     /// Per-provider health, in the order they were probed.
     ProviderStatus(Vec<(Provider, Result<String, String>)>),
-    /// The day's free translations are spent. Carries the anchor so the
-    /// bubble appears exactly where the translation would have, and `prompt`
-    /// for whether to make the case for Pro or only say what happened.
+    /// The free trial is spent. Carries the anchor so the bubble appears
+    /// exactly where the translation would have.
     Capped {
         at: Option<(f64, f64)>,
         limit: u32,
-        prompt: bool,
     },
     /// The same, for the main window's translate box. Not throttled the way
     /// the bubble is: the user pressed a button and is owed an answer every
@@ -159,7 +157,7 @@ fn run(
             Request::Manual(text) => {
                 let entitlement = licensing.license.lock().unwrap().entitlement.clone();
                 let verdict = licensing.quota.lock().unwrap().verdict(&text, &entitlement);
-                let event = if let Verdict::Capped { used, limit, .. } = verdict {
+                let event = if let Verdict::Capped { used, limit } = verdict {
                     UiEvent::ManualCapped { used, limit }
                 } else {
                     match translator.translate(&text, &cfg) {
@@ -422,8 +420,8 @@ fn settle(rx: &Receiver<Request>, mut latest: Trigger, window: Duration) -> Sett
 /// Pulled out of the loop for one reason: it is the only decision in there
 /// that can be tested. Everything around it needs a screen to capture from.
 enum Gate {
-    /// Translate it. `charge` is false for a repeat of text already read
-    /// today, which is free.
+    /// Translate it. `charge` is false for a repeat of text already read,
+    /// which is free.
     Translate { charge: bool },
     /// Do not translate it, and show this instead. Deliberately not an
     /// `Option`: a gesture that produces nothing at all is what a broken app
@@ -435,11 +433,7 @@ fn gate(verdict: Verdict, at: Option<(f64, f64)>) -> Gate {
     match verdict {
         Verdict::Allow => Gate::Translate { charge: true },
         Verdict::Repeat => Gate::Translate { charge: false },
-        // `prompt` rides along to the bubble rather than deciding whether
-        // there is one. The throttle is on the pitch, not on the answer.
-        Verdict::Capped { limit, prompt, .. } => {
-            Gate::Refuse(UiEvent::Capped { at, limit, prompt })
-        }
+        Verdict::Capped { limit, .. } => Gate::Refuse(UiEvent::Capped { at, limit }),
     }
 }
 
@@ -451,45 +445,24 @@ mod tests {
         Request::Selection(Trigger { at: Some((x, 0.0)) })
     }
 
-    /// The regression this seam exists for: a spent allowance still answers.
+    /// The regression this seam exists for: a spent trial still answers.
     ///
-    /// `quota` throttles `prompt` so the upgrade pitch cannot appear more than
-    /// once an hour, and this decision used to read that as permission to send
-    /// nothing at all — so for 59 minutes out of every 60, selecting text did
-    /// visibly nothing. That is indistinguishable from a broken app, and is
-    /// reported as one.
+    /// This decision once read a throttled upgrade prompt as permission to
+    /// send nothing at all, so for 59 minutes out of every 60, selecting text
+    /// did visibly nothing. That is indistinguishable from a broken app and is
+    /// reported as one. The throttle is gone, but the seam stays: a refusal
+    /// has to reach the screen, at the place the translation would have been.
     #[test]
-    fn a_spent_allowance_still_answers_the_gesture() {
-        let throttled = Verdict::Capped {
-            used: 5,
-            limit: 5,
-            prompt: false,
-        };
-        match gate(throttled, Some((120.0, 340.0))) {
-            Gate::Refuse(UiEvent::Capped { at, limit, prompt }) => {
+    fn a_spent_trial_still_answers_the_gesture() {
+        let spent = Verdict::Capped { used: 10, limit: 10 };
+        match gate(spent, Some((120.0, 340.0))) {
+            Gate::Refuse(UiEvent::Capped { at, limit }) => {
                 // Where the translation would have appeared, not wherever the
                 // bubble last happened to sit.
                 assert_eq!(at, Some((120.0, 340.0)));
-                assert_eq!(limit, 5);
-                assert!(!prompt, "the pitch is the part the throttle silences");
+                assert_eq!(limit, 10);
             }
-            _ => panic!("a spent allowance produced no bubble at all"),
-        }
-    }
-
-    /// ...and when the throttle does allow it, the pitch rides along.
-    #[test]
-    fn the_pitch_rides_on_the_bubble_when_it_is_due() {
-        let due = Verdict::Capped {
-            used: 5,
-            limit: 5,
-            prompt: true,
-        };
-        match gate(due, None) {
-            Gate::Refuse(UiEvent::Capped { prompt, .. }) => {
-                assert!(prompt, "an hour has passed; the case for Pro is due")
-            }
-            _ => panic!("expected the upgrade bubble"),
+            _ => panic!("a spent trial produced no bubble at all"),
         }
     }
 

@@ -53,6 +53,10 @@ fn main() -> eframe::Result<()> {
     if let Some(pos) = args.iter().position(|a| a == "--dev-license") {
         std::process::exit(mint_dev_license(args.get(pos + 1).map(String::as_str)));
     }
+    #[cfg(debug_assertions)]
+    if args.iter().any(|a| a == "--dev-reset-trial") {
+        std::process::exit(reset_trial());
+    }
 
     // Sampled before the config is loaded, because loading it creates the
     // file when it is missing — and whether it existed a moment ago is the
@@ -157,10 +161,10 @@ fn main() -> eframe::Result<()> {
 }
 
 /// `bubbleTranslate --license`: says what this install is entitled to and how
-/// much of today's allowance is left, without opening a window.
+/// much of the free trial is left, without opening a window.
 ///
 /// The counterpart to `--check`. That one separates "the app is broken" from
-/// "the network is"; this one separates either from "the allowance is spent",
+/// "the network is"; this one separates either from "the trial is spent",
 /// which otherwise looks identical from the outside — no bubble appears.
 fn license_status() -> i32 {
     let config_existed = Config::path().exists();
@@ -168,27 +172,35 @@ fn license_status() -> i32 {
     let quota = Quota::load(config_existed);
 
     println!("device    {}", license::device_id());
-    println!("plan      {}", licence.entitlement.plan.label());
+    println!(
+        "plan      {}{}",
+        licence.entitlement.plan.label(),
+        match licence.entitlement.cycle {
+            Some(cycle) => format!(" ({})", cycle.label()),
+            None => String::new(),
+        },
+    );
 
     match quota.limit(&licence.entitlement) {
         None => {
             println!(
                 "allowance unlimited{}",
                 if quota.is_grandfathered() {
-                    " (install predates the daily limit)"
+                    " (install predates the free trial)"
                 } else {
                     ""
                 },
             );
-            println!("today     {} translated", quota.used_today());
+            println!("used      {} translated", quota.used());
         }
         Some(limit) => {
-            println!("allowance {limit} translations a day");
+            println!("allowance {limit} free translations, once");
             println!(
-                "today     {} used, {} left",
-                quota.used_today(),
-                limit.saturating_sub(quota.used_today()),
+                "used      {} of {limit}, {} left",
+                quota.used(),
+                quota.remaining(&licence.entitlement).unwrap_or(0),
             );
+            println!("pro       {} or {}", license::PRICE_MONTHLY, license::PRICE_YEARLY);
         }
     }
 
@@ -205,6 +217,30 @@ fn license_status() -> i32 {
         license::Status::Problem(why) => println!("licence   {why}"),
     }
 
+    0
+}
+
+/// `bubbleTranslate --dev-reset-trial`: hands the ten free translations back.
+///
+/// A daily allowance tested itself: spend it, wait for midnight, and the free
+/// path was available again. A trial that never resets has no such tomorrow —
+/// without this, working on the free tier means editing `usage.json` by hand
+/// after the tenth translation, and the free tier is the path most users see.
+/// Debug builds only: in a release this would be the whole paywall.
+#[cfg(debug_assertions)]
+fn reset_trial() -> i32 {
+    let config_existed = Config::path().exists();
+    let mut quota = Quota::load(config_existed);
+    if quota.is_grandfathered() {
+        println!("This install predates the trial and is already unlimited.");
+        return 0;
+    }
+    quota.reset_trial();
+    println!(
+        "Trial reset: {} free translations again.",
+        license::FREE_TRIAL_TRANSLATIONS,
+    );
+    println!("  counter     {}", quota::path().display());
     0
 }
 

@@ -94,13 +94,10 @@ enum State {
     Failed {
         errors: Vec<(Provider, TranslateError)>,
     },
-    /// The day's free translations are gone. Appears exactly where a
-    /// translation would have and says when the allowance comes back;
-    /// `prompt` adds the case for Pro, which is throttled when the answer
-    /// is not.
+    /// The free trial is spent. Appears exactly where a translation would
+    /// have, and always carries the way past it.
     Capped {
         limit: u32,
-        prompt: bool,
     },
 }
 
@@ -261,9 +258,9 @@ impl BubbleApp {
                     main.testing = false;
                     main.statuses = statuses;
                 }
-                UiEvent::Capped { at, limit, prompt } => {
+                UiEvent::Capped { at, limit } => {
                     self.anchor = at;
-                    self.state = State::Capped { limit, prompt };
+                    self.state = State::Capped { limit };
                     self.settings_open = false;
                     self.copied_at = None;
                     self.show(ctx);
@@ -729,44 +726,47 @@ impl BubbleApp {
                         );
                     });
             }
-            State::Capped { limit, prompt } => {
-                let (limit, prompt) = (*limit, *prompt);
+            State::Capped { limit } => {
+                let limit = *limit;
                 ui.label(
-                    egui::RichText::new(format!("You have used today's {limit} free translations"))
+                    egui::RichText::new(format!("You have used all {limit} free translations"))
                         .size(14.0)
                         .color(TEXT_PRIMARY),
                 );
                 ui.add_space(3.0);
                 ui.label(
-                    egui::RichText::new(if prompt {
-                        "The allowance resets at midnight. Pro removes the daily limit."
-                    } else {
-                        "The allowance resets at midnight."
-                    })
+                    egui::RichText::new(format!(
+                        "Pro removes the limit — {} or {}.",
+                        license::PRICE_MONTHLY,
+                        license::PRICE_YEARLY,
+                    ))
                     .size(12.0)
                     .color(TEXT_MUTED),
                 );
-                // Only the pitch is throttled. Select something else a minute
-                // later and the bubble still says why nothing was translated,
-                // it just does not ask for money twice in an hour.
-                if prompt {
-                    ui.add_space(9.0);
-                    ui.horizontal(|ui| {
-                        if ui.button("Upgrade to Pro").clicked() {
-                            shell::open_url(&format!("{}?src=bubble", license::BUY_URL));
-                            dismiss = true;
-                        }
-                        if ui
-                            .add(
-                                egui::Button::new(egui::RichText::new("Not now").size(12.0))
-                                    .frame(false),
-                            )
-                            .clicked()
-                        {
-                            dismiss = true;
-                        }
-                    });
-                }
+                // The button is on every refusal, not one an hour.
+                //
+                // Throttling it made sense against a daily allowance: the wall
+                // came down at midnight, so "Not now" was a real answer and
+                // repeating the offer would have been nagging. A trial has no
+                // midnight. Buying is the only way forward, and a bubble that
+                // states the problem while hiding the one control that solves
+                // it is a dead end wearing an explanation.
+                ui.add_space(9.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Upgrade to Pro").clicked() {
+                        shell::open_url(&format!("{}?src=bubble", license::BUY_URL));
+                        dismiss = true;
+                    }
+                    if ui
+                        .add(
+                            egui::Button::new(egui::RichText::new("Not now").size(12.0))
+                                .frame(false),
+                        )
+                        .clicked()
+                    {
+                        dismiss = true;
+                    }
+                });
             }
             State::Failed { errors, .. } => {
                 ui.label(
