@@ -260,6 +260,10 @@ impl BubbleApp {
             pos.y,
         );
         self.last_pos = pos;
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+            BUBBLE_WIDTH,
+            self.last_height.max(MIN_HEIGHT),
+        )));
         ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
         if !self.visible {
             self.pending_show = true;
@@ -550,6 +554,18 @@ impl eframe::App for BubbleApp {
             return;
         }
 
+        // Revealed here rather than from the draw. eframe calls `ui` only for a
+        // viewport that is *already* visible, so a bubble that waits for its own
+        // draw to show itself never shows at all — on any platform. `logic`
+        // runs every frame either way. The size and position queued by `show`
+        // are ahead of this command, so the bubble still arrives placed rather
+        // than jumping into position afterwards.
+        if self.pending_show {
+            self.pending_show = false;
+            self.visible = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        }
+
         // A visible bubble keeps painting whether or not anything changed:
         // the pointer moving onto it is not an event this window can rely on
         // being told about, so noticing it means looking.
@@ -619,15 +635,6 @@ impl eframe::App for BubbleApp {
             let pos = self.clamped_position(&ctx);
             self.last_pos = pos;
             ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
-        }
-
-        // Reveal only now, with the window already at its final size and
-        // position: both commands above were queued ahead of this one, so the
-        // bubble arrives finished instead of resizing in front of the user.
-        if self.pending_show {
-            self.pending_show = false;
-            self.visible = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         }
 
         if dismiss {
