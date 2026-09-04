@@ -11,10 +11,14 @@
 //! every single click anywhere in the OS. Only drags past a few points and
 //! double/triple clicks get through.
 
+use std::cell::Cell;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use core_foundation::base::TCFType;
+use core_foundation::mach_port::CFMachPortRef;
 use core_foundation::runloop::CFRunLoop;
+use core_foundation_sys::runloop::kCFRunLoopCommonModes;
 use core_graphics::event::{
     CGEventFlags, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
     CGEventType, CallbackResult, EventField,
@@ -39,6 +43,17 @@ const NAVIGATION_KEYS: [i64; 8] = [
     121, // page down
 ];
 const KEYCODE_A: i64 = 0;
+
+// The tap's own port, so its callback can switch it back on. Only ever
+// touched from the monitor thread, which is where both the tap and the
+// callback live.
+thread_local! {
+    static TAP_PORT: Cell<CFMachPortRef> = const { Cell::new(std::ptr::null_mut()) };
+}
+
+unsafe extern "C" {
+    fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
+}
 
 /// Set while the pointer is inside the bubble, so interacting with our own
 /// window never kicks off another capture of the app behind it.
@@ -65,12 +80,32 @@ pub fn spawn(on_trigger: impl Fn(Trigger) + Send + 'static) -> std::io::Result<(
 }
 
 fn run(on_trigger: impl Fn(Trigger) + Send + 'static) {
-    // Where the current drag started. `None` between gestures.
-    let press_origin: Mutex<Option<(f64, f64)>> = Mutex::new(None);
+    // Where the current drag started, and what the pasteboard looked like then.
+    // `None` between gestures.
+    let press: Mutex<Option<((f64, f64), isize)>> = Mutex::new(None);
 
     let callback = move |_proxy: _,
                          event_type: CGEventType,
                          event: &core_graphics::event::CGEvent| {
+        // macOS switches off a tap whose callback took too long, and then
+        // simply stops delivering events — no error, no further callbacks
+        // beyond this one notification. Catching it and switching the tap back
+        // on is the difference between a hiccup and selection detection being
+        // dead for the rest of the session.
+        if matches!(
+            event_type,
+            CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput
+        ) {
+            crate::trace!("tap disabled by system ({event_type:?}) — re-enabling");
+            TAP_PORT.with(|port| {
+                let port = port.get();
+                if !port.is_null() {
+                    unsafe { CGEventTapEnable(port, true) };
+                }
+            });
+            return CallbackResult::Keep;
+        }
+
         // Never react to the Cmd+C we post ourselves, or the gesture would
         // feed itself.
         if capture::is_synthesizing() || capture::is_marked_synthetic(event) {
@@ -85,13 +120,18 @@ fn run(on_trigger: impl Fn(Trigger) + Send + 'static) {
             CGEventType::LeftMouseDown => {
                 let p = event.location();
                 crate::trace!("mouse-down at ({:.0}, {:.0})", p.x, p.y);
-                *press_origin.lock().unwrap() = Some((p.x, p.y));
+                // Sampled here because a copy-on-select interface writes the
+                // pasteboard at mouse-up; by the time the capture runs there is
+                // no longer a "before" to compare against.
+                *press.lock().unwrap() = Some(((p.x, p.y), capture::pasteboard_change_count()));
             }
             CGEventType::LeftMouseUp => {
                 let p = event.location();
-                let origin = press_origin.lock().unwrap().take();
-                let dragged = origin
-                    .map(|(x, y)| ((p.x - x).powi(2) + (p.y - y).powi(2)).sqrt() > DRAG_THRESHOLD)
+                let pressed = press.lock().unwrap().take();
+                let dragged = pressed
+                    .map(|((x, y), _)| {
+                        ((p.x - x).powi(2) + (p.y - y).powi(2)).sqrt() > DRAG_THRESHOLD
+                    })
                     .unwrap_or(false);
                 // Click state 2 is a double-click (word), 3 a triple-click
                 // (paragraph); both select without any drag.
@@ -109,7 +149,10 @@ fn run(on_trigger: impl Fn(Trigger) + Send + 'static) {
                     },
                 );
                 if dragged || multi_click {
-                    on_trigger(Trigger { at: Some((p.x, p.y)) });
+                    on_trigger(Trigger {
+                        at: Some((p.x, p.y)),
+                        clipboard_before: pressed.map(|(_, count)| count),
+                    });
                 }
             }
             CGEventType::KeyUp => {
@@ -123,7 +166,10 @@ fn run(on_trigger: impl Fn(Trigger) + Send + 'static) {
                 if shift_select || select_all {
                     crate::trace!("key-up    keycode={keycode} -> TRIGGER");
                     let p = event.location();
-                    on_trigger(Trigger { at: Some((p.x, p.y)) });
+                    on_trigger(Trigger {
+                        at: Some((p.x, p.y)),
+                        clipboard_before: None,
+                    });
                 }
             }
             _ => {}
@@ -133,25 +179,44 @@ fn run(on_trigger: impl Fn(Trigger) + Send + 'static) {
     };
 
     crate::trace!("installing event tap...");
-    let result = CGEventTap::with_enabled(
-        CGEventTapLocation::Session,
-        CGEventTapPlacement::HeadInsertEventTap,
-        // Listen-only: we never modify or swallow the user's events, which
-        // also means a slow callback can never stall their typing.
-        CGEventTapOptions::ListenOnly,
-        vec![
-            CGEventType::LeftMouseDown,
-            CGEventType::LeftMouseUp,
-            CGEventType::KeyUp,
-        ],
-        callback,
-        || CFRunLoop::run_current(),
-    );
+    // Built by hand rather than with `with_enabled`, which keeps the tap to
+    // itself: the callback needs the port to re-enable the tap above.
+    //
+    // SAFETY: `new_unchecked` requires the callback to run only on the thread
+    // the tap is installed on, and the tap to outlive its use. Both hold — the
+    // run loop below is this thread's, and `tap` owns the callback until this
+    // function returns, which only happens once that run loop stops.
+    let tap = unsafe {
+        CGEventTap::new_unchecked(
+            CGEventTapLocation::Session,
+            CGEventTapPlacement::HeadInsertEventTap,
+            // Listen-only: we never modify or swallow the user's events, which
+            // also means a slow callback can never stall their typing.
+            CGEventTapOptions::ListenOnly,
+            vec![
+                CGEventType::LeftMouseDown,
+                CGEventType::LeftMouseUp,
+                CGEventType::KeyUp,
+            ],
+            callback,
+        )
+    };
 
-    if result.is_err() {
+    let Ok(tap) = tap else {
         eprintln!(
             "bubbleTranslate: could not install the event tap — grant Accessibility \
              permission in System Settings and restart."
         );
-    }
+        return;
+    };
+
+    let Ok(source) = tap.mach_port().create_runloop_source(0) else {
+        eprintln!("bubbleTranslate: could not attach the event tap to the run loop.");
+        return;
+    };
+    CFRunLoop::get_current().add_source(&source, unsafe { kCFRunLoopCommonModes });
+    TAP_PORT.with(|port| port.set(tap.mach_port().as_concrete_TypeRef()));
+    tap.enable();
+    crate::trace!("event tap installed");
+    CFRunLoop::run_current();
 }

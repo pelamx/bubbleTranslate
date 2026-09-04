@@ -96,8 +96,6 @@ fn main() -> eframe::Result<()> {
                 move || ctx.request_repaint()
             });
 
-            // Feed the monitor's triggers into the engine, honouring the
-            // auto-translate switch without tearing the tap down.
             let main = Arc::new(Mutex::new(MainState::new(
                 engine.sender(),
                 readiness,
@@ -111,11 +109,13 @@ fn main() -> eframe::Result<()> {
             shell::install(cc.egui_ctx.clone());
 
             let requests = engine.sender();
-            let monitor_config = config.clone();
             if let Err(err) = monitor::spawn(move |trigger| {
-                if monitor_config.lock().unwrap().auto_translate {
-                    let _ = requests.send(Request::Selection(trigger));
-                }
+                // Nothing here may block. This runs inside the event tap
+                // callback, and macOS disables a tap that dwells too long — so
+                // reading the auto-translate switch here, behind a mutex the UI
+                // holds while it draws, is enough to kill the tap. The engine
+                // applies the switch instead; it can afford to wait for it.
+                let _ = requests.send(Request::Selection(trigger));
             }) {
                 eprintln!("bubbleTranslate: could not start the selection monitor: {err}");
             }

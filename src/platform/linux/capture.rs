@@ -28,7 +28,11 @@ pub(super) fn latch(text: String) {
     *LATCHED.lock().unwrap() = Some(text);
 }
 
-pub fn selected_text(_allow_clipboard: bool) -> Option<Capture> {
+// `_clipboard_before` is what macOS uses to tell a selection an interface
+// copied itself from the clipboard the user already had. Here the monitor
+// latches selections as they happen, so there is never our own copy to
+// discount, and the sample is ignored.
+pub fn selected_text(_allow_clipboard: bool, _clipboard_before: Option<isize>) -> Option<Capture> {
     let text = LATCHED.lock().unwrap().take()?;
     let trimmed = text.trim();
     if trimmed.is_empty() {
