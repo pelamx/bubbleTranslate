@@ -129,6 +129,16 @@ Geolocation is a guess, so both variants of `/buy` link to the other. A Turkish
 customer on a VPN, or someone abroad who wants to pay in lira, must not be
 stuck with the wrong processor because Cloudflare read an IP a certain way.
 
+### Languages
+
+Every page speaks English, Turkish and Spanish, switched from the EN / TR / ES
+links at the top right. English is the default for everyone — the language is
+never guessed from the IP address; only the payment processor is. The choice
+rides on `?lang=`, on a hidden field in each form, and on a `lang` cookie so
+the return trip from a processor comes back in the same language. The strings
+live in `src/i18n.ts`, one object per language, typed against the English one
+so a string added without its two translations fails to compile.
+
 ### How the key reaches the buyer
 
 The success page shows it, and email is the fallback rather than the route.

@@ -111,8 +111,15 @@ export async function customerEmail(env: Env, data: any): Promise<string | null>
 /** Cancels at the end of the paid period rather than immediately: the
  *  subscriber has paid for the rest of the term and is entitled to it, which
  *  is also why `endLicence("cancelled")` leaves `expires_at` alone. */
-export async function cancelSubscription(env: Env, subscriptionId: string): Promise<string | null> {
-  if (!env.PADDLE_API_KEY) return "Subscription management is not configured on this server.";
+/** What went wrong, as a key into the page strings — the page says it in the
+ *  reader's language; the log line beside it says the detail in English. */
+export type CancelFailure = "cancelNotConfigured" | "paddleRefusedCancel" | "paddleUnreachable";
+
+export async function cancelSubscription(
+  env: Env,
+  subscriptionId: string,
+): Promise<CancelFailure | null> {
+  if (!env.PADDLE_API_KEY) return "cancelNotConfigured";
   try {
     const response = await fetch(
       `${paddleApiBase(env)}/subscriptions/${subscriptionId}/cancel`,
@@ -127,11 +134,11 @@ export async function cancelSubscription(env: Env, subscriptionId: string): Prom
     );
     if (!response.ok) {
       console.error(`Paddle refused the cancellation (${response.status}): ${await response.text()}`);
-      return "Paddle could not cancel this subscription. Please contact support.";
+      return "paddleRefusedCancel";
     }
     return null;
   } catch (err) {
     console.error("could not reach Paddle to cancel", err);
-    return "Could not reach Paddle. Please try again shortly.";
+    return "paddleUnreachable";
   }
 }

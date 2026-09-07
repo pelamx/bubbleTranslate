@@ -1,4 +1,4 @@
-// The four pages this service serves to a browser.
+// The four pages this service serves to a browser, in three languages.
 //
 // They are here rather than on a separate site for one reason: /buy is the
 // only page that has to know which country the visitor is in, and this Worker
@@ -11,6 +11,7 @@
 // checkout.
 
 import type { Cycle } from "./env";
+import { DEFAULT_LANG, LANGS, type Lang, type Strings, switchedTo, t, withLang } from "./i18n";
 
 /// What the free tier allows per day. Display only: the number the client
 /// enforces is `FREE_DAILY_TRANSLATIONS` in `src/license.rs`, and this one has
@@ -103,22 +104,60 @@ const STYLE = `
   ol { color: #b8b8b8; padding-left: 20px; }
   li { margin-bottom: 6px; }
   iframe { width: 100%; border: 0; min-height: 720px; }
+  .langs {
+    position: fixed; top: 14px; right: 18px; display: flex; gap: 4px;
+    font-size: 12px; letter-spacing: .04em;
+  }
+  .langs a {
+    color: #9a9a9a; text-decoration: none; padding: 4px 7px; border-radius: 6px;
+    border: 1px solid transparent;
+  }
+  .langs a:hover { color: #f0f0f0; }
+  .langs a.on { color: #78d28c; border-color: #3a3c41; background: #242629; }
 `;
 
-export function page(title: string, body: string, head = "", wide = false): Response {
+/** Where the page is being served, which the language switcher needs to
+ *  link back to. Absent on the admin panel, which has no switcher. */
+export interface PageContext {
+  lang: Lang;
+  url: URL;
+}
+
+export function page(
+  title: string,
+  body: string,
+  head = "",
+  wide = false,
+  ctx?: PageContext,
+): Response {
+  const lang = ctx?.lang ?? DEFAULT_LANG;
+  const switcher = ctx
+    ? `<nav class="langs" aria-label="Language">${LANGS.map(
+        (code) =>
+          `<a href="${escapeHtml(switchedTo(ctx.url, code))}" hreflang="${code}"` +
+          ` lang="${code}" title="${escapeHtml(t(code).langName)}"` +
+          `${code === lang ? ' class="on" aria-current="true"' : ""}>${code.toUpperCase()}</a>`,
+      ).join("")}</nav>`
+    : "";
+  const headers: Record<string, string> = { "content-type": "text/html; charset=utf-8" };
+  if (ctx) {
+    // The cookie is what brings the buyer back in their language after the
+    // processor's redirect, which lands on a URL written before they left.
+    headers["set-cookie"] = `lang=${lang}; Path=/; Max-Age=31536000; SameSite=Lax`;
+  }
   return new Response(
-    `<!doctype html><html lang="en"><head><meta charset="utf-8">
+    `<!doctype html><html lang="${lang}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title><style>${STYLE}</style>${head}</head>
-<body><div class="sheet${wide ? " wide" : ""}">${body}</div></body></html>`,
-    { headers: { "content-type": "text/html; charset=utf-8" } },
+<body>${switcher}<div class="sheet${wide ? " wide" : ""}">${body}</div></body></html>`,
+    { headers },
   );
 }
 
-const planCard = (cycle: Cycle, price: string, checked: boolean, note: string) => `
+const planCard = (s: Strings, cycle: Cycle, price: string, checked: boolean, note: string) => `
   <label class="plan${checked ? " on" : ""}">
     <input type="radio" name="cycle" value="${cycle}"${checked ? " checked" : ""}>
-    <div class="name">${cycle === "yearly" ? "Yearly" : "Monthly"}</div>
+    <div class="name">${cycle === "yearly" ? s.yearly : s.monthly}</div>
     <div class="price">${escapeHtml(price)}</div>
     <div class="note">${escapeHtml(note)}</div>
   </label>`;
@@ -137,9 +176,11 @@ const PLAN_SCRIPT = `
 // -- /buy --------------------------------------------------------------------
 
 export interface BuyOptions {
+  ctx: PageContext;
   turkey: boolean;
   configured: boolean;
-  reason?: string;
+  /** A key into the strings, so the reason reads in the page's language. */
+  reason?: "reasonPaytrUnconfigured" | "reasonPaddleUnconfigured";
   monthly: string;
   yearly: string;
   src: string;
@@ -153,91 +194,73 @@ export interface BuyOptions {
 }
 
 export function buyPage(opts: BuyOptions): Response {
+  const { ctx } = opts;
+  const s = t(ctx.lang);
   if (!opts.configured) {
     return page(
-      "bubbleTranslate Pro",
-      `<h1>bubbleTranslate Pro</h1>
-       <p class="warn">Checkout is not available yet.</p>
-       <p class="muted">${escapeHtml(opts.reason ?? "The payment provider for your region is not configured.")}</p>`,
+      s.proTitle,
+      `<h1>${s.proTitle}</h1>
+       <p class="warn">${s.checkoutUnavailable}</p>
+       <p class="muted">${escapeHtml(opts.reason ? s[opts.reason] : s.providerNotConfigured)}</p>`,
+      "",
+      false,
+      ctx,
     );
   }
 
-  const savings =
-    opts.turkey
-      ? "12 ay, tek ödeme"
-      : "two months free";
   // The plan cards are radio inputs, so on the PayTR page they have to sit
   // *inside* the form that posts them — a radio outside the form it belongs to
   // is simply not submitted, and the server would be left guessing which plan
   // was bought. Hence `heading` and `plans` separately rather than one block:
   // the Paddle page reads the selection with JavaScript and does not care, but
   // this one is a plain form post and cares a great deal.
+  //
   // The free tier is described here, next to Pro, because this is the page
   // the bubble sends someone to at the moment they hit the wall — the one
   // place they will read what the wall is and what removes it.
-  const tiers = opts.turkey
-    ? `<div class="tiers">
-         <div class="tier">
-           <div class="name">Ücretsiz</div>
-           Günde ${FREE_DAILY_TRANSLATIONS} çeviri, tek cihaz. Sayaç her gece
-           yarısı sıfırlanır; sonrasında devam etmek için Pro gerekir.
-         </div>
-         <div class="tier pro">
-           <div class="name">Pro</div>
-           Sınırsız çeviri, üç cihaz. Günlük limit kalkar.
-         </div>
-       </div>`
-    : `<div class="tiers">
-         <div class="tier">
-           <div class="name">Free</div>
-           ${FREE_DAILY_TRANSLATIONS} translations a day, one machine. The count
-           comes back at midnight; past it, you need Pro to keep going.
-         </div>
-         <div class="tier pro">
-           <div class="name">Pro</div>
-           Unlimited translations, three devices. No daily limit.
-         </div>
-       </div>`;
   const heading = `
-    <h1>bubbleTranslate Pro</h1>
-    <p>${
-      opts.turkey
-        ? "Ücretsiz sürüm günde on çeviriyle sınırlıdır. Pro sınırı kaldırır; ödeme PayTR üzerinden alınır."
-        : "The free version is limited to ten translations a day. Pro removes the limit; billed through Paddle."
-    }</p>
-    ${tiers}`;
+    <h1>${s.proTitle}</h1>
+    <p>${opts.turkey ? s.introPaytr : s.introPaddle}</p>
+    <div class="tiers">
+      <div class="tier">
+        <div class="name">${s.tierFreeName}</div>
+        ${s.tierFree(FREE_DAILY_TRANSLATIONS)}
+      </div>
+      <div class="tier pro">
+        <div class="name">${s.tierProName}</div>
+        ${s.tierPro}
+      </div>
+    </div>`;
   const plans = `
     <div class="plans">
-      ${planCard("monthly", opts.monthly, false, opts.turkey ? "aylık" : "billed monthly")}
-      ${planCard("yearly", opts.yearly, true, savings)}
+      ${planCard(s, "monthly", opts.monthly, false, s.billedMonthly)}
+      ${planCard(s, "yearly", opts.yearly, true, opts.turkey ? s.yearlyNotePaytr : s.yearlyNotePaddle)}
     </div>`;
 
+  const other = escapeHtml(withLang(opts.otherUrl, ctx.lang));
   const footer = `
     <hr>
-    <p class="muted">${
-      opts.turkey
-        ? `Türkiye dışındaysanız <a href="${escapeHtml(opts.otherUrl)}">dolar üzerinden ödeyebilirsiniz</a>.`
-        : `In Turkey? <a href="${escapeHtml(opts.otherUrl)}">Pay in lira instead</a>.`
-    }</p>`;
+    <p class="muted">${opts.turkey ? s.footerTurkey(other) : s.footerOther(other)}</p>`;
 
   if (opts.turkey) {
     return page(
-      "bubbleTranslate Pro",
+      s.proTitle,
       `${heading}
        <form method="post" action="/checkout/paytr">
          ${plans}
          <input type="hidden" name="src" value="${escapeHtml(opts.src)}">
-         <label class="field" for="email">E-posta adresiniz — lisans anahtarı buraya gönderilir</label>
+         <input type="hidden" name="lang" value="${ctx.lang}">
+         <label class="field" for="email">${s.emailLabel}</label>
          <input id="email" type="email" name="email" required autocomplete="email"
-                placeholder="siz@ornek.com">
-         <button type="submit">Ödemeye geç</button>
+                placeholder="${escapeHtml(s.emailPlaceholder)}">
+         <button type="submit">${s.continueToPayment}</button>
        </form>
-       <p class="muted" style="margin-top:14px">
-         Kart bilgileriniz PayTR'ye gider, bu sunucuya değil. Satın alma tek seferliktir
-         ve süre sonunda kendiliğinden yenilenmez.
-       </p>
+       <p class="muted" style="margin-top:14px">${s.paytrNote}</p>
        ${footer}
        <script>${PLAN_SCRIPT}</script>`,
+      "",
+      false,
+      ctx,
     );
   }
 
@@ -249,13 +272,10 @@ export function buyPage(opts: BuyOptions): Response {
   const body = `
     ${heading}
     ${plans}
-    <label class="field" for="email">Your email — the licence key is sent here</label>
-    <input id="email" type="email" required autocomplete="email" placeholder="you@example.com">
-    <button id="pay" type="button">Continue to payment</button>
-    <p class="muted" style="margin-top:14px">
-      Card details go to Paddle, not to this server. Paddle is the merchant of
-      record and handles VAT and invoicing.
-    </p>
+    <label class="field" for="email">${s.emailLabel}</label>
+    <input id="email" type="email" required autocomplete="email" placeholder="${escapeHtml(s.emailPlaceholder)}">
+    <button id="pay" type="button">${s.continueToPayment}</button>
+    <p class="muted" style="margin-top:14px">${s.paddleNote}</p>
     ${footer}
     <script>
       ${PLAN_SCRIPT}
@@ -265,11 +285,12 @@ export function buyPage(opts: BuyOptions): Response {
         monthly: ${JSON.stringify(opts.priceMonthly ?? "")},
         yearly: ${JSON.stringify(opts.priceYearly ?? "")},
       };
+      const words = ${JSON.stringify({ planUnavailable: s.planUnavailable, checkoutFailed: s.checkoutFailed })};
       document.getElementById('pay').addEventListener('click', async () => {
         const email = document.getElementById('email');
         if (!email.reportValidity()) return;
         const cycle = document.querySelector('.plan input:checked').value;
-        if (!prices[cycle]) { alert('That plan is not available yet.'); return; }
+        if (!prices[cycle]) { alert(words.planUnavailable); return; }
         // The ref is minted server-side so the order row exists before the
         // webhook can arrive — a webhook is quite capable of beating the
         // buyer's redirect back to us.
@@ -278,49 +299,75 @@ export function buyPage(opts: BuyOptions): Response {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ cycle, email: email.value }),
         }).then((r) => r.json());
-        if (!created.ref) { alert(created.error || 'Could not start checkout.'); return; }
+        if (!created.ref) { alert(created.error || words.checkoutFailed); return; }
         Paddle.Checkout.open({
           items: [{ priceId: prices[cycle], quantity: 1 }],
           customer: { email: email.value },
           customData: { ref: created.ref },
           settings: {
-            successUrl: ${JSON.stringify(opts.successUrl ?? "")} + '?ref=' + created.ref,
+            successUrl: ${JSON.stringify(withLang(opts.successUrl ?? "", ctx.lang))} + '&ref=' + created.ref,
           },
         });
       });
     </script>`;
-  return page("bubbleTranslate Pro", body, paddleScript);
+  return page(s.proTitle, body, paddleScript, false, ctx);
 }
 
 // -- the PayTR iframe --------------------------------------------------------
 
-export function paytrPage(iframeSrc: string, ref: string): Response {
+export function paytrPage(ctx: PageContext, iframeSrc: string, ref: string): Response {
+  const s = t(ctx.lang);
   return page(
-    "Ödeme — bubbleTranslate Pro",
-    `<h1>Ödeme</h1>
-     <p class="muted">Sipariş ${escapeHtml(ref.slice(0, 12))}</p>
+    `${s.paymentTitle} — ${s.proTitle}`,
+    `<h1>${s.paymentTitle}</h1>
+     <p class="muted">${s.order} ${escapeHtml(ref.slice(0, 12))}</p>
      <iframe src="${escapeHtml(iframeSrc)}"
              id="paytriframe" frameborder="0" scrolling="no"></iframe>
      <script src="https://www.paytr.com/js/iframeResizer.min.js"></script>
      <script>iFrameResize({}, '#paytriframe');</script>`,
+    "",
+    false,
+    ctx,
   );
 }
 
 // -- /done -------------------------------------------------------------------
 
-export function donePage(ref: string, support: string): Response {
+export function donePage(ctx: PageContext, ref: string, support: string): Response {
+  const s = t(ctx.lang);
   // The page is rendered before the outcome is known: the buyer may well
   // arrive back here before the processor's webhook does. So it polls, and
   // says plainly that it is waiting rather than showing an empty box.
+  //
+  // Everything the script can say is handed to it here, so it says it in the
+  // page's language and the escaping happens once, on this side.
+  const words = {
+    paymentReceived: s.paymentReceived,
+    activating: s.activating,
+    step1: s.step1,
+    step2: s.step2,
+    step3: s.step3,
+    keepKey: s.keepKey,
+    paymentFailed: s.paymentFailed,
+    nothingCharged: s.nothingCharged,
+    youCan: s.youCan,
+    tryAgain: s.tryAgain,
+    takingLong: s.takingLong,
+    ifCharged: s.ifCharged,
+    withReference: s.withReference,
+    keyWillBeSent: s.keyWillBeSent,
+    buyUrl: withLang("/buy", ctx.lang),
+  };
   return page(
-    "Thank you — bubbleTranslate Pro",
-    `<h1>Thank you</h1>
+    `${s.thankYou} — ${s.proTitle}`,
+    `<h1>${s.thankYou}</h1>
      <div id="body">
-       <p id="status">Confirming your payment…</p>
+       <p id="status">${s.confirming}</p>
      </div>
      <script>
        const ref = ${JSON.stringify(ref)};
        const support = ${JSON.stringify(support)};
+       const w = ${JSON.stringify(words)};
        const body = document.getElementById('body');
        let tries = 0;
        async function poll() {
@@ -330,32 +377,34 @@ export function donePage(ref: string, support: string): Response {
          catch { order = null; }
          if (order && order.status === 'paid' && order.key) {
            body.innerHTML =
-             '<p class="ok">Payment received. Here is your licence key:</p>' +
+             '<p class="ok">' + w.paymentReceived + '</p>' +
              '<div class="key">' + order.key + '</div>' +
-             '<h2>Activating it</h2><ol>' +
-             '<li>Open bubbleTranslate.</li>' +
-             '<li>Go to the <b>Account</b> section.</li>' +
-             '<li>Paste the key and choose <b>Activate</b>.</li></ol>' +
-             '<p class="muted">It works on up to three machines. Keep this key — ' +
-             'this page stops showing it after an hour.</p>';
+             '<h2>' + w.activating + '</h2><ol>' +
+             '<li>' + w.step1 + '</li>' +
+             '<li>' + w.step2 + '</li>' +
+             '<li>' + w.step3 + '</li></ol>' +
+             '<p class="muted">' + w.keepKey + '</p>';
            return;
          }
          if (order && order.status === 'failed') {
-           body.innerHTML = '<p class="err">The payment did not go through.</p>' +
-             '<p class="muted">' + (order.failure || '') + ' Nothing was charged. ' +
-             'You can <a href="/buy">try again</a>.</p>';
+           body.innerHTML = '<p class="err">' + w.paymentFailed + '</p>' +
+             '<p class="muted">' + (order.failure || '') + ' ' + w.nothingCharged + ' ' +
+             w.youCan + ' <a href="' + w.buyUrl + '">' + w.tryAgain + '</a>.</p>';
            return;
          }
          if (tries > 40) {
-           body.innerHTML = '<p class="warn">This is taking longer than expected.</p>' +
-             '<p class="muted">If you were charged, email ' + support +
-             ' with reference <b>' + ref.slice(0, 12) + '</b> and the key will be sent to you.</p>';
+           body.innerHTML = '<p class="warn">' + w.takingLong + '</p>' +
+             '<p class="muted">' + w.ifCharged + ' ' + support + ' ' + w.withReference +
+             ' <b>' + ref.slice(0, 12) + '</b> ' + w.keyWillBeSent + '</p>';
            return;
          }
          setTimeout(poll, 2000);
        }
        poll();
      </script>`,
+    "",
+    false,
+    ctx,
   );
 }
 
@@ -375,57 +424,72 @@ export interface AccountView {
   error?: string;
 }
 
-export function accountPage(view: AccountView | null, support: string, error?: string): Response {
+export function accountPage(
+  ctx: PageContext,
+  view: AccountView | null,
+  support: string,
+  error?: string,
+): Response {
+  const s = t(ctx.lang);
   const form = `
     <form method="post" action="/account">
-      <label class="field" for="key">Your licence key</label>
+      <input type="hidden" name="lang" value="${ctx.lang}">
+      <label class="field" for="key">${s.keyLabel}</label>
       <input id="key" type="text" name="key" required placeholder="BT-XXXXX-XXXXX-XXXXX"
              value="${escapeHtml(view?.key ?? "")}" autocapitalize="characters" spellcheck="false">
-      <button type="submit">Look it up</button>
+      <button type="submit">${s.lookUp}</button>
     </form>`;
+  const title = `${s.yourSubscription} — bubbleTranslate`;
 
   if (!view) {
     return page(
-      "Your subscription — bubbleTranslate",
-      `<h1>Your subscription</h1>
-       <p>Enter the key you were sent to see its status.</p>
+      title,
+      `<h1>${s.yourSubscription}</h1>
+       <p>${s.enterKeyToSee}</p>
        ${error ? `<p class="err">${escapeHtml(error)}</p>` : ""}
        ${form}
        <hr>
-       <p class="muted">Lost the key? Email ${escapeHtml(support)} from the address you
-       bought with.</p>`,
+       <p class="muted">${s.lostKey(escapeHtml(support))}</p>`,
+      "",
+      false,
+      ctx,
     );
   }
 
+  const buyUrl = escapeHtml(withLang("/buy", ctx.lang));
   const cancel = view.cancellable
     ? `<form method="post" action="/account/cancel" style="margin-top:18px">
          <input type="hidden" name="key" value="${escapeHtml(view.key)}">
-         <button class="quiet" type="submit">Cancel subscription</button>
+         <input type="hidden" name="lang" value="${ctx.lang}">
+         <button class="quiet" type="submit">${s.cancelSubscription}</button>
          <p class="muted" style="margin-top:8px">
-           You keep Pro until ${escapeHtml(view.renews ?? "the end of the paid period")}.
+           ${s.keepProUntil(escapeHtml(view.renews ?? s.endOfPaidPeriod))}
          </p>
        </form>`
     : `<p class="muted" style="margin-top:18px">
-         This is a fixed-term licence — there is no recurring charge to cancel.
-         It simply ends on ${escapeHtml(view.renews ?? "its expiry date")}, and you can
-         <a href="/buy">buy another term</a> whenever you like.
+         ${s.fixedTerm(escapeHtml(view.renews ?? s.itsExpiryDate), buyUrl)}
        </p>`;
 
+  const status = s.status[view.status] ?? view.status;
+  const cycle = s.cycle[view.cycle] ?? view.cycle;
   return page(
-    "Your subscription — bubbleTranslate",
-    `<h1>Your subscription</h1>
+    title,
+    `<h1>${s.yourSubscription}</h1>
      ${view.message ? `<p class="ok">${escapeHtml(view.message)}</p>` : ""}
      ${view.error ? `<p class="err">${escapeHtml(view.error)}</p>` : ""}
-     <h2>${escapeHtml(view.plan)} — ${escapeHtml(view.cycle)}</h2>
+     <h2>${escapeHtml(view.plan)} — ${escapeHtml(cycle)}</h2>
      <p class="muted">
-       Status: <b class="${view.status === "active" ? "ok" : "warn"}">${escapeHtml(view.status)}</b><br>
-       ${view.renews ? `Ends ${escapeHtml(view.renews)}<br>` : ""}
-       Devices: ${view.seats} of ${view.seatLimit} in use<br>
-       Paid through ${escapeHtml(view.provider === "paytr" ? "PayTR" : "Paddle")}
+       ${s.statusLabel}: <b class="${view.status === "active" ? "ok" : "warn"}">${escapeHtml(status)}</b><br>
+       ${view.renews ? `${s.ends} ${escapeHtml(view.renews)}<br>` : ""}
+       ${s.devices(view.seats, view.seatLimit)}<br>
+       ${s.paidThrough} ${escapeHtml(view.provider === "paytr" ? "PayTR" : "Paddle")}
      </p>
      ${cancel}
      <hr>
      ${form}
-     <p class="muted">Questions: ${escapeHtml(support)}</p>`,
+     <p class="muted">${s.questions}: ${escapeHtml(support)}</p>`,
+    "",
+    false,
+    ctx,
   );
 }

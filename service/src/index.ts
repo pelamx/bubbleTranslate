@@ -46,7 +46,8 @@ import {
 } from "./licences";
 import { handleAdmin } from "./admin";
 import { cancelSubscription, customerEmail, cycleFromItems, verifyWebhook } from "./paddle";
-import { accountPage, buyPage, donePage, lira, paytrPage } from "./pages";
+import { isLang, pickLang, t, withLang } from "./i18n";
+import { type PageContext, accountPage, buyPage, donePage, lira, paytrPage } from "./pages";
 import { createCharge, iframeUrl, readCallback } from "./paytr";
 import { keys, now, open } from "./tokens";
 
@@ -63,6 +64,14 @@ const json = (body: unknown, status = 200) =>
 const refuse = (message: string, status = 400) => json({ error: message }, status);
 
 const redirect = (location: string) => new Response(null, { status: 303, headers: { location } });
+
+/** The language a page is rendered in, and the URL its switcher links from.
+ *  A form post carries its language as a hidden field, which wins over the
+ *  cookie: the field is the page the user was actually looking at. */
+function pageContext(request: Request, url: URL, formLang?: unknown): PageContext {
+  const lang = isLang(formLang) ? formLang : pickLang(request, url);
+  return { lang, url };
+}
 
 // -- the routes the app calls ------------------------------------------------
 
@@ -164,6 +173,7 @@ function inTurkey(request: Request, url: URL): boolean {
 }
 
 function buy(env: Env, request: Request, url: URL): Response {
+  const ctx = pageContext(request, url);
   const turkey = inTurkey(request, url);
   const src = url.searchParams.get("src") ?? "direct";
   const base = baseUrl(env, request);
@@ -174,11 +184,10 @@ function buy(env: Env, request: Request, url: URL): Response {
     const yearly = paytrPriceKurus(env, "yearly");
     if (!paytrConfigured(env) || monthly === null || yearly === null) {
       return buyPage({
+        ctx,
         turkey,
         configured: false,
-        reason:
-          "PayTR is not configured on this server yet. Set the merchant credentials " +
-          "and the lira prices, or pay in dollars instead.",
+        reason: "reasonPaytrUnconfigured",
         monthly: "",
         yearly: "",
         src,
@@ -186,6 +195,7 @@ function buy(env: Env, request: Request, url: URL): Response {
       });
     }
     return buyPage({
+      ctx,
       turkey,
       configured: true,
       monthly: lira(monthly),
@@ -197,9 +207,10 @@ function buy(env: Env, request: Request, url: URL): Response {
 
   if (!paddleConfigured(env)) {
     return buyPage({
+      ctx,
       turkey,
       configured: false,
-      reason: "Paddle is not configured on this server yet.",
+      reason: "reasonPaddleUnconfigured",
       monthly: "",
       yearly: "",
       src,
@@ -207,6 +218,7 @@ function buy(env: Env, request: Request, url: URL): Response {
     });
   }
   return buyPage({
+    ctx,
     turkey,
     configured: true,
     monthly: USD_PRICE.monthly,
@@ -221,19 +233,23 @@ function buy(env: Env, request: Request, url: URL): Response {
   });
 }
 
-async function checkoutPaytr(env: Env, request: Request): Promise<Response> {
+async function checkoutPaytr(env: Env, request: Request, url: URL): Promise<Response> {
   const form = await request.formData();
+  const ctx = pageContext(request, url, form.get("lang"));
+  const s = t(ctx.lang);
+  const plain = (text: string, status: number) =>
+    new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
   // No default. A missing plan is a bug or a hand-made request, and guessing
   // which one someone meant to buy is guessing what to charge them.
   const cycleRaw = String(form.get("cycle") ?? "");
   const email = String(form.get("email") ?? "").trim();
 
-  if (!isCycle(cycleRaw)) return new Response("Geçersiz plan.", { status: 400 });
-  if (!email.includes("@")) return new Response("Geçerli bir e-posta adresi girin.", { status: 400 });
-  if (!paytrConfigured(env)) return new Response("PayTR yapılandırılmamış.", { status: 503 });
+  if (!isCycle(cycleRaw)) return plain(s.invalidPlan, 400);
+  if (!email.includes("@")) return plain(s.invalidEmail, 400);
+  if (!paytrConfigured(env)) return plain(s.paytrNotConfigured, 503);
 
   const amount = paytrPriceKurus(env, cycleRaw);
-  if (amount === null) return new Response("Bu planın fiyatı ayarlanmamış.", { status: 503 });
+  if (amount === null) return plain(s.priceNotSet, 503);
 
   const base = baseUrl(env, request);
   const ref = newOrderRef();
@@ -246,15 +262,17 @@ async function checkoutPaytr(env: Env, request: Request): Promise<Response> {
     cycle: cycleRaw,
     email,
     userIp: request.headers.get("CF-Connecting-IP") ?? "127.0.0.1",
-    okUrl: `${base}/done?ref=${ref}`,
-    failUrl: `${base}/done?ref=${ref}`,
+    okUrl: withLang(`${base}/done?ref=${ref}`, ctx.lang),
+    failUrl: withLang(`${base}/done?ref=${ref}`, ctx.lang),
   });
 
   if (!charge.ok || !charge.token) {
+    // The detail goes on the order row for the operator; the buyer gets the
+    // sentence in their own language.
     await markOrderFailed(env, ref, charge.error ?? "token request failed");
-    return new Response(charge.error ?? "Ödeme başlatılamadı.", { status: 502 });
+    return plain(s.paymentCouldNotStart, 502);
   }
-  return paytrPage(iframeUrl(charge.token), ref);
+  return paytrPage(ctx, iframeUrl(charge.token), ref);
 }
 
 async function checkoutPaddle(env: Env, request: Request): Promise<Response> {
@@ -430,12 +448,20 @@ async function paddleWebhook(env: Env, request: Request): Promise<Response> {
 
 // -- managing it -------------------------------------------------------------
 
-async function accountView(env: Env, licence: Licence, key: string, message?: string, error?: string) {
+async function accountView(
+  env: Env,
+  ctx: PageContext,
+  licence: Licence,
+  key: string,
+  message?: string,
+  error?: string,
+) {
   const { count } = (await env.DB.prepare("SELECT COUNT(*) AS count FROM seats WHERE licence_id = ?")
     .bind(licence.id)
     .first<{ count: number }>())!;
 
   return accountPage(
+    ctx,
     {
       key,
       plan: licence.plan === "pro" ? "bubbleTranslate Pro" : licence.plan,
@@ -455,42 +481,41 @@ async function accountView(env: Env, licence: Licence, key: string, message?: st
   );
 }
 
-async function account(env: Env, request: Request): Promise<Response> {
+async function account(env: Env, request: Request, url: URL): Promise<Response> {
   const form = await request.formData();
+  const ctx = pageContext(request, url, form.get("lang"));
+  const s = t(ctx.lang);
   const key = String(form.get("key") ?? "").trim().toUpperCase();
-  if (!key) return accountPage(null, supportEmail(env), "Enter your licence key.");
+  if (!key) return accountPage(ctx, null, supportEmail(env), s.enterYourKey);
 
   const licence = await licenceByKey(env, key);
   if (!licence) {
-    return accountPage(null, supportEmail(env), "That licence key was not recognised.");
+    return accountPage(ctx, null, supportEmail(env), s.keyNotRecognised);
   }
-  return accountView(env, licence, key);
+  return accountView(env, ctx, licence, key);
 }
 
-async function accountCancel(env: Env, request: Request): Promise<Response> {
+async function accountCancel(env: Env, request: Request, url: URL): Promise<Response> {
   const form = await request.formData();
+  const ctx = pageContext(request, url, form.get("lang"));
+  const s = t(ctx.lang);
   const key = String(form.get("key") ?? "").trim().toUpperCase();
   const licence = await licenceByKey(env, key);
   if (!licence) {
-    return accountPage(null, supportEmail(env), "That licence key was not recognised.");
+    return accountPage(ctx, null, supportEmail(env), s.keyNotRecognised);
   }
   if (licence.provider !== "paddle" || !licence.provider_ref) {
-    return accountView(env, licence, key, undefined, "This licence has no recurring charge to cancel.");
+    return accountView(env, ctx, licence, key, undefined, s.noRecurringCharge);
   }
 
   const failure = await cancelSubscription(env, licence.provider_ref);
-  if (failure) return accountView(env, licence, key, undefined, failure);
+  if (failure) return accountView(env, ctx, licence, key, undefined, s[failure]);
 
   // Paddle will also send `subscription.canceled`; recording it now means the
   // page the user is about to see tells the truth without waiting for it.
   await endLicence(env, licence, "cancelled");
   const updated = (await licenceById(env, licence.id)) ?? licence;
-  return accountView(
-    env,
-    updated,
-    key,
-    `Cancelled. Pro keeps working until ${updated.renews_at ?? "the end of the paid period"}.`,
-  );
+  return accountView(env, ctx, updated, key, s.cancelled(updated.renews_at ?? s.endOfPaidPeriod));
 }
 
 // -- development -------------------------------------------------------------
@@ -525,11 +550,14 @@ export default {
 
       if (request.method === "GET") {
         if (pathname === "/buy") return buy(env, request, url);
-        if (pathname === "/account") return accountPage(null, supportEmail(env));
+        if (pathname === "/account") {
+          return accountPage(pageContext(request, url), null, supportEmail(env));
+        }
         if (pathname === "/done") {
+          const ctx = pageContext(request, url);
           const ref = url.searchParams.get("ref") ?? "";
-          if (!ref) return redirect("/buy");
-          return donePage(ref, supportEmail(env));
+          if (!ref) return redirect(withLang("/buy", ctx.lang));
+          return donePage(ctx, ref, supportEmail(env));
         }
         if (pathname.startsWith("/v1/order/")) {
           return orderStatus(env, pathname.slice("/v1/order/".length));
@@ -551,13 +579,13 @@ export default {
         case "/webhooks/paddle":
           return await paddleWebhook(env, request);
         case "/checkout/paytr":
-          return await checkoutPaytr(env, request);
+          return await checkoutPaytr(env, request, url);
         case "/checkout/paddle":
           return await checkoutPaddle(env, request);
         case "/account":
-          return await account(env, request);
+          return await account(env, request, url);
         case "/account/cancel":
-          return await accountCancel(env, request);
+          return await accountCancel(env, request, url);
       }
 
       const body = await request.json().catch(() => ({}));
