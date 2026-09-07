@@ -4,6 +4,11 @@
 # the download on GitHub is the metered build, under the plain name.
 bubbleTranslate-free*
 
+# Where those builds are kept. The rule above already covers them by name;
+# this covers the shelf itself, so anything else set aside here is out of the
+# repository by virtue of where it was put rather than what it was called.
+/backup/
+
 # The bundle the DMG is built around. The DMG is the download and carries the
 # same app inside it, so tracking both would put fifteen megabytes of the same
 # binary in every release commit.
