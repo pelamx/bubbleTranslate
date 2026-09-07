@@ -1,3 +1,7 @@
 /target
 
+# The last unlimited builds, kept on this machine only. Never published:
+# the download on GitHub is the metered build, under the plain name.
+bubbleTranslate-free*
+
 .DS_Store
