@@ -12,8 +12,8 @@ which is a surprisingly large difference: see
 
 | | Download | What you get |
 |---|---|---|
+| **macOS** | [`bubbleTranslate.dmg`](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate.dmg) (7 MB) | An app bundle to drag into Applications |
 | **Linux** | [`bubbleTranslate-linux-x86_64`](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate-linux-x86_64) (20 MB) | One executable to `chmod +x` and run |
-| **macOS** | not published yet — build the DMG on a Mac with `./release.sh` | An app bundle to drag into Applications |
 
 The download is the metered build: ten free translations a day, and Pro to
 lift the limit — see [The free allowance and Pro](#the-free-allowance-and-pro).
