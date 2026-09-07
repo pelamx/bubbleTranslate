@@ -5,7 +5,12 @@
 //! 1. **Accessibility API** — ask the focused UI element for `AXSelectedText`.
 //!    Clean and instant, and it never touches the pasteboard. Native Cocoa
 //!    apps, Safari and most text fields answer this.
-//! 2. **Synthetic Cmd+C** — post a command-C keystroke and watch the general
+//! 2. **Copy-on-select** — some interfaces put the selection on the pasteboard
+//!    themselves as the gesture ends, and leave nothing selected behind: a
+//!    terminal set to copy on select, and any full-screen TUI that takes the
+//!    mouse over from the terminal it runs in. Cmd+C would come back empty
+//!    there, but the text is already on the pasteboard.
+//! 3. **Synthetic Cmd+C** — post a command-C keystroke and watch the general
 //!    pasteboard's change count. Terminal.app, most PDF viewers and Electron
 //!    apps expose nothing over AX but all copy just fine, so this is what
 //!    makes "anywhere" actually mean anywhere. The previous pasteboard text is
@@ -18,7 +23,7 @@ use std::time::{Duration, Instant};
 use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::string::{CFString, CFStringRef};
-use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, EventField};
+use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, EventField};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
 use objc2_foundation::NSString;
@@ -86,7 +91,7 @@ pub fn readiness() -> Readiness {
 ///
 /// `allow_clipboard` gates the Cmd+C strategy: with it off, apps that don't
 /// speak AX simply return nothing instead of having their pasteboard borrowed.
-pub fn selected_text(allow_clipboard: bool) -> Option<Capture> {
+pub fn selected_text(allow_clipboard: bool, clipboard_before: Option<isize>) -> Option<Capture> {
     if let Some(text) = accessibility_selection() {
         let trimmed = text.trim();
         if !trimmed.is_empty() {
@@ -99,10 +104,40 @@ pub fn selected_text(allow_clipboard: bool) -> Option<Capture> {
     if !allow_clipboard {
         return None;
     }
+
+    // Checked before Cmd+C rather than after: where it applies, Cmd+C has
+    // nothing left to copy and would only spend the full budget failing, and
+    // the keystroke would land in an interface that never asked for it.
+    // Trusting the pasteboard only when it moved *during this gesture* is what
+    // keeps an unrelated, older clipboard from being translated on a stray
+    // double-click.
+    if let Some(before) = clipboard_before {
+        let pasteboard = NSPasteboard::generalPasteboard();
+        if pasteboard.changeCount() != before {
+            if let Some(text) = read_pasteboard_string(&pasteboard) {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    crate::trace!("clipboard the app copied it itself during the gesture");
+                    return Some(Capture {
+                        text: trimmed.to_string(),
+                        via: CaptureSource::Clipboard,
+                    });
+                }
+            }
+        }
+    }
+
     clipboard_selection().map(|text| Capture {
         text,
         via: CaptureSource::Clipboard,
     })
+}
+
+/// The general pasteboard's change count, sampled when a gesture begins so the
+/// capture above can tell a selection the app copied itself from the clipboard
+/// the user already had.
+pub fn pasteboard_change_count() -> isize {
+    NSPasteboard::generalPasteboard().changeCount()
 }
 
 // -- Strategy 1: Accessibility ---------------------------------------------
@@ -207,8 +242,25 @@ fn clipboard_selection() -> Option<String> {
 /// while the cost of giving up too early is a selection that silently vanishes.
 const COPY_BUDGET: Duration = Duration::from_millis(1200);
 
+/// Virtual keycode for the left Command key.
+const KEYCODE_COMMAND: u16 = 55;
+
 fn post_command_c() -> bool {
     let Ok(source) = CGEventSource::new(CGEventSourceStateID::CombinedSessionState) else {
+        return false;
+    };
+
+    // The Command key is pressed and released for real, as its own pair of
+    // flagsChanged events, rather than only setting the modifier bit on the C
+    // keypress. Native Cocoa apps accept the bit on its own, but Chromium —
+    // and so every Electron app, VS Code's terminal included — tracks modifier
+    // state from these events and treats a C with nothing but the bit set as a
+    // plain "c" keystroke: no copy, and a stray character typed into whatever
+    // was focused.
+    let Ok(cmd_down) = CGEvent::new_keyboard_event(source.clone(), KEYCODE_COMMAND, true) else {
+        return false;
+    };
+    let Ok(cmd_up) = CGEvent::new_keyboard_event(source.clone(), KEYCODE_COMMAND, false) else {
         return false;
     };
     let Ok(down) = CGEvent::new_keyboard_event(source.clone(), KEYCODE_C, true) else {
@@ -218,15 +270,28 @@ fn post_command_c() -> bool {
         return false;
     };
 
-    for event in [&down, &up] {
-        event.set_flags(CGEventFlags::CGEventFlagCommand);
+    cmd_down.set_type(CGEventType::FlagsChanged);
+    cmd_up.set_type(CGEventType::FlagsChanged);
+    cmd_down.set_flags(CGEventFlags::CGEventFlagCommand);
+    // Releasing Command leaves no modifiers held.
+    cmd_up.set_flags(CGEventFlags::CGEventFlagNull);
+    down.set_flags(CGEventFlags::CGEventFlagCommand);
+    up.set_flags(CGEventFlags::CGEventFlagCommand);
+
+    for event in [&cmd_down, &down, &up, &cmd_up] {
         event.set_integer_value_field(EventField::EVENT_SOURCE_USER_DATA, SYNTHETIC_MARKER);
     }
 
+    cmd_down.post(CGEventTapLocation::HID);
+    // Let the modifier land before the key that depends on it; a chord posted
+    // in one burst is read as an unmodified keypress by some apps.
+    std::thread::sleep(Duration::from_millis(12));
     down.post(CGEventTapLocation::HID);
     // A gap between down and up; some apps ignore a zero-duration keypress.
     std::thread::sleep(Duration::from_millis(12));
     up.post(CGEventTapLocation::HID);
+    std::thread::sleep(Duration::from_millis(12));
+    cmd_up.post(CGEventTapLocation::HID);
     true
 }
 

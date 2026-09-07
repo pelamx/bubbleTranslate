@@ -59,6 +59,14 @@ pub struct Trigger {
     /// a compositor without a private one this is genuinely unknowable and the
     /// bubble falls back to a screen corner.
     pub at: Option<(f64, f64)>,
+    /// The clipboard's change count when the gesture began, where the platform
+    /// can sample one.
+    ///
+    /// It is how the capture tells a selection the interface copied *itself*
+    /// from the clipboard the user already had: only a clipboard that moved
+    /// during this gesture is the selection. `None` for a gesture with no
+    /// press to sample at, such as a shift- or select-all selection.
+    pub clipboard_before: Option<isize>,
 }
 
 /// Whether the pointer is inside `rect`, which is given in the same

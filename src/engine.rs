@@ -273,7 +273,15 @@ fn run(
                 (last_text.clone(), last_at, last_via, false)
             }
             Request::Selection(trigger) => {
-                let Some(capture) = capture::selected_text(cfg.clipboard_fallback) else {
+                // Applied here rather than in the tap callback, which must not
+                // touch the config mutex.
+                if !cfg.auto_translate {
+                    crate::trace!("skip      auto-translate is off");
+                    continue;
+                }
+                let Some(capture) =
+                    capture::selected_text(cfg.clipboard_fallback, trigger.clipboard_before)
+                else {
                     crate::trace!("capture   nothing (AX empty, clipboard produced nothing)");
                     continue;
                 };
@@ -441,7 +449,10 @@ mod tests {
     use super::*;
 
     fn selection(x: f64) -> Request {
-        Request::Selection(Trigger { at: Some((x, 0.0)) })
+        Request::Selection(Trigger {
+            at: Some((x, 0.0)),
+            clipboard_before: None,
+        })
     }
 
     /// The regression this seam exists for: a spent allowance still answers.
@@ -496,7 +507,14 @@ mod tests {
             std::thread::sleep(Duration::from_millis(500));
         });
 
-        let settled = settle(&rx, Trigger { at: Some((0.0, 0.0)) }, Duration::from_millis(100));
+        let settled = settle(
+            &rx,
+            Trigger {
+                at: Some((0.0, 0.0)),
+                clipboard_before: None,
+            },
+            Duration::from_millis(100),
+        );
         let elapsed = started.elapsed();
 
         match settled {
@@ -520,7 +538,14 @@ mod tests {
             drop(tx);
         });
 
-        let settled = settle(&rx, Trigger { at: Some((7.0, 0.0)) }, Duration::from_millis(50));
+        let settled = settle(
+            &rx,
+            Trigger {
+                at: Some((7.0, 0.0)),
+                clipboard_before: None,
+            },
+            Duration::from_millis(50),
+        );
         assert!(started.elapsed() < Duration::from_millis(250));
         assert!(matches!(settled, Settled::Trigger(t) if t.at == Some((7.0, 0.0))));
     }
@@ -535,7 +560,14 @@ mod tests {
             std::thread::sleep(Duration::from_millis(200));
         });
 
-        let settled = settle(&rx, Trigger { at: None }, Duration::from_millis(100));
+        let settled = settle(
+            &rx,
+            Trigger {
+                at: None,
+                clipboard_before: None,
+            },
+            Duration::from_millis(100),
+        );
         assert!(matches!(settled, Settled::Superseded(Request::Retranslate)));
     }
 }

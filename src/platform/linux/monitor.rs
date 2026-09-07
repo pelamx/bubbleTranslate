@@ -82,6 +82,10 @@ pub fn spawn(on_trigger: impl Fn(Trigger) + Send + 'static) -> std::io::Result<(
                 capture::latch(text);
                 on_trigger(Trigger {
                     at: cursor::position(),
+                    // The X11 and Wayland readers below take the selection
+                    // directly, so there is no copy of our own to tell apart
+                    // from one the interface made.
+                    clipboard_before: None,
                 });
             };
 
