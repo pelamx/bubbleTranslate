@@ -5,7 +5,7 @@
 // it does is decide whether a licence key still entitles a machine to have its
 // counter lifted, and say so in a token the app can check on its own for up to
 // thirty days. If this service is down, every install degrades to the free
-// trial rather than to a broken app.
+// daily allowance rather than to a broken app.
 //
 // Two processors, split by where the buyer is: PayTR settles in lira for
 // Turkey, Paddle acts as merchant of record everywhere else. Which one a

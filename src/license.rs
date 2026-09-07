@@ -1,4 +1,4 @@
-//! The free trial, and the signed entitlement that lifts it.
+//! The free daily allowance, and the signed entitlement that lifts it.
 //!
 //! There are no accounts here and no passwords. A purchase produces a licence
 //! key, the key is exchanged once for a short-lived token signed by the
@@ -22,12 +22,13 @@ use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Translations before a subscription is needed — once, not per day.
+/// Translations a day before a subscription is needed. The count comes back
+/// at the user's local midnight — see [`crate::quota`].
 ///
 /// Deliberately also carried in the token as `lim`, so this is only the
 /// fallback for an install that has never talked to the service. Changing the
 /// number for everyone is a server-side edit, not a release.
-pub const FREE_TRIAL_TRANSLATIONS: u32 = 10;
+pub const FREE_DAILY_TRANSLATIONS: u32 = 10;
 
 /// What Pro costs, as the app says it out loud. Kept here rather than in the
 /// window so the bubble and the account panel cannot drift apart from each
@@ -142,10 +143,8 @@ pub struct Entitlement {
     /// How Pro is billed, when the service said. `None` on the free tier and
     /// on a token minted before this claim existed.
     pub cycle: Option<Cycle>,
-    /// Translations in total on the free trial, or `None` for unlimited.
-    ///
-    /// Not a rate: this is the whole allowance, and it does not come back. See
-    /// [`crate::quota`] for why that is the deliberate shape.
+    /// Translations a day on the free tier, or `None` for unlimited. See
+    /// [`crate::quota`] for what counts against it and when it resets.
     pub limit: Option<u32>,
     /// Unix seconds at which the token stops being valid. 0 on the free tier.
     pub exp: u64,
@@ -156,7 +155,7 @@ impl Entitlement {
         Self {
             plan: Plan::Free,
             cycle: None,
-            limit: Some(FREE_TRIAL_TRANSLATIONS),
+            limit: Some(FREE_DAILY_TRANSLATIONS),
             exp: 0,
         }
     }
@@ -305,7 +304,7 @@ impl Claims {
             limit: match (plan, self.lim) {
                 (_, Some(n)) => Some(n),
                 (Plan::Pro, None) => None,
-                (Plan::Free, None) => Some(FREE_TRIAL_TRANSLATIONS),
+                (Plan::Free, None) => Some(FREE_DAILY_TRANSLATIONS),
             },
             exp: self.exp,
         }
@@ -746,11 +745,11 @@ mod tests {
         assert_eq!(claims("pro").entitlement().limit, None);
         assert_eq!(
             claims("free").entitlement().limit,
-            Some(FREE_TRIAL_TRANSLATIONS),
+            Some(FREE_DAILY_TRANSLATIONS),
         );
         assert_eq!(
             claims("nonsense").entitlement().limit,
-            Some(FREE_TRIAL_TRANSLATIONS),
+            Some(FREE_DAILY_TRANSLATIONS),
         );
     }
 

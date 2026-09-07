@@ -66,15 +66,14 @@ pub enum UiEvent {
     ManualFailed(Vec<(Provider, TranslateError)>),
     /// Per-provider health, in the order they were probed.
     ProviderStatus(Vec<(Provider, Result<String, String>)>),
-    /// The free trial is spent. Carries the anchor so the bubble appears
-    /// exactly where the translation would have.
+    /// Today's free allowance is spent. Carries the anchor so the bubble
+    /// appears exactly where the translation would have.
     Capped {
         at: Option<(f64, f64)>,
         limit: u32,
     },
-    /// The same, for the main window's translate box. Not throttled the way
-    /// the bubble is: the user pressed a button and is owed an answer every
-    /// time they press it.
+    /// The same, for the main window's translate box. The user pressed a
+    /// button and is owed an answer every time they press it.
     ManualCapped { used: u32, limit: u32 },
 }
 
@@ -445,7 +444,7 @@ mod tests {
         Request::Selection(Trigger { at: Some((x, 0.0)) })
     }
 
-    /// The regression this seam exists for: a spent trial still answers.
+    /// The regression this seam exists for: a spent allowance still answers.
     ///
     /// This decision once read a throttled upgrade prompt as permission to
     /// send nothing at all, so for 59 minutes out of every 60, selecting text
@@ -453,7 +452,7 @@ mod tests {
     /// reported as one. The throttle is gone, but the seam stays: a refusal
     /// has to reach the screen, at the place the translation would have been.
     #[test]
-    fn a_spent_trial_still_answers_the_gesture() {
+    fn a_spent_allowance_still_answers_the_gesture() {
         let spent = Verdict::Capped { used: 10, limit: 10 };
         match gate(spent, Some((120.0, 340.0))) {
             Gate::Refuse(UiEvent::Capped { at, limit }) => {
@@ -462,7 +461,7 @@ mod tests {
                 assert_eq!(at, Some((120.0, 340.0)));
                 assert_eq!(limit, 10);
             }
-            _ => panic!("a spent trial produced no bubble at all"),
+            _ => panic!("a spent allowance produced no bubble at all"),
         }
     }
 

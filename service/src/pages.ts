@@ -12,6 +12,11 @@
 
 import type { Cycle } from "./env";
 
+/// What the free tier allows per day. Display only: the number the client
+/// enforces is `FREE_DAILY_TRANSLATIONS` in `src/license.rs`, and this one has
+/// to say the same thing or the page and the bubble will disagree.
+const FREE_DAILY_TRANSLATIONS = 10;
+
 export const escapeHtml = (value: unknown): string =>
   String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -65,6 +70,12 @@ const STYLE = `
   .plan .name { font-size: 13px; color: #b8b8b8; }
   .plan .price { font-size: 24px; font-weight: 600; margin: 4px 0 2px; }
   .plan .note { font-size: 12px; color: #78d28c; }
+  .tiers { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; margin: 18px 0 6px; }
+  @media (max-width: 520px) { .tiers { grid-template-columns: 1fr; } }
+  .tier { border: 1px solid #3a3c41; border-radius: 10px; padding: 12px 14px; font-size: 13px; }
+  .tier .name { color: #b8b8b8; font-weight: 600; margin-bottom: 4px; }
+  .tier.pro { border-color: #78d28c; }
+  .tier.pro .name { color: #78d28c; }
   label.field { display: block; font-size: 13px; color: #b8b8b8; margin: 0 0 6px; }
   input[type=text], input[type=email] {
     width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid #3a3c41;
@@ -161,13 +172,40 @@ export function buyPage(opts: BuyOptions): Response {
   // was bought. Hence `heading` and `plans` separately rather than one block:
   // the Paddle page reads the selection with JavaScript and does not care, but
   // this one is a plain form post and cares a great deal.
+  // The free tier is described here, next to Pro, because this is the page
+  // the bubble sends someone to at the moment they hit the wall — the one
+  // place they will read what the wall is and what removes it.
+  const tiers = opts.turkey
+    ? `<div class="tiers">
+         <div class="tier">
+           <div class="name">Ücretsiz</div>
+           Günde ${FREE_DAILY_TRANSLATIONS} çeviri, tek cihaz. Sayaç her gece
+           yarısı sıfırlanır; sonrasında devam etmek için Pro gerekir.
+         </div>
+         <div class="tier pro">
+           <div class="name">Pro</div>
+           Sınırsız çeviri, üç cihaz. Günlük limit kalkar.
+         </div>
+       </div>`
+    : `<div class="tiers">
+         <div class="tier">
+           <div class="name">Free</div>
+           ${FREE_DAILY_TRANSLATIONS} translations a day, one machine. The count
+           comes back at midnight; past it, you need Pro to keep going.
+         </div>
+         <div class="tier pro">
+           <div class="name">Pro</div>
+           Unlimited translations, three devices. No daily limit.
+         </div>
+       </div>`;
   const heading = `
     <h1>bubbleTranslate Pro</h1>
     <p>${
       opts.turkey
-        ? "Sınırsız çeviri, üç cihaz. Ödeme PayTR üzerinden alınır."
-        : "Unlimited translations, three devices. Billed through Paddle."
-    }</p>`;
+        ? "Ücretsiz sürüm günde on çeviriyle sınırlıdır. Pro sınırı kaldırır; ödeme PayTR üzerinden alınır."
+        : "The free version is limited to ten translations a day. Pro removes the limit; billed through Paddle."
+    }</p>
+    ${tiers}`;
   const plans = `
     <div class="plans">
       ${planCard("monthly", opts.monthly, false, opts.turkey ? "aylık" : "billed monthly")}

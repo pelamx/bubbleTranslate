@@ -68,8 +68,8 @@ pub struct MainState {
     pub recent: Vec<RecentEntry>,
 
     // Account.
-    /// Set when the translate box was refused for want of trial, as
-    /// (used, limit). Cleared on the next attempt.
+    /// Set when the translate box was refused for want of today's allowance,
+    /// as (used, limit). Cleared on the next attempt.
     pub capped: Option<(u32, u32)>,
     /// The licence key being typed. Separate from the saved one in the config
     /// so a half-typed key is never written to disk, but seeded from it at
@@ -343,13 +343,13 @@ fn translate_box(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
     if let Some((_, limit)) = state.capped {
         ui.add_space(8.0);
         ui.label(
-            egui::RichText::new(format!("All {limit} free translations are used"))
+            egui::RichText::new(format!("Today's {limit} free translations are used"))
                 .size(13.0)
                 .color(WARN_AMBER),
         );
         ui.label(
             egui::RichText::new(format!(
-                "Pro removes the limit — {} or {}.",
+                "They come back at midnight. Pro removes the limit — {} or {}.",
                 license::PRICE_MONTHLY,
                 license::PRICE_YEARLY,
             ))
@@ -643,9 +643,9 @@ fn account(
         )
     };
     let (used, limit, left, grandfathered) = {
-        let quota = licensing.quota.lock().unwrap();
+        let mut quota = licensing.quota.lock().unwrap();
         (
-            quota.used(),
+            quota.used_today(),
             quota.limit(&entitlement),
             quota.remaining(&entitlement),
             quota.is_grandfathered(),
@@ -675,15 +675,15 @@ fn account(
             if grandfathered {
                 ui.label(
                     egui::RichText::new(
-                        "This install predates the free trial, so the trial does not \
-                         apply to it.",
+                        "This install predates the free allowance, so the limit does \
+                         not apply to it.",
                     )
                     .size(11.0)
                     .color(TEXT_MUTED),
                 );
             }
             ui.label(
-                egui::RichText::new(format!("{used} translated so far"))
+                egui::RichText::new(format!("{used} translated today"))
                     .size(11.5)
                     .color(TEXT_MUTED),
             );
@@ -693,19 +693,19 @@ fn account(
             let spent = left == 0;
             ui.label(
                 egui::RichText::new(if spent {
-                    format!("● Free trial — all {limit} translations used")
+                    format!("● Free — all {limit} of today's translations used")
                 } else {
-                    format!("● Free trial — {left} of {limit} translations left")
+                    format!("● Free — {left} of {limit} translations left today")
                 })
                 .size(13.0)
                 .color(if spent { WARN_AMBER } else { TEXT_SECONDARY }),
             );
             ui.label(
                 egui::RichText::new(if spent {
-                    "The trial does not reset. Pro removes the limit."
+                    "The count comes back at midnight. Pro removes the limit."
                 } else {
-                    "The trial is once, not per day. Re-reading something already \
-                     translated does not count."
+                    "Ten a day, counted at your local midnight. Re-reading something \
+                     already translated does not count."
                 })
                 .size(11.0)
                 .color(TEXT_MUTED),

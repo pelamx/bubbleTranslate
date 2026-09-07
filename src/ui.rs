@@ -94,7 +94,7 @@ enum State {
     Failed {
         errors: Vec<(Provider, TranslateError)>,
     },
-    /// The free trial is spent. Appears exactly where a translation would
+    /// Today's free allowance is spent. Appears exactly where a translation would
     /// have, and always carries the way past it.
     Capped {
         limit: u32,
@@ -729,28 +729,25 @@ impl BubbleApp {
             State::Capped { limit } => {
                 let limit = *limit;
                 ui.label(
-                    egui::RichText::new(format!("You have used all {limit} free translations"))
+                    egui::RichText::new(format!("You have used today's {limit} free translations"))
                         .size(14.0)
                         .color(TEXT_PRIMARY),
                 );
                 ui.add_space(3.0);
                 ui.label(
                     egui::RichText::new(format!(
-                        "Pro removes the limit — {} or {}.",
+                        "They come back at midnight. Pro removes the limit — {} or {}.",
                         license::PRICE_MONTHLY,
                         license::PRICE_YEARLY,
                     ))
                     .size(12.0)
                     .color(TEXT_MUTED),
                 );
-                // The button is on every refusal, not one an hour.
-                //
-                // Throttling it made sense against a daily allowance: the wall
-                // came down at midnight, so "Not now" was a real answer and
-                // repeating the offer would have been nagging. A trial has no
-                // midnight. Buying is the only way forward, and a bubble that
-                // states the problem while hiding the one control that solves
-                // it is a dead end wearing an explanation.
+                // The button is on every refusal, not one an hour. "Not now"
+                // is a real answer against a daily allowance, but a bubble
+                // that states the problem while hiding the one control that
+                // solves it is a dead end wearing an explanation — and the
+                // "Not now" beside it is what keeps this from being a nag.
                 ui.add_space(9.0);
                 ui.horizontal(|ui| {
                     if ui.button("Upgrade to Pro").clicked() {

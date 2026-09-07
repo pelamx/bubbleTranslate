@@ -12,18 +12,14 @@ which is a surprisingly large difference: see
 
 | | Download | What you get |
 |---|---|---|
-| **macOS** | [`bubbleTranslate-free.dmg`](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate-free.dmg) (7 MB) | An app bundle to drag into Applications |
-| **Linux** | [`bubbleTranslate-free-linux-x86_64`](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate-free-linux-x86_64) (15 MB) | One executable to `chmod +x` and run |
+| **Linux** | [`bubbleTranslate-linux-x86_64`](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate-linux-x86_64) (20 MB) | One executable to `chmod +x` and run |
+| **macOS** | not published yet — build the DMG on a Mac with `./release.sh` | An app bundle to drag into Applications |
 
-These two are the **free version**: the last builds made before the free trial
-and Pro existed. They have no trial, no licence and no limit, and they are kept
-here under their own names so that publishing Pro cannot overwrite them. What
-the source tree builds today is the Pro version — see
-[The free trial and Pro](#the-free-trial-and-pro).
-
-The two never collide, so this repo carries both. Neither download needs a Rust
-toolchain; building from source is covered under each and is the better route
-on Linux if your distribution is not a recent one — see the note on glibc.
+The download is the metered build: ten free translations a day, and Pro to
+lift the limit — see [The free allowance and Pro](#the-free-allowance-and-pro).
+It needs no Rust toolchain; building from source is covered below and is the
+better route on Linux if your distribution is not a recent one — see the note
+on glibc.
 
 ### macOS — from the DMG
 
@@ -73,9 +69,9 @@ no permission to grant — the desktop publishes the selection itself. It just
 needs the executable bit:
 
 ```sh
-chmod +x bubbleTranslate-free-linux-x86_64
-./bubbleTranslate-free-linux-x86_64 --check     # confirms the backends answer
-./bubbleTranslate-free-linux-x86_64
+chmod +x bubbleTranslate-linux-x86_64
+./bubbleTranslate-linux-x86_64 --check     # confirms the backends answer
+./bubbleTranslate-linux-x86_64
 ```
 
 `--check` runs one translation through each provider and prints the result
@@ -87,7 +83,7 @@ against glibc 2.43 or newer — `atan2f@GLIBC_2.43` and friends, pulled in by th
 maths in the bubble's layout. On anything older the loader refuses it outright:
 
 ```
-version `GLIBC_2.43' not found (required by ./bubbleTranslate-free-linux-x86_64)
+version `GLIBC_2.43' not found (required by ./bubbleTranslate-linux-x86_64)
 ```
 
 Ubuntu 24.04 (glibc 2.39) and Debian 13 (2.41) are both below that line. If you
@@ -102,7 +98,7 @@ To install it properly — on your `PATH`, in the application menu, with an icon
 — take the launcher and icon from this repo alongside it:
 
 ```sh
-install -Dm755 bubbleTranslate-free-linux-x86_64 ~/.local/bin/bubbleTranslate
+install -Dm755 bubbleTranslate-linux-x86_64 ~/.local/bin/bubbleTranslate
 install -Dm644 linux/bubbleTranslate.desktop ~/.local/share/applications/bubbleTranslate.desktop
 install -Dm644 linux/bubbleTranslate.svg ~/.local/share/icons/hicolor/scalable/apps/bubbleTranslate.svg
 ```
@@ -232,29 +228,27 @@ started invisibly and cannot reach is worse than an unwanted window, so
 - **Languages** — target and source language
 - **Providers** — reorder the chain with ↑↓, set the DeepL key and MyMemory
   email, and **Test providers** to see which backends answer right now
-- **Account** — the plan, what is left of the free trial, and the box to
+- **Account** — the plan, what is left of today's allowance, and the box to
   paste a licence key into
 - **Behaviour** — bubble text size, auto-hide delay, settle delay, length cap
 - **Recent** — what the bubble has translated this session, with copy buttons
 
 Every change saves immediately to the config file.
 
-## The free trial and Pro
+## The free allowance and Pro
 
-Ten translations, free, once. Not per day — the trial does not reset, and the
-app says "trial" rather than "allowance" everywhere for that reason. After
-that the bubble still appears where the translation would have and says the
-trial is spent, with the button that lifts it. It does not fail silently, it
-does not stop responding to the gesture, and it does not hide the one control
-that solves the problem it is describing — there is no midnight to wait for, so
-every refusal carries the way past it.
+Ten translations a day, free. The count comes back at your local midnight.
+After the tenth, the bubble still appears where the translation would have and
+says today's allowance is spent, with the button that lifts it. It does not
+fail silently, it does not stop responding to the gesture, and it does not hide
+the one control that solves the problem it is describing.
 
 **Pro** removes the limit: unlimited translations on up to three machines,
 $2/month or $20/year. In Turkey it is billed in lira through PayTR; everywhere
 else through Paddle, which is the merchant of record. Which one you see is
 decided by where you are, and either page links to the other.
 
-What counts against the trial is deliberately narrow, because ten is a small
+What counts against the day is deliberately narrow, because ten is a small
 number and the bubble fires on every finished selection:
 
 | Counted | Not counted |
@@ -264,7 +258,7 @@ number and the bubble fires on every finished selection:
 | | Switching the target language on text already on screen |
 | | A selection too short or too long to translate at all |
 
-**An install that predates the trial keeps unlimited use** — the limit applies
+**An install that predates the allowance keeps unlimited use** — the limit applies
 to installs that meet it for the first time, and taking something away from
 people who already have it is the one thing this cannot undo.
 
@@ -272,12 +266,12 @@ There are no accounts and no passwords. A purchase produces a licence key,
 which is exchanged once for a signed token that is then checked locally
 against a key compiled into the binary. The licence service is never on the
 path of a translation and never sees one: Pro only lifts a counter, so the
-text you select goes to the providers exactly as it does on the free trial.
+text you select goes to the providers exactly as it does on the free tier.
 The token is good offline for up to 30 days between checks, and never outlives
 the subscription period it was issued against by more than a few days.
 
-The count itself is a single total. What you have translated is never written
-to disk, not even hashed — an app that reads whatever you highlight has no
+The count itself is a day number and a total. What you have translated is never
+written to disk, not even hashed — an app that reads whatever you highlight has no
 business leaving a record of it behind.
 
 To see where an install stands without opening a window:
@@ -286,10 +280,11 @@ To see where an install stands without opening a window:
 ./bubbleTranslate --license
 ```
 
-which prints the plan, the device id, and how much of the trial is left. It is
-the counterpart to `--check`: that one separates "the app is broken" from "the
-network is", and this one separates either from "the trial is spent", which
-from the outside looks identical — no bubble appears.
+which prints the plan, the device id, and how much of today's allowance is
+left. It is the counterpart to `--check`: that one separates "the app is
+broken" from "the network is", and this one separates either from "today's
+allowance is spent", which from the outside looks identical — no bubble
+appears.
 
 The service that issues and renews those tokens, and takes the payments, lives
 in [`service/`](service/). It runs locally with no domain and no payment

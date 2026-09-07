@@ -1,21 +1,20 @@
-//! The free trial, and what does and does not spend it.
+//! The daily allowance, and what does and does not spend it.
 //!
-//! Ten translations, once, for the life of the install. There is no daily
-//! refill: the trial is there to let someone find out whether the bubble is
-//! worth two dollars a month, and a wall that dissolves overnight never asks
-//! that question.
+//! Ten translations a day on the free tier. The count comes back at the
+//! user's midnight, so someone who runs out is never more than a night away
+//! from the free path — and Pro is there for anyone who does not want to wait.
 //!
-//! Which is exactly why *what counts* matters more than the number does. The
-//! bubble fires on every finished selection, so a user reading a PDF would
-//! burn the whole trial in under a minute if every trigger were charged. The
-//! rule is deliberately narrow: only a translation that was asked for and
-//! actually came back spends anything. Failures, language switches and
-//! re-reading the same sentence are all free.
+//! Ten is a small number, so *what counts* matters more than the number does.
+//! The bubble fires on every finished selection, which means a user reading a
+//! PDF would burn the day's allowance in under a minute if every trigger were
+//! charged. So the rule is deliberately narrow: only a translation that was
+//! asked for and actually came back spends anything. Failures, language
+//! switches and re-reading the same sentence are all free.
 //!
-//! What is written to disk is only the count: a total and the flags below. The
-//! list of what has already been translated is held in memory and never
-//! persisted — an app that reads whatever the user highlights has no business
-//! leaving a record of it behind, not even a hashed one.
+//! What is written to disk is only the count: a day number, a total, and the
+//! flags below. The list of what has already been translated today is held in
+//! memory and never persisted — an app that reads whatever the user highlights
+//! has no business leaving a record of it behind, not even a hashed one.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -26,9 +25,8 @@ use serde::{Deserialize, Serialize};
 use crate::license::{Entitlement, now};
 
 /// How many recently translated strings stay free to repeat. Enough to cover
-/// re-selecting a phrase while reading around it, and — now that the trial
-/// does not refill — enough that re-reading what you already paid for with it
-/// never costs a second time.
+/// re-selecting a phrase while reading around it; small enough that the whole
+/// day's work is not exempt.
 const RECENT_MEMORY: usize = 16;
 
 /// What to do with a selection that has already been captured.
@@ -37,11 +35,10 @@ pub enum Verdict {
     /// Translate it, and count it if it succeeds.
     Allow,
     /// Translate it, but do not count it — the same text was translated
-    /// before, and reading a sentence twice is one translation.
+    /// earlier today, and reading a sentence twice is one translation.
     Repeat,
-    /// The trial is spent. There is no third state: unlike the daily allowance
-    /// this replaced, the wall does not come down overnight, so every refusal
-    /// carries the way past it.
+    /// Today's allowance is spent. Every refusal carries the way past it: the
+    /// bubble says so and offers Pro, rather than going quiet until midnight.
     Capped { used: u32, limit: u32 },
 }
 
@@ -49,8 +46,8 @@ impl std::fmt::Display for Verdict {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Allow => write!(f, "allowed"),
-            Self::Repeat => write!(f, "repeat of translated text; free"),
-            Self::Capped { used, limit } => write!(f, "{used}/{limit} used; trial spent"),
+            Self::Repeat => write!(f, "repeat of today's text; free"),
+            Self::Capped { used, limit } => write!(f, "{used}/{limit} used today; capped"),
         }
     }
 }
@@ -59,13 +56,18 @@ impl std::fmt::Display for Verdict {
 /// selected, which is what keeps this file uninteresting if it is ever read.
 #[derive(Debug, Serialize, Deserialize)]
 struct Counter {
-    /// Translations spent from the trial, for the life of this install.
-    ///
-    /// There is no `day` beside it any more and no high-water mark: a counter
-    /// that never resets has nothing to protect against a clock moved
-    /// backwards, which removes the whole class of bug that logic existed for.
+    /// Days since the epoch, in local time — see [`local_day`]. Missing from
+    /// a counter written by the build that metered once per install; a zero
+    /// here is simply an old day, and the count rolls over on first read.
+    #[serde(default)]
+    day: i64,
+    /// Translations spent today.
     #[serde(default)]
     used: u32,
+    /// The furthest-forward day ever seen. A `day` behind this one means the
+    /// clock moved, not that time passed.
+    #[serde(default)]
+    high_water_day: i64,
     /// When this install first ran a metered build.
     #[serde(default)]
     first_seen: u64,
@@ -78,8 +80,11 @@ struct Counter {
 
 impl Default for Counter {
     fn default() -> Self {
+        let today = local_day();
         Self {
+            day: today,
             used: 0,
+            high_water_day: today,
             first_seen: now(),
             legacy_unlimited: false,
         }
@@ -88,8 +93,7 @@ impl Default for Counter {
 
 pub struct Quota {
     counter: Counter,
-    /// Hashes of what has been translated in this session. In memory only, on
-    /// purpose.
+    /// Hashes of what has been translated today. In memory only, on purpose.
     recent: Vec<u64>,
 }
 
@@ -101,11 +105,11 @@ impl Quota {
     /// existed. It has to be sampled before [`crate::config::Config::load`],
     /// which writes the file it is asking about.
     ///
-    /// A counter written by a build that metered per day is read here without
-    /// ceremony: `day` and `high_water_day` are simply not fields any more, and
-    /// `used` carries over. Someone who had spent three of that day's five
-    /// arrives with three of ten spent, which is the generous reading and the
-    /// only one that does not punish an existing user for upgrading.
+    /// A counter written by the build that metered once per install has no
+    /// `day`, so it reads as day zero and [`Self::roll`] starts a fresh day
+    /// from it. Someone who had spent their whole one-off trial arrives with
+    /// today's ten in hand, which is the generous reading and the only one
+    /// that does not punish an existing user for upgrading.
     pub fn load(config_existed: bool) -> Self {
         let mut quota = match std::fs::read_to_string(path()).ok() {
             Some(raw) => match serde_json::from_str::<Counter>(&raw) {
@@ -141,6 +145,7 @@ impl Quota {
             quota.counter.first_seen = now();
             quota.save();
         }
+        quota.roll();
         quota
     }
 
@@ -154,7 +159,7 @@ impl Quota {
         }
     }
 
-    /// Translations in total, or `None` for unlimited.
+    /// Translations a day, or `None` for unlimited.
     pub fn limit(&self, entitlement: &Entitlement) -> Option<u32> {
         if self.counter.legacy_unlimited {
             return None;
@@ -162,12 +167,16 @@ impl Quota {
         entitlement.limit
     }
 
-    pub fn used(&self) -> u32 {
+    /// Translations spent today. `&mut` because asking rolls the day over
+    /// first: a count read across midnight would otherwise be yesterday's.
+    pub fn used_today(&mut self) -> u32 {
+        self.roll();
         self.counter.used
     }
 
-    /// What is left of the trial, or `None` on an unlimited install.
-    pub fn remaining(&self, entitlement: &Entitlement) -> Option<u32> {
+    /// What is left of today's allowance, or `None` on an unlimited install.
+    pub fn remaining(&mut self, entitlement: &Entitlement) -> Option<u32> {
+        self.roll();
         self.limit(entitlement)
             .map(|limit| limit.saturating_sub(self.counter.used))
     }
@@ -178,10 +187,12 @@ impl Quota {
 
     /// Whether this selection may be translated, and whether it will be charged.
     ///
-    /// Takes `&self`: deciding costs nothing and records nothing. Only
-    /// [`Self::record`] moves the counter, and only for a translation that
+    /// Deciding records nothing beyond the day rolling over. Only
+    /// [`Self::record`] moves the count, and only for a translation that
     /// actually came back.
-    pub fn verdict(&self, text: &str, entitlement: &Entitlement) -> Verdict {
+    pub fn verdict(&mut self, text: &str, entitlement: &Entitlement) -> Verdict {
+        self.roll();
+
         let Some(limit) = self.limit(entitlement) else {
             return Verdict::Allow;
         };
@@ -200,6 +211,7 @@ impl Quota {
     /// Records a translation that actually came back. Called only on success,
     /// and only for a [`Verdict::Allow`].
     pub fn record(&mut self, text: &str) {
+        self.roll();
         self.counter.used = self.counter.used.saturating_add(1);
         self.recent.push(digest(text));
         if self.recent.len() > RECENT_MEMORY {
@@ -208,11 +220,31 @@ impl Quota {
         self.save();
     }
 
-    /// Hands the trial back, which is what activating a licence and then
-    /// removing it must not silently do — see the test. Only ever called from
-    /// the development helper.
+    /// Moves the counter to today, if today is later than the day it is on.
+    ///
+    /// A day number *behind* the high-water mark means the system clock went
+    /// backwards — a timezone change, an NTP correction, or someone hoping for
+    /// a fresh ten. The count is kept in that case, and it is kept again when
+    /// the clock catches back up, because the high-water mark is what the
+    /// comparison is against rather than the current day.
+    fn roll(&mut self) {
+        let today = local_day();
+        if today == self.counter.day {
+            return;
+        }
+        if today > self.counter.high_water_day {
+            self.counter.used = 0;
+            self.counter.high_water_day = today;
+            self.recent.clear();
+        }
+        self.counter.day = today;
+        self.save();
+    }
+
+    /// Hands today's allowance back without waiting for midnight. Only ever
+    /// called from the development helper.
     #[cfg(debug_assertions)]
-    pub fn reset_trial(&mut self) {
+    pub fn reset_today(&mut self) {
         self.counter.used = 0;
         self.recent.clear();
         self.save();
@@ -221,7 +253,7 @@ impl Quota {
     fn save(&self) {
         // Tests build counters directly and must never reach the real file —
         // running `cargo test` should not spend, reset, or resurrect anybody's
-        // trial.
+        // allowance.
         if cfg!(test) {
             return;
         }
@@ -249,6 +281,32 @@ pub fn path() -> PathBuf {
         .join("usage.json")
 }
 
+/// Days since the epoch in local time, so the allowance resets at the user's
+/// midnight rather than at UTC's.
+///
+/// Stored as a number rather than a date string so that comparing two of them
+/// is unambiguous no matter how the date would have been formatted.
+fn local_day() -> i64 {
+    let unix = now() as i64;
+    (unix + local_offset(unix)) / 86_400
+}
+
+/// Seconds east of UTC at the given moment, which is what makes this correct
+/// across a daylight-saving change rather than only at the moment it is read.
+fn local_offset(unix: i64) -> i64 {
+    // SAFETY: `localtime_r` fills a `tm` the caller owns and is the reentrant
+    // form of `localtime`, so nothing here reads or writes shared state. A
+    // null return means the conversion failed, and UTC is the honest fallback.
+    unsafe {
+        let time = unix as libc::time_t;
+        let mut tm: libc::tm = std::mem::zeroed();
+        if libc::localtime_r(&time, &mut tm).is_null() {
+            return 0;
+        }
+        tm.tm_gmtoff as i64
+    }
+}
+
 fn digest(text: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     text.trim().hash(&mut hasher);
@@ -258,17 +316,23 @@ fn digest(text: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::license::{FREE_TRIAL_TRANSLATIONS, Plan};
+    use crate::license::{FREE_DAILY_TRANSLATIONS, Plan};
 
-    fn quota(used: u32) -> Quota {
+    fn quota(used: u32, day: i64, high_water: i64) -> Quota {
         Quota {
             counter: Counter {
+                day,
                 used,
+                high_water_day: high_water,
                 first_seen: 0,
                 legacy_unlimited: false,
             },
             recent: Vec::new(),
         }
+    }
+
+    fn today_quota(used: u32) -> Quota {
+        quota(used, local_day(), local_day())
     }
 
     fn free() -> Entitlement {
@@ -284,73 +348,87 @@ mod tests {
         }
     }
 
-    /// The trial runs out, and says so with the numbers the bubble shows.
+    /// The allowance runs out, and says so with the numbers the bubble shows.
     #[test]
-    fn the_tenth_translation_is_the_last_free_one() {
-        let mut q = quota(0);
-        for n in 0..FREE_TRIAL_TRANSLATIONS {
+    fn the_tenth_translation_is_the_last_free_one_today() {
+        let mut q = today_quota(0);
+        for n in 0..FREE_DAILY_TRANSLATIONS {
             assert_eq!(q.verdict(&format!("text {n}"), &free()), Verdict::Allow);
             q.record(&format!("text {n}"));
         }
         assert!(matches!(
             q.verdict("something new", &free()),
-            Verdict::Capped { used: 10, limit: 10, .. },
+            Verdict::Capped { used: 10, limit: 10 },
         ));
     }
 
-    /// The trial does not come back tomorrow. This is the whole difference
-    /// between this file and the daily allowance it replaced, and with the
-    /// upgrade throttle gone it is now literally true of the code: nothing in
-    /// this file reads a clock at all, so there is no moment at which it could
-    /// decide to be generous again.
+    /// A new day restores the allowance — reloaded the way a launch tomorrow
+    /// would be, from what was written.
     #[test]
-    fn a_spent_trial_stays_spent() {
-        let q = quota(FREE_TRIAL_TRANSLATIONS);
-        assert!(matches!(q.verdict("one", &free()), Verdict::Capped { .. }));
-
-        // Reload the way a launch tomorrow would, from what was written.
+    fn tomorrow_starts_over() {
+        let today = local_day();
+        let mut q = quota(FREE_DAILY_TRANSLATIONS, today - 1, today - 1);
         let json = serde_json::to_string(&q.counter).unwrap();
-        let counter: Counter = serde_json::from_str(&json).unwrap();
-        let next_launch = Quota {
+        q.counter = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(q.verdict("anything", &free()), Verdict::Allow);
+        assert_eq!(q.used_today(), 0);
+        assert_eq!(q.remaining(&free()), Some(FREE_DAILY_TRANSLATIONS));
+    }
+
+    /// Winding the clock back does not hand out a second allowance — and the
+    /// count survives the clock catching up again.
+    #[test]
+    fn a_clock_moved_backwards_does_not_refill_the_allowance() {
+        let today = local_day();
+        let mut q = today_quota(FREE_DAILY_TRANSLATIONS);
+
+        // Yesterday, according to a clock that has been tampered with.
+        q.counter.day = today - 3;
+        q.roll();
+        assert_eq!(q.used_today(), FREE_DAILY_TRANSLATIONS, "winding back refilled it");
+
+        // And back to the real date, which is still not a new day.
+        q.counter.day = today - 3;
+        q.counter.high_water_day = today;
+        q.roll();
+        assert_eq!(q.used_today(), FREE_DAILY_TRANSLATIONS);
+        assert!(matches!(q.verdict("one", &free()), Verdict::Capped { .. }));
+    }
+
+    /// A counter written by the build that metered once per install still
+    /// loads. It has no day, so it reads as the distant past and today is a
+    /// fresh day for it: that install's spent trial becomes today's ten.
+    #[test]
+    fn a_one_off_trial_counter_from_an_older_build_becomes_a_fresh_day() {
+        let old = r#"{"used":10,"first_seen":1750000000,"legacy_unlimited":false}"#;
+        let counter: Counter = serde_json::from_str(old).expect("an old counter still parses");
+        assert_eq!(counter.day, 0);
+        let mut q = Quota {
             counter,
             recent: Vec::new(),
         };
-        assert_eq!(next_launch.used(), FREE_TRIAL_TRANSLATIONS);
-        assert!(matches!(
-            next_launch.verdict("two", &free()),
-            Verdict::Capped { .. },
-        ));
-    }
-
-    /// A counter written by a build that metered per day still loads, and its
-    /// day fields are simply gone rather than fatal.
-    #[test]
-    fn a_daily_counter_from_an_older_build_carries_its_count_over() {
-        let old = r#"{"day":20699,"used":3,"high_water_day":20699,
-                      "first_seen":1750000000,"legacy_unlimited":false,
-                      "prompted_at":0}"#;
-        let counter: Counter = serde_json::from_str(old).expect("an old counter still parses");
-        assert_eq!(counter.used, 3);
-        assert!(!counter.legacy_unlimited);
+        assert_eq!(q.verdict("anything", &free()), Verdict::Allow);
+        assert_eq!(q.used_today(), 0);
 
         // And the grandfathering flag survives, which matters far more: it is
         // the one thing in this file that cannot be reconstructed if lost.
-        let legacy = r#"{"day":1,"used":99,"high_water_day":1,"legacy_unlimited":true}"#;
+        let legacy = r#"{"used":99,"legacy_unlimited":true}"#;
         let counter: Counter = serde_json::from_str(legacy).unwrap();
         assert!(counter.legacy_unlimited);
     }
 
     /// Re-reading a sentence is one translation, not two. Without this, the
-    /// language picker and an idle re-selection both cost the user trial.
+    /// language picker and an idle re-selection both cost the user quota.
     #[test]
     fn re_selecting_the_same_text_is_free() {
-        let mut q = quota(0);
+        let mut q = today_quota(0);
         q.record("merhaba dünya");
-        // Spend the rest of the trial on other things.
-        for n in 0..(FREE_TRIAL_TRANSLATIONS - 1) {
+        // Spend the rest of the day on other things.
+        for n in 0..(FREE_DAILY_TRANSLATIONS - 1) {
             q.record(&format!("other {n}"));
         }
-        assert_eq!(q.used(), FREE_TRIAL_TRANSLATIONS);
+        assert_eq!(q.used_today(), FREE_DAILY_TRANSLATIONS);
         assert_eq!(q.verdict("merhaba dünya", &free()), Verdict::Repeat);
         // Whitespace differences are the same selection to a human.
         assert_eq!(q.verdict("  merhaba dünya  ", &free()), Verdict::Repeat);
@@ -360,42 +438,35 @@ mod tests {
         ));
     }
 
-    /// Every refusal carries the way past it.
-    ///
-    /// The allowance this replaced showed the upgrade button once an hour, so
-    /// as not to nag someone whose allowance would refill at midnight. A trial
-    /// has no midnight: buying is the only way forward, and a refusal that
-    /// hides it answers the gesture with a dead end.
+    /// Every refusal carries the numbers the bubble shows, every time. There
+    /// is no throttle to fall silent behind.
     #[test]
     fn every_refusal_offers_the_way_out() {
-        let q = quota(FREE_TRIAL_TRANSLATIONS);
-        for attempt in ["one", "two", "three"] {
-            assert!(
-                matches!(q.verdict(attempt, &free()), Verdict::Capped { .. }),
-                "{attempt} was not refused",
-            );
+        let mut q = today_quota(FREE_DAILY_TRANSLATIONS);
+        for n in 0..5 {
+            assert!(matches!(
+                q.verdict(&format!("try {n}"), &free()),
+                Verdict::Capped { used: 10, limit: 10 },
+            ));
         }
     }
 
-    /// What is left is what the account panel and the trial bubble both count
-    /// down, so an over-spent counter must not underflow into a huge number.
+    /// A count that somehow exceeds the limit shows zero left, not a wrap.
     #[test]
     fn remaining_never_underflows() {
-        assert_eq!(quota(0).remaining(&free()), Some(FREE_TRIAL_TRANSLATIONS));
-        assert_eq!(quota(4).remaining(&free()), Some(6));
-        assert_eq!(quota(FREE_TRIAL_TRANSLATIONS).remaining(&free()), Some(0));
-        assert_eq!(quota(9_000).remaining(&free()), Some(0));
-        assert_eq!(quota(0).remaining(&pro()), None);
+        let mut q = today_quota(FREE_DAILY_TRANSLATIONS + 5);
+        assert_eq!(q.remaining(&free()), Some(0));
+        assert_eq!(q.remaining(&pro()), None);
     }
 
     /// Pro is unlimited, and an install that predates metering stays unlimited
     /// whatever the entitlement says.
     #[test]
     fn unlimited_means_unlimited() {
-        let q = quota(9_000);
+        let mut q = today_quota(9_000);
         assert_eq!(q.verdict("anything", &pro()), Verdict::Allow);
 
-        let mut legacy = quota(9_000);
+        let mut legacy = today_quota(9_000);
         legacy.counter.legacy_unlimited = true;
         assert_eq!(legacy.limit(&free()), None);
         assert_eq!(legacy.verdict("anything", &free()), Verdict::Allow);

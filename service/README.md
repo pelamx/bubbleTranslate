@@ -6,7 +6,7 @@ and never sees one — all it decides is whether a licence key still entitles a
 machine to have its counter lifted, and it says so in a token the app then
 checks on its own for up to thirty days.
 
-If this service is down, every install degrades to the free trial rather than
+If this service is down, every install degrades to the free allowance rather than
 to a broken app. That is the reason the client was built to work before this
 existed, and the reason it should stay that way.
 
@@ -22,9 +22,9 @@ existed, and the reason it should stay that way.
 | Renews itself | no — fixed term | yes |
 | Tax and invoicing | yours | Paddle's, as merchant of record |
 
-The free tier is ten translations, once, for the life of the install — not per
-day. It does not reset, which is why the wording throughout the app says
-"trial" rather than "allowance". See `src/quota.rs` in the client.
+The free tier is ten translations a day, counted at the user's local midnight.
+The number travels in the token as `lim` and falls back to the compiled-in ten
+when there is no token. See `src/quota.rs` in the client.
 
 ### The two prices that are not in this repo
 
