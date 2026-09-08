@@ -37,6 +37,25 @@ use crate::main_window::MainState;
 use crate::quota::Quota;
 use crate::ui::{BUBBLE_WIDTH, BubbleApp};
 
+/// Loads the config and the counter, in that order and always together.
+///
+/// These two cannot be created apart. The counter reads "config.toml exists
+/// but usage.json does not" as an install that predates metering, and hands it
+/// unlimited use forever — see [`quota::Counter::legacy_unlimited`]. So a path
+/// that writes the config without also creating the counter grants the *next*
+/// launch a free upgrade. `--check` and `--translate` both did exactly that,
+/// and `--check` is the command the installer prints, which made it the
+/// ordinary way to arrive at an unmetered install rather than an obscure one.
+///
+/// Sampling whether the config existed has to happen before it is loaded,
+/// because loading writes the file when it is missing.
+fn load_state() -> (Config, Quota) {
+    let config_existed = Config::path().exists();
+    let config = Config::load();
+    let quota = Quota::load(config_existed);
+    (config, quota)
+}
+
 fn main() -> eframe::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(pos) = args.iter().position(|a| a == "--translate") {
@@ -58,16 +77,11 @@ fn main() -> eframe::Result<()> {
         std::process::exit(reset_quota());
     }
 
-    // Sampled before the config is loaded, because loading it creates the
-    // file when it is missing — and whether it existed a moment ago is the
-    // only way to tell an install that predates metering from a new one. That
-    // install keeps unlimited use; see `quota::Counter::legacy_unlimited`.
-    let config_existed = Config::path().exists();
-
-    let config = Arc::new(Mutex::new(Config::load()));
+    let (loaded_config, loaded_quota) = load_state();
+    let config = Arc::new(Mutex::new(loaded_config));
     let licensing = Licensing {
         license: Arc::new(Mutex::new(License::load())),
-        quota: Arc::new(Mutex::new(Quota::load(config_existed))),
+        quota: Arc::new(Mutex::new(loaded_quota)),
     };
 
     // Whether to come up with no interface at all. The flag is for autostart
@@ -168,9 +182,8 @@ fn main() -> eframe::Result<()> {
 /// spent", which otherwise looks identical from the outside — no bubble
 /// appears.
 fn license_status() -> i32 {
-    let config_existed = Config::path().exists();
     let licence = License::load();
-    let mut quota = Quota::load(config_existed);
+    let (_config, mut quota) = load_state();
 
     println!("device    {}", license::device_id());
     println!(
@@ -228,8 +241,7 @@ fn license_status() -> i32 {
 /// would be the whole paywall.
 #[cfg(debug_assertions)]
 fn reset_quota() -> i32 {
-    let config_existed = Config::path().exists();
-    let mut quota = Quota::load(config_existed);
+    let (_config, mut quota) = load_state();
     if quota.is_grandfathered() {
         println!("This install predates the allowance and is already unlimited.");
         return 0;
@@ -273,7 +285,9 @@ fn translate_once(text: &str) -> i32 {
         eprintln!("usage: bubbleTranslate --translate <text>");
         return 2;
     }
-    let cfg = Config::load();
+    // The counter is not consulted here, but it has to be created alongside
+    // the config; see `load_state`.
+    let (cfg, _quota) = load_state();
     println!(
         "chain: {}  →  {}",
         cfg.active_providers()
@@ -308,7 +322,9 @@ fn translate_once(text: &str) -> i32 {
 /// and reports which ones answer. Exits non-zero if none do.
 fn check_providers() -> i32 {
     const PROBE: &str = "Merhaba dünya";
-    let cfg = Config::load();
+    // Same reason as in `translate_once`: this command writes the config, so
+    // it must write the counter too.
+    let (cfg, _quota) = load_state();
     let translator = translate::Translator::new();
     let mut healthy = 0;
 
