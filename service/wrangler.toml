@@ -2,24 +2,29 @@ name = "bubbletranslate-licence"
 main = "src/index.ts"
 compatibility_date = "2026-09-01"
 
+# Served only at the custom domain. The workers.dev address is switched off
+# so there is exactly one hostname the app, the processors and the buy page
+# ever see.
+workers_dev = false
+routes = [{ pattern = "api.bubbletranslate.app", custom_domain = true }]
+
 # Local `wrangler dev` ignores database_id and uses a SQLite file under
 # .wrangler/. Replace it with the real one from `wrangler d1 create` before
 # the first `wrangler deploy`.
 [[d1_databases]]
 binding = "DB"
 database_name = "bubbletranslate-licence"
-database_id = "local-development-placeholder"
+database_id = "2a1d9813-734e-4380-bee6-60ea0e91f704"
 
 [vars]
-# Opens /v1/pubkey and /v1/dev/issue, and lets the service generate and keep
-# its own signing key. Never set in production: there the key arrives as a
-# secret and licences are created only by a processor's webhook.
-DEV_MODE = "1"
+# DEV_MODE opens /v1/pubkey and /v1/dev/issue and lets the service mint its
+# own signing key. It is deliberately absent here: this file is what gets
+# deployed. For local work, `npm run dev` passes it through .dev.vars.
 
 # Where this service is reachable, without a trailing slash. It cannot be
 # inferred from the request: a PayTR callback arrives from PayTR, not from a
 # browser on the site, and the return URLs are built before either.
-PUBLIC_BASE_URL = "http://localhost:8787"
+PUBLIC_BASE_URL = "https://api.bubbletranslate.app"
 
 SUPPORT_EMAIL = "support@bubbletranslate.app"
 

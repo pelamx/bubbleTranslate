@@ -85,10 +85,16 @@ behaviour is exercised without waiting a year.
 
 In development the service generates its own Ed25519 key on first use and
 keeps it in D1, so the public key you started the app with still verifies
-tomorrow's tokens. `DEV_MODE` in `wrangler.toml` is what opens `/v1/pubkey`
-and `/v1/dev/issue`; it must never be set in production.
+tomorrow's tokens. `DEV_MODE` is what opens `/v1/pubkey` and `/v1/dev/issue`.
+It lives in `.dev.vars`, which `wrangler dev` reads and `wrangler deploy`
+ignores, so it cannot reach production by accident:
 
-Processor credentials for local work go in `.dev.vars`, which is gitignored.
+```
+DEV_MODE = "1"
+PUBLIC_BASE_URL = "http://localhost:8787"
+```
+
+Processor credentials for local work go in the same file, which is gitignored.
 
 ## The contract
 
@@ -244,8 +250,9 @@ including a form on someone else's page.
    The same hex goes into `PUBLIC_KEY_HEX` in `src/license.rs`. If that
    private key ever leaks, anyone can mint Pro licences and the only fix is
    shipping a new binary — treat it accordingly.
-3. Remove `DEV_MODE` from `wrangler.toml`, and set `PUBLIC_BASE_URL` to the
-   real hostname. The return URLs PayTR is given are built from it.
+3. Check `PUBLIC_BASE_URL` in `wrangler.toml` is the real hostname. The
+   return URLs PayTR is given are built from it. `DEV_MODE` is never in that
+   file; see above.
 4. **PayTR**: set the merchant secrets, set the two lira prices, set
    `PAYTR_TEST_MODE = "0"`, and point the notification URL in the PayTR panel
    at `/webhooks/paytr`.
