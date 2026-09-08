@@ -57,12 +57,12 @@ PADDLE_ENV = "sandbox"
 # From the Paddle catalogue, `pri_...`. The prices themselves ($2/month,
 # $20/year) are set in Paddle, not here — Paddle is the merchant of record and
 # owns what the customer is charged, including tax.
-PADDLE_PRICE_MONTHLY = ""
-PADDLE_PRICE_YEARLY = ""
+PADDLE_PRICE_MONTHLY = "pri_01m20cnzfc4qrtweh094467ws8"
+PADDLE_PRICE_YEARLY = "pri_01m20cnzx8namfwybrcxbn3bg2"
 
 # The browser-side token Paddle.js is initialised with. Publishable by design —
 # it appears in the page source — and not a secret.
-PADDLE_CLIENT_TOKEN = ""
+PADDLE_CLIENT_TOKEN = "test_dea032ce3e79036ceb14475bd27"
 
 # Secrets, set with `wrangler secret put` and never written here:
 #
