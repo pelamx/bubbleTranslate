@@ -174,32 +174,35 @@ function inTurkey(request: Request, url: URL): boolean {
 
 function buy(env: Env, request: Request, url: URL): Response {
   const ctx = pageContext(request, url);
-  const turkey = inTurkey(request, url);
+  const wantsTurkish = inTurkey(request, url);
   const src = url.searchParams.get("src") ?? "direct";
   const base = baseUrl(env, request);
-  const otherUrl = `/buy?country=${turkey ? "XX" : "TR"}&src=${encodeURIComponent(src)}`;
 
-  if (turkey) {
-    const monthly = paytrPriceKurus(env, "monthly");
-    const yearly = paytrPriceKurus(env, "yearly");
-    if (!paytrConfigured(env) || monthly === null || yearly === null) {
-      return buyPage({
-        ctx,
-        turkey,
-        configured: false,
-        reason: "reasonPaytrUnconfigured",
-        monthly: "",
-        yearly: "",
-        src,
-        otherUrl,
-      });
-    }
+  const monthlyKurus = paytrPriceKurus(env, "monthly");
+  const yearlyKurus = paytrPriceKurus(env, "yearly");
+  const paytrReady =
+    paytrConfigured(env) && monthlyKurus !== null && yearlyKurus !== null;
+
+  // A visitor whose own processor is not set up is sent to the other one
+  // rather than to a dead end. Turkey is routed to PayTR because lira and a
+  // local card are what people there expect -- but "we would rather bill you
+  // in lira" is not a reason to refuse a customer who is holding out a card,
+  // and this page used to do exactly that: it told Turkish visitors that
+  // checkout was unavailable while Paddle sat configured and idle.
+  //
+  // It matters for payment links too. Paddle sends customers to the account's
+  // default payment link, and that link has to open a Paddle checkout for
+  // whoever follows it, wherever they happen to be.
+  const serveTurkish = wantsTurkish && paytrReady;
+  const otherUrl = `/buy?country=${serveTurkish ? "XX" : "TR"}&src=${encodeURIComponent(src)}`;
+
+  if (serveTurkish) {
     return buyPage({
       ctx,
-      turkey,
+      turkey: true,
       configured: true,
-      monthly: lira(monthly),
-      yearly: lira(yearly),
+      monthly: lira(monthlyKurus!),
+      yearly: lira(yearlyKurus!),
       src,
       otherUrl,
     });
@@ -208,9 +211,9 @@ function buy(env: Env, request: Request, url: URL): Response {
   if (!paddleConfigured(env)) {
     return buyPage({
       ctx,
-      turkey,
+      turkey: wantsTurkish,
       configured: false,
-      reason: "reasonPaddleUnconfigured",
+      reason: wantsTurkish ? "reasonPaytrUnconfigured" : "reasonPaddleUnconfigured",
       monthly: "",
       yearly: "",
       src,
@@ -219,7 +222,7 @@ function buy(env: Env, request: Request, url: URL): Response {
   }
   return buyPage({
     ctx,
-    turkey,
+    turkey: false,
     configured: true,
     monthly: USD_PRICE.monthly,
     yearly: USD_PRICE.yearly,
