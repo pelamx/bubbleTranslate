@@ -11,6 +11,7 @@
 // checkout.
 
 import type { Cycle } from "./env";
+import { TIERS } from "./tiers";
 import { DEFAULT_LANG, LANGS, type Lang, type Strings, switchedTo, t, withLang } from "./i18n";
 
 /// What the free tier allows per day. Display only: the number the client
@@ -158,7 +159,7 @@ const planCard = (s: Strings, cycle: Cycle, price: string, checked: boolean, not
   <label class="plan${checked ? " on" : ""}">
     <input type="radio" name="cycle" value="${cycle}"${checked ? " checked" : ""}>
     <div class="name">${cycle === "yearly" ? s.yearly : s.monthly}</div>
-    <div class="price">${escapeHtml(price)}</div>
+    <div class="price" data-cycle="${cycle}">${escapeHtml(price)}</div>
     <div class="note">${escapeHtml(note)}</div>
   </label>`;
 
@@ -187,10 +188,17 @@ export interface BuyOptions {
   otherUrl: string;
   /** Paddle only. */
   clientToken?: string;
-  paddleEnv?: string;
+  paddleEnv?: "production" | "sandbox";
   priceMonthly?: string;
   priceYearly?: string;
   successUrl?: string;
+  /** A real ISO 3166-1 alpha-2 code, or undefined. Never a sentinel: `/buy`
+   *  uses `?country=XX` to mean "not Turkey", and Cloudflare itself sends XX
+   *  for an address it cannot place and T1 for Tor. None of those are
+   *  countries, and Paddle rejects them. When this is undefined the browser
+   *  omits `address` entirely and Paddle geolocates the visitor's IP, which
+   *  is both more accurate than our guess and the documented behaviour. */
+  country?: string;
 }
 
 export function buyPage(opts: BuyOptions): Response {
@@ -222,14 +230,13 @@ export function buyPage(opts: BuyOptions): Response {
     <h1>${s.proTitle}</h1>
     <p>${opts.turkey ? s.introPaytr : s.introPaddle}</p>
     <div class="tiers">
-      <div class="tier">
-        <div class="name">${s.tierFreeName}</div>
-        ${s.tierFree(FREE_DAILY_TRANSLATIONS)}
-      </div>
-      <div class="tier pro">
-        <div class="name">${s.tierProName}</div>
-        ${s.tierPro}
-      </div>
+      ${TIERS.map(
+        (tier) => `
+      <div class="tier${tier.purchasable ? " pro" : ""}" data-tier="${tier.id}">
+        <div class="name">${s[tier.nameKey]}</div>
+        ${tier.id === "free" ? s.tierFree(FREE_DAILY_TRANSLATIONS) : s.tierPro}
+      </div>`,
+      ).join("")}
     </div>`;
   const plans = `
     <div class="plans">
@@ -279,12 +286,45 @@ export function buyPage(opts: BuyOptions): Response {
     ${footer}
     <script>
       ${PLAN_SCRIPT}
-      Paddle.Environment.set(${JSON.stringify(opts.paddleEnv === "production" ? "production" : "sandbox")});
+      Paddle.Environment.set(${JSON.stringify(opts.paddleEnv)});
       Paddle.Initialize({ token: ${JSON.stringify(opts.clientToken ?? "")} });
       const prices = {
         monthly: ${JSON.stringify(opts.priceMonthly ?? "")},
         yearly: ${JSON.stringify(opts.priceYearly ?? "")},
       };
+      // Undefined unless the edge actually placed the visitor. See the note on
+      // BuyOptions.country: a sentinel must never reach Paddle as a country.
+      const country = ${JSON.stringify(opts.country ?? null)};
+
+      // The cards are rendered with the dollar price, then corrected to the
+      // buyer's own currency by Paddle. The figures shown are Paddle's
+      // formatted strings exactly as returned -- the totals it will actually
+      // charge, tax included, in the currency it will charge them in. Nothing
+      // here parses, converts or re-formats a price: the dollar amount is a
+      // fallback for a failed request, not an input to arithmetic.
+      (async () => {
+        const items = Object.entries(prices)
+          .filter(([, id]) => id)
+          .map(([cycle, id]) => ({ cycle, priceId: id }));
+        if (!items.length) return;
+        try {
+          const preview = await Paddle.PricePreview({
+            items: items.map((item) => ({ priceId: item.priceId, quantity: 1 })),
+            ...(country ? { address: { countryCode: country } } : {}),
+          });
+          for (const line of preview.data.details.lineItems) {
+            const match = items.find((item) => item.priceId === line.price.id);
+            if (!match) continue;
+            const cell = document.querySelector('.price[data-cycle="' + match.cycle + '"]');
+            if (cell) cell.textContent = line.formattedTotals.total;
+          }
+        } catch (err) {
+          // A failed preview leaves the dollar prices standing. It must never
+          // blank the cards or block the buy button: the checkout overlay
+          // prices the transaction itself regardless of what this showed.
+          console.error('price preview failed', err);
+        }
+      })();
       const words = ${JSON.stringify({ planUnavailable: s.planUnavailable, checkoutFailed: s.checkoutFailed })};
       document.getElementById('pay').addEventListener('click', async () => {
         const email = document.getElementById('email');
@@ -305,6 +345,8 @@ export function buyPage(opts: BuyOptions): Response {
           customer: { email: email.value },
           customData: { ref: created.ref },
           settings: {
+            displayMode: 'overlay',
+            variant: 'one-page',
             successUrl: ${JSON.stringify(withLang(opts.successUrl ?? "", ctx.lang))} + '&ref=' + created.ref,
           },
         });

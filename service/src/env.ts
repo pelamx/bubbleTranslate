@@ -102,8 +102,27 @@ export const paytrConfigured = (env: Env) =>
 export const paddleConfigured = (env: Env) =>
   Boolean(env.PADDLE_CLIENT_TOKEN && (paddlePriceId(env, "monthly") || paddlePriceId(env, "yearly")));
 
+/** The one place `PADDLE_ENV` is read, and it refuses to guess.
+ *
+ *  An unset or misspelled value used to mean "sandbox", which is the wrong
+ *  default in the only direction that matters: it points a deployment that
+ *  believes it is live at the sandbox account, where the price ids do not
+ *  exist and the webhook secret does not match. Failing here instead turns a
+ *  silent wrong-account run into a loud one. */
+export function paddleEnvOrThrow(env: Env): "production" | "sandbox" {
+  const raw = (env.PADDLE_ENV ?? "").trim();
+  if (raw === "production" || raw === "sandbox") return raw;
+  throw new Error(
+    `PADDLE_ENV must be "sandbox" or "production", got ${JSON.stringify(raw)}. ` +
+      `Set it in wrangler.toml [vars]; it chooses both the API host and the ` +
+      `Paddle.js environment, so it is never inferred.`,
+  );
+}
+
 export const paddleApiBase = (env: Env) =>
-  env.PADDLE_ENV === "production" ? "https://api.paddle.com" : "https://sandbox-api.paddle.com";
+  paddleEnvOrThrow(env) === "production"
+    ? "https://api.paddle.com"
+    : "https://sandbox-api.paddle.com";
 
 export const supportEmail = (env: Env) => env.SUPPORT_EMAIL ?? "support@bubbletranslate.app";
 

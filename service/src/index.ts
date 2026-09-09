@@ -19,6 +19,7 @@ import {
   baseUrl,
   isCycle,
   paddleConfigured,
+  paddleEnvOrThrow,
   paddlePriceId,
   paytrConfigured,
   paytrPriceKurus,
@@ -172,6 +173,23 @@ function inTurkey(request: Request, url: URL): boolean {
   return (request.headers.get("CF-IPCountry") ?? "").toUpperCase() === "TR";
 }
 
+/** The visitor's country, or undefined when we genuinely do not know.
+ *
+ *  Three different things mean "unknown" here and none of them is a country.
+ *  `/buy?country=XX` is this app's own sentinel for "not Turkey", set by the
+ *  link between the two buy pages. Cloudflare sends `XX` when it cannot place
+ *  an address and `T1` when the request came out of Tor. Passing any of them
+ *  to Paddle as a country code is an error; omitting the address instead lets
+ *  Paddle geolocate the IP, which is what it does best. */
+function visitorCountry(request: Request, url: URL): string | undefined {
+  const raw = (url.searchParams.get("country") ?? request.headers.get("CF-IPCountry") ?? "")
+    .trim()
+    .toUpperCase();
+  if (!/^[A-Z]{2}$/.test(raw)) return undefined;
+  if (raw === "XX" || raw === "T1") return undefined;
+  return raw;
+}
+
 function buy(env: Env, request: Request, url: URL): Response {
   const ctx = pageContext(request, url);
   const wantsTurkish = inTurkey(request, url);
@@ -229,10 +247,11 @@ function buy(env: Env, request: Request, url: URL): Response {
     src,
     otherUrl,
     clientToken: env.PADDLE_CLIENT_TOKEN,
-    paddleEnv: env.PADDLE_ENV,
+    paddleEnv: paddleEnvOrThrow(env),
     priceMonthly: paddlePriceId(env, "monthly") ?? "",
     priceYearly: paddlePriceId(env, "yearly") ?? "",
-    successUrl: `${base}/done`,
+    country: visitorCountry(request, url),
+    successUrl: `${base}/welcome`,
   });
 }
 
@@ -556,7 +575,10 @@ export default {
         if (pathname === "/account") {
           return accountPage(pageContext(request, url), null, supportEmail(env));
         }
-        if (pathname === "/done") {
+        // /welcome is where Paddle returns the buyer, and /done is where PayTR
+        // does. They are the same page: it polls for the licence key using the
+        // ref in the query string, so the ref has to survive the rename.
+        if (pathname === "/done" || pathname === "/welcome") {
           const ctx = pageContext(request, url);
           const ref = url.searchParams.get("ref") ?? "";
           if (!ref) return redirect(withLang("/buy", ctx.lang));
