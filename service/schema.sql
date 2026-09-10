@@ -27,11 +27,11 @@ CREATE TABLE IF NOT EXISTS licences (
   -- The same moment as a date, for the client to display. Never enforced.
   renews_at    TEXT,
   email        TEXT,
-  -- paytr | paddle. Decides which cancel route the account page offers, and
+  -- Always 'paddle'. Decides which cancel route the account page offers, and
   -- which webhook is allowed to move this row.
   provider     TEXT NOT NULL,
-  -- The processor's own id for the thing that pays: a Paddle subscription id,
-  -- or a PayTR merchant_oid. How a renewal or a refund finds this row.
+  -- Paddle's own id for the thing that pays: the subscription id. How a
+  -- renewal or a refund finds this row.
   provider_ref TEXT,
   created_at   INTEGER NOT NULL
 );
@@ -62,18 +62,16 @@ CREATE INDEX IF NOT EXISTS seats_by_licence ON seats (licence_id);
 -- the key is cleared as soon as `reveal_until` passes. A stolen database of
 -- orders is a stolen list of live licences for at most an hour.
 CREATE TABLE IF NOT EXISTS orders (
-  -- Unguessable, and the only thing protecting the reveal. For PayTR this is
-  -- also the merchant_oid, which is why it is bare hex: PayTR rejects an oid
-  -- containing anything but letters and digits.
+  -- Unguessable, and the only thing protecting the reveal. Bare hex, 128 bits,
+  -- carried to Paddle as customData.ref and handed back on the webhook.
   ref          TEXT PRIMARY KEY,
   provider     TEXT NOT NULL,
   cycle        TEXT NOT NULL,
   email        TEXT,
   -- pending | paid | failed
   status       TEXT NOT NULL DEFAULT 'pending',
-  -- Minor units (kuruş, cents) and the currency actually charged, kept so the
-  -- processor's callback can be checked against what was asked for rather
-  -- than trusted.
+  -- Minor units (cents) and the currency actually charged, kept so the
+  -- webhook can be checked against what was asked for rather than trusted.
   amount       INTEGER,
   currency     TEXT,
   licence_id   TEXT,

@@ -26,11 +26,6 @@ PUBLIC_BASE_URL = "http://localhost:8787"
 PADDLE_API_KEY = "pdl_sdbx_apikey_..."
 PADDLE_WEBHOOK_SECRET = "pdl_ntfset_..."
 
-# -- PayTR, for Turkey --------------------------------------------------------
-PAYTR_MERCHANT_ID = ""
-PAYTR_MERCHANT_KEY = ""
-PAYTR_MERCHANT_SALT = ""
-
 # -- Licence signing ----------------------------------------------------------
 # Omit both locally and DEV_MODE mints an ephemeral pair on each run.
 # SIGNING_KEY_PKCS8 = ""

@@ -34,10 +34,9 @@ pub const FREE_DAILY_TRANSLATIONS: u32 = 10;
 /// window so the bubble and the account panel cannot drift apart from each
 /// other, or from the checkout page the button opens.
 ///
-/// These are the display prices. The amounts actually charged live in the
-/// service, per processor and per currency, because that is where a price can
-/// be changed without cutting a release — and where the Turkish lira price has
-/// to live, since it is not a conversion of this one.
+/// These are the display prices. The amount actually charged lives in Paddle,
+/// which prices the transaction in the buyer's own currency and adds tax, so
+/// this is what the app says rather than what the card is debited.
 pub const PRICE_MONTHLY: &str = "$2/month";
 pub const PRICE_YEARLY: &str = "$20/year";
 
@@ -47,8 +46,8 @@ pub const PRICE_YEARLY: &str = "$20/year";
 ///
 /// `/buy` is served by the licence service rather than by a separate site: it
 /// is the one page that has to know the visitor's country, and the service is
-/// already the thing sitting behind Cloudflare that gets told it. Turkey is
-/// routed to PayTR, everywhere else to Paddle — see `service/src/index.ts`.
+/// already the thing sitting behind Cloudflare that gets told it. Checkout is
+/// Paddle everywhere — see `service/src/index.ts`.
 pub const BUY_URL: &str = "https://api.bubbletranslate.app/buy";
 pub const MANAGE_URL: &str = "https://api.bubbletranslate.app/account";
 

@@ -1,8 +1,7 @@
 // The three languages the pages speak, and how one is chosen.
 //
-// Language and payment processor are two different questions. Where the
-// visitor *is* decides whether they see PayTR or Paddle (see `inTurkey` in
-// index.ts); what they *read* is theirs to pick, from the switcher at the top
+// Language and payment are two different questions. What a visitor *reads* is
+// theirs to pick, from the switcher at the top
 // right of every page. English is the default for everyone: the app itself is
 // in English, and a page that guesses a language from an IP address is wrong
 // for every traveller, expatriate and VPN user at once.
@@ -56,11 +55,7 @@ const en = {
   // /buy
   checkoutUnavailable: "Checkout is not available yet.",
   providerNotConfigured: "The payment provider for your region is not configured.",
-  reasonPaytrUnconfigured:
-    "PayTR is not configured on this server yet. Set the merchant credentials and the lira prices, or pay in dollars instead.",
   reasonPaddleUnconfigured: "Paddle is not configured on this server yet.",
-  introPaytr:
-    "The free version is limited to ten translations a day. Pro removes the limit; billed in lira through PayTR.",
   introPaddle:
     "The free version is limited to ten translations a day. Pro removes the limit; billed through Paddle.",
   tierFreeName: "Free",
@@ -72,24 +67,15 @@ const en = {
   yearly: "Yearly",
   billedMonthly: "billed monthly",
   yearlyNotePaddle: "two months free",
-  yearlyNotePaytr: "12 months, one payment",
   emailLabel: "Your email — the licence key is sent here",
   emailPlaceholder: "you@example.com",
   continueToPayment: "Continue to payment",
-  paytrNote:
-    "Card details go to PayTR, not to this server. The purchase is a single payment and does not renew by itself when the term ends.",
   paddleNote:
     "Card details go to Paddle, not to this server. Paddle is the merchant of record and handles VAT and invoicing.",
-  footerTurkey: (url: string) => `Outside Turkey? <a href="${url}">Pay in dollars instead</a>.`,
-  footerOther: (url: string) => `In Turkey? <a href="${url}">Pay in lira instead</a>.`,
   planUnavailable: "That plan is not available yet.",
   checkoutFailed: "Could not start checkout.",
 
-  // the PayTR frame
-  paymentTitle: "Payment",
-  order: "Order",
-
-  // /done
+  // /welcome
   thankYou: "Thank you",
   confirming: "Confirming your payment…",
   paymentReceived: "Payment received. Here is your licence key:",
@@ -142,14 +128,11 @@ const en = {
   paddleRefusedCancel: "Paddle could not cancel this subscription. Please contact support.",
   paddleUnreachable: "Could not reach Paddle. Please try again shortly.",
 
-  // plain-text replies from the PayTR form post
-  invalidPlan: "Invalid plan.",
-  invalidEmail: "Enter a valid email address.",
-  paytrNotConfigured: "PayTR is not configured.",
-  priceNotSet: "This plan has no price set.",
-  paymentCouldNotStart: "The payment could not be started.",
-  paytrUnreachable: "Could not reach the payment provider. Please try again.",
-  paymentIncomplete: "The payment was not completed.",
+  // the footer every page carries, linking the policies Paddle's review looks for
+  'legalTerms': "Terms",
+  'legalPrivacy': "Privacy",
+  'legalRefunds': "Refunds",
+  'legalHome': "bubbletranslate.app",
 };
 
 export type Strings = typeof en;
@@ -160,11 +143,7 @@ const tr: Strings = {
 
   checkoutUnavailable: "Ödeme henüz kullanılamıyor.",
   providerNotConfigured: "Bölgeniz için ödeme sağlayıcısı ayarlanmamış.",
-  reasonPaytrUnconfigured:
-    "PayTR bu sunucuda henüz ayarlanmadı. Mağaza bilgilerini ve lira fiyatlarını girin ya da dolar üzerinden ödeyin.",
   reasonPaddleUnconfigured: "Paddle bu sunucuda henüz ayarlanmadı.",
-  introPaytr:
-    "Ücretsiz sürüm günde on çeviriyle sınırlıdır. Pro sınırı kaldırır; ödeme lira olarak PayTR üzerinden alınır.",
   introPaddle:
     "Ücretsiz sürüm günde on çeviriyle sınırlıdır. Pro sınırı kaldırır; ödeme Paddle üzerinden alınır.",
   tierFreeName: "Ücretsiz",
@@ -176,21 +155,13 @@ const tr: Strings = {
   yearly: "Yıllık",
   billedMonthly: "aylık",
   yearlyNotePaddle: "iki ay bedava",
-  yearlyNotePaytr: "12 ay, tek ödeme",
   emailLabel: "E-posta adresiniz — lisans anahtarı buraya gönderilir",
   emailPlaceholder: "siz@ornek.com",
   continueToPayment: "Ödemeye geç",
-  paytrNote:
-    "Kart bilgileriniz PayTR'ye gider, bu sunucuya değil. Satın alma tek seferliktir ve süre sonunda kendiliğinden yenilenmez.",
   paddleNote:
     "Kart bilgileriniz Paddle'a gider, bu sunucuya değil. Satıcı Paddle'dır; KDV ve faturayı o düzenler.",
-  footerTurkey: (url: string) => `Türkiye dışındaysanız <a href="${url}">dolar üzerinden ödeyebilirsiniz</a>.`,
-  footerOther: (url: string) => `Türkiye'de misiniz? <a href="${url}">Lira ile ödeyin</a>.`,
   planUnavailable: "Bu plan henüz kullanılamıyor.",
   checkoutFailed: "Ödeme başlatılamadı.",
-
-  paymentTitle: "Ödeme",
-  order: "Sipariş",
 
   thankYou: "Teşekkürler",
   confirming: "Ödemeniz doğrulanıyor…",
@@ -242,13 +213,11 @@ const tr: Strings = {
   paddleRefusedCancel: "Paddle bu aboneliği iptal edemedi. Lütfen destekle iletişime geçin.",
   paddleUnreachable: "Paddle'a ulaşılamadı. Lütfen kısa süre sonra tekrar deneyin.",
 
-  invalidPlan: "Geçersiz plan.",
-  invalidEmail: "Geçerli bir e-posta adresi girin.",
-  paytrNotConfigured: "PayTR yapılandırılmamış.",
-  priceNotSet: "Bu planın fiyatı ayarlanmamış.",
-  paymentCouldNotStart: "Ödeme başlatılamadı.",
-  paytrUnreachable: "Ödeme sağlayıcısına ulaşılamadı. Lütfen tekrar deneyin.",
-  paymentIncomplete: "Ödeme tamamlanamadı.",
+
+  'legalTerms': "Şartlar",
+  'legalPrivacy': "Gizlilik",
+  'legalRefunds': "İade",
+  'legalHome': "bubbletranslate.app",
 };
 
 const es: Strings = {
@@ -257,11 +226,7 @@ const es: Strings = {
 
   checkoutUnavailable: "El pago aún no está disponible.",
   providerNotConfigured: "El proveedor de pagos de tu región no está configurado.",
-  reasonPaytrUnconfigured:
-    "PayTR aún no está configurado en este servidor. Configura las credenciales del comercio y los precios en liras, o paga en dólares.",
   reasonPaddleUnconfigured: "Paddle aún no está configurado en este servidor.",
-  introPaytr:
-    "La versión gratuita está limitada a diez traducciones al día. Pro elimina el límite; se cobra en liras a través de PayTR.",
   introPaddle:
     "La versión gratuita está limitada a diez traducciones al día. Pro elimina el límite; se cobra a través de Paddle.",
   tierFreeName: "Gratis",
@@ -273,21 +238,13 @@ const es: Strings = {
   yearly: "Anual",
   billedMonthly: "cobro mensual",
   yearlyNotePaddle: "dos meses gratis",
-  yearlyNotePaytr: "12 meses, un solo pago",
   emailLabel: "Tu correo — la clave de licencia se envía aquí",
   emailPlaceholder: "tu@ejemplo.com",
   continueToPayment: "Continuar al pago",
-  paytrNote:
-    "Los datos de la tarjeta van a PayTR, no a este servidor. La compra es un pago único y no se renueva sola al terminar el periodo.",
   paddleNote:
     "Los datos de la tarjeta van a Paddle, no a este servidor. Paddle es el vendedor registrado y se encarga del IVA y la facturación.",
-  footerTurkey: (url: string) => `¿Fuera de Turquía? <a href="${url}">Paga en dólares</a>.`,
-  footerOther: (url: string) => `¿En Turquía? <a href="${url}">Paga en liras</a>.`,
   planUnavailable: "Ese plan aún no está disponible.",
   checkoutFailed: "No se pudo iniciar el pago.",
-
-  paymentTitle: "Pago",
-  order: "Pedido",
 
   thankYou: "Gracias",
   confirming: "Confirmando tu pago…",
@@ -339,13 +296,11 @@ const es: Strings = {
   paddleRefusedCancel: "Paddle no pudo cancelar esta suscripción. Contacta con soporte.",
   paddleUnreachable: "No se pudo contactar con Paddle. Inténtalo de nuevo en unos minutos.",
 
-  invalidPlan: "Plan no válido.",
-  invalidEmail: "Introduce una dirección de correo válida.",
-  paytrNotConfigured: "PayTR no está configurado.",
-  priceNotSet: "Este plan no tiene precio configurado.",
-  paymentCouldNotStart: "No se pudo iniciar el pago.",
-  paytrUnreachable: "No se pudo contactar con el proveedor de pagos. Inténtalo de nuevo.",
-  paymentIncomplete: "El pago no se completó.",
+
+  'legalTerms': "Términos",
+  'legalPrivacy': "Privacidad",
+  'legalRefunds': "Reembolsos",
+  'legalHome': "bubbletranslate.app",
 };
 
 const STRINGS: Record<Lang, Strings> = { en, tr, es };

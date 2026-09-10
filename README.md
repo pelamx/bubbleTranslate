@@ -244,9 +244,8 @@ fail silently, it does not stop responding to the gesture, and it does not hide
 the one control that solves the problem it is describing.
 
 **Pro** removes the limit: unlimited translations on up to three machines,
-$2/month or $20/year. In Turkey it is billed in lira through PayTR; everywhere
-else through Paddle, which is the merchant of record. Which one you see is
-decided by where you are, and either page links to the other.
+$2/month or $20/year. Billing goes through Paddle, which is the merchant of
+record, so it is charged in your own currency with local tax included.
 
 What counts against the day is deliberately narrow, because ten is a small
 number and the bubble fires on every finished selection:

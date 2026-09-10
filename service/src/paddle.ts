@@ -1,9 +1,9 @@
-// Paddle, which is how everywhere that is not Turkey pays.
+// Paddle, the single payment processor.
 //
 // Paddle is a merchant of record: it sells the licence to the customer and
 // this service sells it to Paddle. That is worth the higher fee for a product
-// sold from Turkey to the world, because it makes VAT, sales tax and invoicing
-// Paddle's problem rather than ours in every country at once.
+// sold to the world, because it makes VAT, sales tax and invoicing Paddle's
+// problem rather than ours in every country at once.
 //
 // Checkout is Paddle.js in the browser, so no card and no address ever reaches
 // this Worker; all that arrives here is a signed webhook saying it happened.
@@ -26,6 +26,81 @@ export interface Verified {
    *  of two payloads for the same entity is the later one. */
   occurredAt: string | null;
   data: any;
+}
+
+/** Whether a delivery came from one of Paddle's own addresses.
+ *
+ *  Defence in depth, not the gate: the HMAC below is what actually proves a
+ *  webhook is Paddle's, and it holds even if this returns `true` for someone
+ *  else. What this buys is that a stranger who somehow learns the signing
+ *  secret still has to arrive from Paddle's network.
+ *
+ *  The list is fetched rather than pasted in, because Paddle publishes it and
+ *  can change it -- a hardcoded copy is a webhook outage waiting for the day
+ *  they add an address. It is cached per isolate; a Worker isolate is
+ *  short-lived, so this is a handful of requests a day, not one per webhook.
+ *
+ *  Fails **open**: if the list cannot be fetched, the delivery is allowed
+ *  through to the signature check. Closing instead would mean a minute of
+ *  trouble at Paddle's end costing us real payments, to protect a door the
+ *  MAC already locks. The refusal is logged loudly either way. */
+const IP_TTL = 3_600_000;
+let ipCache: { at: number; cidrs: string[] } | null = null;
+
+async function paddleIps(): Promise<string[] | null> {
+  if (ipCache && Date.now() - ipCache.at < IP_TTL) return ipCache.cidrs;
+  try {
+    const res = await fetch("https://api.paddle.com/ips");
+    if (!res.ok) throw new Error(`ips returned ${res.status}`);
+    const body: any = await res.json();
+    const cidrs: string[] = body?.data?.ipv4_cidrs ?? [];
+    if (!cidrs.length) throw new Error("ips returned no ipv4_cidrs");
+    ipCache = { at: Date.now(), cidrs };
+    return cidrs;
+  } catch (err) {
+    console.error(`paddle ip list unavailable, allowing through to the MAC: ${err}`);
+    return null;
+  }
+}
+
+/** `a.b.c.d` as a 32-bit number, or null if it is not an IPv4 address. */
+function ipv4(text: string): number | null {
+  const parts = text.trim().split(".");
+  if (parts.length !== 4) return null;
+  let value = 0;
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const octet = Number(part);
+    if (octet > 255) return null;
+    value = (value << 8) | octet;
+  }
+  return value >>> 0;
+}
+
+function inCidr(address: number, cidr: string): boolean {
+  const [base, lenText] = cidr.split("/");
+  const start = ipv4(base ?? "");
+  if (start === null) return false;
+  const len = lenText === undefined ? 32 : Number(lenText);
+  if (!Number.isInteger(len) || len < 0 || len > 32) return false;
+  if (len === 0) return true;
+  const mask = (0xffffffff << (32 - len)) >>> 0;
+  return (address & mask) === (start & mask);
+}
+
+/** True when the request may proceed to signature checking. */
+export async function fromPaddle(request: Request): Promise<boolean> {
+  const cidrs = await paddleIps();
+  if (!cidrs) return true;
+  const seen = request.headers.get("CF-Connecting-IP") ?? "";
+  const address = ipv4(seen);
+  if (address === null) {
+    console.error(`webhook from an address that is not IPv4: ${JSON.stringify(seen)}`);
+    return false;
+  }
+  if (cidrs.some((cidr) => inCidr(address, cidr))) return true;
+  console.error(`webhook refused: ${seen} is not one of Paddle's published addresses`);
+  return false;
 }
 
 /** Checks the `Paddle-Signature` header against the raw body.

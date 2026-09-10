@@ -16,10 +16,10 @@ is caught rather than assumed safe.
 
 ## Paddle
 
-Paddle is how everywhere outside Turkey pays. Turkey goes through PayTR; see
-`service/src/paytr.ts`. Paddle is the **merchant of record**: it sells the
-licence to the customer and we sell it to Paddle, which is why VAT and
-invoicing are Paddle's problem rather than ours in every country at once.
+Paddle is how everyone pays — it is the only processor. Paddle is the
+**merchant of record**: it sells the licence to the customer and we sell it to
+Paddle, which is why VAT and invoicing are Paddle's problem rather than ours in
+every country at once.
 
 ### Which SDK to use: none
 
@@ -123,9 +123,9 @@ these into one path.
 
 The dollar prices appear in three places and must agree: `USD_PRICE` in
 `service/src/env.ts`, `PRICE_MONTHLY` / `PRICE_YEARLY` in `src/license.rs`, and
-the `price.*` translation keys on the website. The lira prices are **not** a
-conversion of them; PayTR settles in lira and those numbers are set
-deliberately.
+the `price.*` translation keys on the website. Paddle prices the transaction
+in the buyer's own currency and adds tax, so these dollar figures are what the
+product *says*, not what every card is debited.
 
 The Ed25519 public key in `src/license.rs` must match the `SIGNING_KEY_PUBLIC`
 secret on the deployed service. Both halves come from one run of
