@@ -50,33 +50,35 @@ PAYTR_TEST_MODE = "1"
 
 # -- Paddle, for everywhere else ----------------------------------------------
 #
-# "sandbox" until it is "production". This chooses both the API host and the
-# Paddle.js environment, so the two can never disagree.
-PADDLE_ENV = "sandbox"
+# This chooses both the API host and the Paddle.js environment, so the two can
+# never disagree. Now "production": real cards, real money.
+PADDLE_ENV = "production"
 
 # From the Paddle catalogue, `pri_...`. The prices themselves ($2/month,
 # $20/year) are set in Paddle, not here — Paddle is the merchant of record and
 # owns what the customer is charged, including tax.
-# Live equivalents, created once the sandbox integration had been tested end
-# to end. They are commented out because PADDLE_ENV below is still "sandbox",
-# and a live price id under a sandbox environment fails at checkout rather
-# than at deploy. Switching environments means changing all four of these
-# together -- the env, both price ids, and the client token -- plus putting
-# the live account's webhook signing secret in PADDLE_WEBHOOK_SECRET.
 #
-#   PADDLE_ENV            = "production"
-#   PADDLE_PRICE_MONTHLY  = "pri_01m20ka0fmc6s2am1qc0aecjt0"
-#   PADDLE_PRICE_YEARLY   = "pri_01m20ka0z5q29jekndxfxw5z16"
-#   PADDLE_CLIENT_TOKEN   = "live_b16bde0d516696e5290039b41e4"
+# These four values move together, and they are live as of the switch to
+# production: the env, both price ids and the client token all name the live
+# account. A sandbox id left among them fails at checkout rather than at
+# deploy, which is why they are changed in one edit and never one at a time.
+# PADDLE_WEBHOOK_SECRET must be the live destination's signing secret to match.
 #
 # Live product: pro_01m20ka003t3cqdmvy25q1tey8
+#
+# The sandbox catalogue, kept for a run against the sandbox account:
+#
+#   PADDLE_ENV            = "sandbox"
+#   PADDLE_PRICE_MONTHLY  = "pri_01m20cnzfc4qrtweh094467ws8"
+#   PADDLE_PRICE_YEARLY   = "pri_01m20cnzx8namfwybrcxbn3bg2"
+#   PADDLE_CLIENT_TOKEN   = "test_dea032ce3e79036ceb14475bd27"
 
-PADDLE_PRICE_MONTHLY = "pri_01m20cnzfc4qrtweh094467ws8"
-PADDLE_PRICE_YEARLY = "pri_01m20cnzx8namfwybrcxbn3bg2"
+PADDLE_PRICE_MONTHLY = "pri_01m20ka0fmc6s2am1qc0aecjt0"
+PADDLE_PRICE_YEARLY = "pri_01m20ka0z5q29jekndxfxw5z16"
 
 # The browser-side token Paddle.js is initialised with. Publishable by design —
 # it appears in the page source — and not a secret.
-PADDLE_CLIENT_TOKEN = "test_dea032ce3e79036ceb14475bd27"
+PADDLE_CLIENT_TOKEN = "live_b16bde0d516696e5290039b41e4"
 
 # Secrets, set with `wrangler secret put` and never written here:
 #
