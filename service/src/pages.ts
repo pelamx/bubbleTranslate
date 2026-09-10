@@ -78,11 +78,15 @@ const STYLE = `
   .tier.pro { border-color: #78d28c; }
   .tier.pro .name { color: #78d28c; }
   label.field { display: block; font-size: 13px; color: #b8b8b8; margin: 0 0 6px; }
-  input[type=text], input[type=email] {
+  input[type=text], input[type=email], input[type=number], select, textarea {
     width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid #3a3c41;
     background: #17181a; color: #f0f0f0; font-size: 15px; font-family: inherit;
   }
-  input:focus { outline: 2px solid #78d28c; outline-offset: -1px; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid #78d28c; outline-offset: -1px; }
+  textarea.keys {
+    font: 14px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    letter-spacing: .06em; resize: vertical; margin: 8px 0 14px;
+  }
   button {
     width: 100%; padding: 12px 16px; border-radius: 8px; border: 0; cursor: pointer;
     background: #78d28c; color: #14261a; font-size: 15px; font-weight: 600;

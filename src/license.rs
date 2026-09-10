@@ -45,11 +45,19 @@ pub const PRICE_YEARLY: &str = "$20/year";
 /// subscriber who wants to cancel. Both take a `?src=` so the funnel can be
 /// measured by the surface the click came from.
 ///
-/// `/buy` is served by the licence service rather than by a separate site: it
-/// is the one page that has to know the visitor's country, and the service is
-/// already the thing sitting behind Cloudflare that gets told it. Turkey is
-/// routed to PayTR, everywhere else to Paddle — see `service/src/index.ts`.
-pub const BUY_URL: &str = "https://api.bubbletranslate.app/buy";
+/// The buy link is a holding page for now. `api.bubbletranslate.app` does not
+/// resolve yet, and a button that opens nothing is worse than one that opens a
+/// page saying what is coming — the click costs the user the same either way,
+/// and only one of the two looks like a working app.
+///
+/// It moves back to the service's own `/buy` once that is up. That is the one
+/// page which has to know the visitor's country: Turkey is routed to PayTR and
+/// everywhere else to Paddle — see `service/src/index.ts`.
+pub const BUY_URL: &str = "https://pelamx.github.io";
+
+/// Left pointing at the service, because nothing can reach it yet: the account
+/// page is only ever opened by someone who already holds a licence, and no
+/// licence can be issued until the service exists.
 pub const MANAGE_URL: &str = "https://api.bubbletranslate.app/account";
 
 /// The licence service. Overridable in debug builds so the client can be
@@ -58,11 +66,15 @@ const LICENSE_API: &str = "https://api.bubbletranslate.app";
 
 /// Ed25519 public key of the licence service, hex-encoded.
 ///
-/// Still the placeholder: until the service exists and its real key is pasted
-/// in here, every token fails verification and the app stays on the free tier.
-/// That is the correct failure direction, and [`verify`] says so
-/// explicitly rather than reporting a generic bad signature.
-const PUBLIC_KEY_HEX: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+/// The public half of the keypair `service/scripts/keygen.mjs` generated; its
+/// private half lives only in the Worker secret `SIGNING_KEY_PKCS8`. Every
+/// entitlement this binary will ever accept is checked against these 32 bytes,
+/// so changing them invalidates every token already in the field.
+///
+/// An all-zero value is still refused rather than treated as a key — see
+/// [`key_from_hex`] — so a build that loses this constant fails closed, onto
+/// the free tier, instead of trusting anything that arrives.
+const PUBLIC_KEY_HEX: &str = "fcbcd28ac32a0f70b3ce9f7bd304e702e71adc519c0bb7e890cbce5b0eb78a8c";
 
 /// Salt for the device fingerprint. Its only job is to keep the value from
 /// being the machine id itself — see [`device_id`].
@@ -389,10 +401,19 @@ fn service_key() -> Result<VerifyingKey, VerifyError> {
     #[cfg(not(debug_assertions))]
     let hex = PUBLIC_KEY_HEX.to_string();
 
+    key_from_hex(&hex)
+}
+
+/// Turns the compiled-in hex into a key, refusing a placeholder.
+///
+/// Separate from [`service_key`] so the refusal can be tested directly: once a
+/// real key is compiled in, asserting on the constant no longer proves that an
+/// empty one would be rejected, and that is the property worth keeping.
+fn key_from_hex(hex: &str) -> Result<VerifyingKey, VerifyError> {
     if hex.trim_matches('0').is_empty() {
         return Err(VerifyError::NoServiceKey);
     }
-    let bytes: [u8; 32] = decode_hex(&hex)
+    let bytes: [u8; 32] = decode_hex(hex)
         .ok_or_else(|| VerifyError::Malformed("service key is not 32 hex bytes".into()))?;
     VerifyingKey::from_bytes(&bytes).map_err(|_| VerifyError::BadSignature)
 }
@@ -655,9 +676,14 @@ pub mod dev {
         }
         // /dev/urandom rather than a rand crate: this is a development tool on
         // two Unixes, and it is not worth a dependency the app never ships.
+        //
+        // Read to a fixed length, never to EOF: /dev/urandom is an endless
+        // stream, so `fs::read` on it does not return.
+        use std::io::Read as _;
         let mut seed = [0u8; 32];
-        let random = std::fs::read("/dev/urandom").expect("no /dev/urandom");
-        seed.copy_from_slice(&random[..32]);
+        std::fs::File::open("/dev/urandom")
+            .and_then(|mut file| file.read_exact(&mut seed))
+            .expect("no /dev/urandom");
 
         let path = seed_path();
         if let Some(dir) = path.parent() {
@@ -704,11 +730,25 @@ pub mod dev {
 mod tests {
     use super::*;
 
-    /// The placeholder key must never verify anything. If this ever passes by
-    /// accident, every build ships an entitlement anyone can mint.
+    /// A placeholder must never verify anything. If this ever passes by
+    /// accident, a build ships an entitlement anyone can mint.
     #[test]
-    fn the_placeholder_key_is_not_a_key() {
-        assert!(matches!(service_key(), Err(VerifyError::NoServiceKey)));
+    fn a_placeholder_key_is_not_a_key() {
+        for empty in [
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0",
+            "",
+        ] {
+            assert!(matches!(key_from_hex(empty), Err(VerifyError::NoServiceKey)));
+        }
+    }
+
+    /// ...and the key this binary actually ships is a usable one. A typo here
+    /// would not fail the build, it would fail every activation in the field.
+    #[test]
+    fn the_compiled_in_service_key_is_real() {
+        assert_eq!(PUBLIC_KEY_HEX.len(), 64);
+        assert!(key_from_hex(PUBLIC_KEY_HEX).is_ok());
     }
 
     #[test]

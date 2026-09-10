@@ -6,3 +6,8 @@ node_modules/
 # from holding a live PayTR merchant key should not be committable at all.
 .dev.vars
 .dev.vars.*
+
+# The signing keypair. The private half must never be committed: it signs
+# every entitlement the app trusts, and a leak can only be fixed by shipping
+# a new binary.
+.keys/

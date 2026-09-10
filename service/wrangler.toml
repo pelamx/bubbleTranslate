@@ -2,24 +2,38 @@ name = "bubbletranslate-licence"
 main = "src/index.ts"
 compatibility_date = "2026-09-01"
 
+# The hostname the app calls. Declared here, and top-level on purpose: in TOML
+# any key after a table header joins that table, so a `routes` written further
+# down would silently become part of it and a deploy would drop the domain.
+#
+# `custom_domain` rather than a route pattern because this is a Workers custom
+# domain: Cloudflare owns the DNS record and the certificate for it, which is
+# what makes `api.bubbletranslate.app` resolve at all.
+routes = [
+  { pattern = "api.bubbletranslate.app", custom_domain = true }
+]
+
 # Local `wrangler dev` ignores database_id and uses a SQLite file under
-# .wrangler/. Replace it with the real one from `wrangler d1 create` before
-# the first `wrangler deploy`.
+# .wrangler/; the real one is what `--remote` and `wrangler deploy` bind to.
 [[d1_databases]]
 binding = "DB"
 database_name = "bubbletranslate-licence"
-database_id = "local-development-placeholder"
+database_id = "2a1d9813-734e-4380-bee6-60ea0e91f704"
 
 [vars]
-# Opens /v1/pubkey and /v1/dev/issue, and lets the service generate and keep
-# its own signing key. Never set in production: there the key arrives as a
-# secret and licences are created only by a processor's webhook.
-DEV_MODE = "1"
+# Everything here is deployed to production as written. Anything that must
+# differ locally belongs in `.dev.vars`, which is gitignored and overrides
+# these under `wrangler dev` — that is where DEV_MODE now lives.
+#
+# DEV_MODE is deliberately absent. It opens /v1/pubkey and /v1/dev/issue and
+# lets the service mint its own signing key; in production the key arrives as
+# a secret and licences are created only by a processor's webhook. Setting it
+# here once would ship a licence generator to the open internet.
 
 # Where this service is reachable, without a trailing slash. It cannot be
 # inferred from the request: a PayTR callback arrives from PayTR, not from a
 # browser on the site, and the return URLs are built before either.
-PUBLIC_BASE_URL = "http://localhost:8787"
+PUBLIC_BASE_URL = "https://api.bubbletranslate.app"
 
 SUPPORT_EMAIL = "support@bubbletranslate.app"
 
