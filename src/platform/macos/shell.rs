@@ -42,8 +42,17 @@ pub fn has_indicator() -> bool {
 /// else: 3-D Secure needs one, and an app that never asks for a card number is
 /// an app with nothing to leak.
 pub fn open_url(url: &str) {
-    if let Err(err) = std::process::Command::new("/usr/bin/open").arg(url).spawn() {
-        eprintln!("bubbleTranslate: could not open {url}: {err}");
+    match std::process::Command::new("/usr/bin/open").arg(url).spawn() {
+        // `open` hands the URL to Launch Services and exits, activating the
+        // browser as it goes -- so unlike the Linux side there is nothing to
+        // raise here. It still has to be reaped: nothing was waiting on it,
+        // and every click left a defunct process parented to us.
+        Ok(mut child) => {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
+        Err(err) => eprintln!("bubbleTranslate: could not open {url}: {err}"),
     }
 }
 
