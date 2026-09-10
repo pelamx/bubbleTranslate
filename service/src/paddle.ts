@@ -21,6 +21,10 @@ const MAX_SKEW = 300;
 
 export interface Verified {
   eventType: string;
+  /** When Paddle says the event happened, RFC 3339. Not when it arrived:
+   *  deliveries are unordered, so this is the only thing that can say which
+   *  of two payloads for the same entity is the later one. */
+  occurredAt: string | null;
   data: any;
 }
 
@@ -58,7 +62,11 @@ export async function verifyWebhook(
 
   try {
     const event = JSON.parse(raw);
-    return { eventType: String(event?.event_type ?? ""), data: event?.data ?? {} };
+    return {
+      eventType: String(event?.event_type ?? ""),
+      occurredAt: event?.occurred_at ? String(event.occurred_at) : null,
+      data: event?.data ?? {},
+    };
   } catch {
     return null;
   }
@@ -113,7 +121,11 @@ export async function customerEmail(env: Env, data: any): Promise<string | null>
  *  is also why `endLicence("cancelled")` leaves `expires_at` alone. */
 /** What went wrong, as a key into the page strings — the page says it in the
  *  reader's language; the log line beside it says the detail in English. */
-export type CancelFailure = "cancelNotConfigured" | "paddleRefusedCancel" | "paddleUnreachable";
+export type CancelFailure =
+  | "cancelNotConfigured"
+  | "paddleRefusedCancel"
+  | "paddleRefusedPortal"
+  | "paddleUnreachable";
 
 export async function cancelSubscription(
   env: Env,
@@ -139,6 +151,63 @@ export async function cancelSubscription(
     return null;
   } catch (err) {
     console.error("could not reach Paddle to cancel", err);
+    return "paddleUnreachable";
+  }
+}
+
+/** Mints a customer portal session and returns the URL to send the browser to.
+ *
+ *  The portal is Paddle-hosted, and that is the point: updating a card,
+ *  downloading an invoice and cancelling all happen on Paddle's side, so no
+ *  card number and no billing address ever reaches this Worker -- the same
+ *  reason checkout is Paddle.js rather than a form here.
+ *
+ *  The customer id is never taken from the browser. Callers resolve it from
+ *  the licence key the visitor proved they hold; a customer id in a form field
+ *  is an invitation to read someone else's invoices.
+ *
+ *  Sessions are short-lived by design, so the URL is redirected to immediately
+ *  and never stored. */
+export async function portalSession(
+  env: Env,
+  customerId: string,
+  subscriptionIds: string[] = [],
+): Promise<string | CancelFailure> {
+  if (!env.PADDLE_API_KEY) return "cancelNotConfigured";
+  try {
+    const response = await fetch(
+      `${paddleApiBase(env)}/customers/${customerId}/portal-sessions`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${env.PADDLE_API_KEY}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(
+          subscriptionIds.length ? { subscription_ids: subscriptionIds } : {},
+        ),
+      },
+    );
+    if (!response.ok) {
+      console.error(`Paddle refused a portal session (${response.status}): ${await response.text()}`);
+      return "paddleRefusedPortal";
+    }
+    const body: any = await response.json();
+    // The overview, not one of the deep links: this is a general "manage
+    // billing" button, and landing someone who came to read an invoice on the
+    // change-your-card screen is worse than one more click. The deep links are
+    // only a fallback for a response that somehow has no overview.
+    const urls = body?.data?.urls ?? {};
+    const url =
+      urls?.general?.overview ??
+      (urls.subscriptions ?? [])[0]?.update_subscription_payment_method;
+    if (!url) {
+      console.error("Paddle returned a portal session with no URL");
+      return "paddleRefusedPortal";
+    }
+    return String(url);
+  } catch (err) {
+    console.error("could not reach Paddle to open the portal", err);
     return "paddleUnreachable";
   }
 }

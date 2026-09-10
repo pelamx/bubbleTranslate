@@ -20,9 +20,9 @@ PUBLIC_BASE_URL = "http://localhost:8787"
 #
 # Secrets, for local runs only. On the deployed Worker these are set with
 # `wrangler secret put` and exist nowhere on disk. None of them is ever sent to
-# the browser: PADDLE_API_KEY is used server-side for cancellations and
-# customer lookup, and the only Paddle value that reaches the page is
-# PADDLE_CLIENT_TOKEN, which is publishable by design.
+# the browser: PADDLE_API_KEY is used server-side for cancellations, customer
+# lookup and minting customer portal sessions, and the only Paddle value that
+# reaches the page is PADDLE_CLIENT_TOKEN, which is publishable by design.
 PADDLE_API_KEY = "pdl_sdbx_apikey_..."
 PADDLE_WEBHOOK_SECRET = "pdl_ntfset_..."
 

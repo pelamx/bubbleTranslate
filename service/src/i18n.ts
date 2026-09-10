@@ -133,6 +133,12 @@ const en = {
   noRecurringCharge: "This licence has no recurring charge to cancel.",
   cancelled: (date: string) => `Cancelled. Pro keeps working until ${date}.`,
   cancelNotConfigured: "Subscription management is not configured on this server.",
+  manageBilling: "Manage billing",
+  manageBillingNote:
+    "Opens Paddle, where you can update your card, download invoices and change your plan.",
+  portalNotAvailable: "Billing management is not available for this licence yet.",
+  paddleRefusedPortal: "Paddle could not open the billing portal. Please contact support.",
+  scheduledToCancel: (date: string) => `Scheduled to cancel on ${date}. Pro works until then.`,
   paddleRefusedCancel: "Paddle could not cancel this subscription. Please contact support.",
   paddleUnreachable: "Could not reach Paddle. Please try again shortly.",
 
@@ -227,6 +233,12 @@ const tr: Strings = {
   noRecurringCharge: "Bu lisansın iptal edilecek yinelenen bir ücreti yok.",
   cancelled: (date: string) => `İptal edildi. Pro ${date} tarihine kadar çalışmaya devam eder.`,
   cancelNotConfigured: "Abonelik yönetimi bu sunucuda ayarlanmamış.",
+  manageBilling: "Faturalandırmayı yönet",
+  manageBillingNote:
+    "Kartınızı güncelleyebileceğiniz, faturalarınızı indirebileceğiniz ve planınızı değiştirebileceğiniz Paddle sayfasını açar.",
+  portalNotAvailable: "Bu lisans için faturalandırma yönetimi henüz kullanılamıyor.",
+  paddleRefusedPortal: "Paddle faturalandırma portalını açamadı. Lütfen destek ile iletişime geçin.",
+  scheduledToCancel: (date: string) => `${date} tarihinde iptal edilecek. Pro o tarihe kadar çalışır.`,
   paddleRefusedCancel: "Paddle bu aboneliği iptal edemedi. Lütfen destekle iletişime geçin.",
   paddleUnreachable: "Paddle'a ulaşılamadı. Lütfen kısa süre sonra tekrar deneyin.",
 
@@ -318,6 +330,12 @@ const es: Strings = {
   noRecurringCharge: "Esta licencia no tiene ningún cobro recurrente que cancelar.",
   cancelled: (date: string) => `Cancelada. Pro sigue funcionando hasta el ${date}.`,
   cancelNotConfigured: "La gestión de suscripciones no está configurada en este servidor.",
+  manageBilling: "Gestionar la facturación",
+  manageBillingNote:
+    "Abre Paddle, donde puedes actualizar tu tarjeta, descargar facturas y cambiar de plan.",
+  portalNotAvailable: "La gestión de facturación aún no está disponible para esta licencia.",
+  paddleRefusedPortal: "Paddle no pudo abrir el portal de facturación. Contacta con soporte.",
+  scheduledToCancel: (date: string) => `Se cancelará el ${date}. Pro funciona hasta esa fecha.`,
   paddleRefusedCancel: "Paddle no pudo cancelar esta suscripción. Contacta con soporte.",
   paddleUnreachable: "No se pudo contactar con Paddle. Inténtalo de nuevo en unos minutos.",
 

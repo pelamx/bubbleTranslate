@@ -462,6 +462,12 @@ export interface AccountView {
   seatLimit: number;
   provider: string;
   cancellable: boolean;
+  /** Whether the Paddle-hosted portal can be opened -- true only once a
+   *  webhook has told us which Paddle customer this licence belongs to. */
+  portal: boolean;
+  /** Set when Paddle is scheduled to cancel at the end of the paid period.
+   *  Shown, not enforced: the subscription is live until that date. */
+  scheduledCancelAt: string | null;
   message?: string;
   error?: string;
 }
@@ -512,6 +518,15 @@ export function accountPage(
          ${s.fixedTerm(escapeHtml(view.renews ?? s.itsExpiryDate), buyUrl)}
        </p>`;
 
+  const portal = view.portal
+    ? `<form method="post" action="/account/portal" style="margin-top:18px">
+         <input type="hidden" name="key" value="${escapeHtml(view.key)}">
+         <input type="hidden" name="lang" value="${ctx.lang}">
+         <button class="quiet" type="submit">${s.manageBilling}</button>
+         <p class="muted" style="margin-top:8px">${s.manageBillingNote}</p>
+       </form>`
+    : "";
+
   const status = s.status[view.status] ?? view.status;
   const cycle = s.cycle[view.cycle] ?? view.cycle;
   return page(
@@ -526,6 +541,8 @@ export function accountPage(
        ${s.devices(view.seats, view.seatLimit)}<br>
        ${s.paidThrough} ${escapeHtml(view.provider === "paytr" ? "PayTR" : "Paddle")}
      </p>
+     ${view.scheduledCancelAt ? `<p class="muted">${s.scheduledToCancel(escapeHtml(view.scheduledCancelAt))}</p>` : ""}
+     ${portal}
      ${cancel}
      <hr>
      ${form}

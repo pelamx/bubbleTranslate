@@ -93,3 +93,54 @@ CREATE TABLE IF NOT EXISTS service_keys (
   pkcs8       TEXT NOT NULL,
   public_hex  TEXT NOT NULL
 );
+
+-- -- The Paddle mirror ------------------------------------------------------
+--
+-- What Paddle believes, copied here from verified webhooks. It is a cache of
+-- someone else's records, not a second source of truth: nothing writes to
+-- these tables except `mirror.ts`, and every column comes off an event.
+--
+-- The `licences` table above is still what entitles anyone to anything. This
+-- mirror exists so that the account page can answer "what is Paddle going to
+-- charge me next, and where do I change my card" without a round trip, and so
+-- that a customer id can be resolved server-side rather than taken from a form.
+--
+-- There is deliberately no foreign key from subscriptions to customers.
+-- Deliveries are at-least-once and unordered, so `subscription.created` can
+-- and does arrive before `customer.created`; a constraint here would turn a
+-- normal ordering into a 500 and a retry storm.
+
+CREATE TABLE IF NOT EXISTS paddle_customers (
+  customer_id TEXT PRIMARY KEY,
+  email       TEXT,
+  status      TEXT,
+  -- `occurred_at` of the event this row was last written from, in unix
+  -- seconds. Webhooks arrive out of order, so an older event must not
+  -- overwrite a newer one -- this is what the upserts compare against.
+  event_at    INTEGER NOT NULL DEFAULT 0,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS paddle_subscriptions (
+  subscription_id         TEXT PRIMARY KEY,
+  customer_id             TEXT NOT NULL,
+  -- Paddle's own vocabulary, stored verbatim: active | trialing | past_due |
+  -- paused | canceled. Never translated on the way in, so that `grantsAccess`
+  -- is the single place that decides what any of them mean.
+  status                  TEXT NOT NULL,
+  price_id                TEXT,
+  product_id              TEXT,
+  -- A scheduled cancellation or pause is a future intention, not a current
+  -- state. It is recorded so the account page can say "ends on the 3rd", and
+  -- it is deliberately not consulted by `grantsAccess`.
+  scheduled_change_action TEXT,
+  scheduled_change_at     TEXT,
+  next_billed_at          TEXT,
+  event_at                INTEGER NOT NULL DEFAULT 0,
+  created_at              INTEGER NOT NULL,
+  updated_at              INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS paddle_subscriptions_by_customer
+  ON paddle_subscriptions (customer_id);

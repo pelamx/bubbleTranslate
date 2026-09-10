@@ -46,7 +46,22 @@ import {
   sweepRevealedKeys,
 } from "./licences";
 import { handleAdmin } from "./admin";
-import { cancelSubscription, customerEmail, cycleFromItems, verifyWebhook } from "./paddle";
+import {
+  type CancelFailure,
+  cancelSubscription,
+  customerEmail,
+  cycleFromItems,
+  portalSession,
+  verifyWebhook,
+} from "./paddle";
+import {
+  grantsAccess,
+  mirrorCustomer,
+  mirrorSubscription,
+  noteCustomer,
+  occurredAt,
+  subscriptionById,
+} from "./mirror";
 import { isLang, pickLang, t, withLang } from "./i18n";
 import { type PageContext, accountPage, buyPage, donePage, lira, paytrPage } from "./pages";
 import { createCharge, iframeUrl, readCallback } from "./paytr";
@@ -418,6 +433,10 @@ async function paddleWebhook(env: Env, request: Request): Promise<Response> {
   if (!event) return refuse("Bad signature.", 401);
 
   const data = event.data ?? {};
+  // Paddle's own idea of when this happened. Deliveries are at-least-once and
+  // unordered, so every mirror write is guarded by it: an old payload arriving
+  // late must not overwrite a newer status.
+  const eventAt = occurredAt(event);
 
   switch (event.eventType) {
     case "transaction.completed": {
@@ -425,6 +444,7 @@ async function paddleWebhook(env: Env, request: Request): Promise<Response> {
       const subscriptionId = data.subscription_id ? String(data.subscription_id) : null;
       const ref = data?.custom_data?.ref ? String(data.custom_data.ref) : null;
       const email = await customerEmail(env, data);
+      await noteCustomer(env, data?.customer_id ? String(data.customer_id) : null, email);
 
       // A renewal has the same shape as a first payment, minus our ref: the
       // subscription already exists, so this extends it rather than selling
@@ -446,10 +466,30 @@ async function paddleWebhook(env: Env, request: Request): Promise<Response> {
       return json({ ok: true });
     }
 
+    case "subscription.created":
+    case "subscription.updated": {
+      // The mirror takes every one of these; the licence is only moved by a
+      // status that actually stops the entitlement. A `scheduled_change` to
+      // cancel is not one: it says what Paddle will do at the end of a period
+      // the customer has already paid for, and acting on it now would take
+      // back time they bought. `subscription.canceled` is what does that.
+      await mirrorSubscription(env, data, eventAt);
+      return json({ ok: true });
+    }
+
     case "subscription.canceled": {
+      await mirrorSubscription(env, data, eventAt);
       const licence = await licenceByProviderRef(env, "paddle", String(data.id ?? ""));
       // Cancelling leaves the paid term alone — it has been paid for.
       if (licence) await endLicence(env, licence, "cancelled");
+      return json({ ok: true });
+    }
+
+    case "customer.created":
+    case "customer.updated": {
+      // One write for both: the second delivery of a create and the first of
+      // an update are indistinguishable, and should leave the same row.
+      await mirrorCustomer(env, data, eventAt);
       return json({ ok: true });
     }
 
@@ -482,6 +522,15 @@ async function accountView(
     .bind(licence.id)
     .first<{ count: number }>())!;
 
+  // What Paddle believes, if a webhook has told us. It only ever decorates
+  // this page -- the licence row is what entitles anyone to anything, and a
+  // mirror that is empty (an old licence, a webhook not yet delivered) must
+  // not make the page refuse to work.
+  const subscription =
+    licence.provider === "paddle" && licence.provider_ref
+      ? await subscriptionById(env, licence.provider_ref)
+      : null;
+
   return accountPage(
     ctx,
     {
@@ -495,7 +544,22 @@ async function accountView(
       provider: licence.provider,
       // PayTR licences are fixed-term and do not recur, so there is nothing to
       // cancel — see the note at the top of `paytr.ts`.
-      cancellable: licence.provider === "paddle" && licence.status === "active",
+      cancellable:
+        licence.provider === "paddle" &&
+        licence.status === "active" &&
+        // A subscription Paddle has already stopped billing has nothing left
+        // to cancel; the button would only produce an API error.
+        (!subscription || grantsAccess(subscription)),
+      // The portal needs a customer id, and the only place one comes from is
+      // a webhook. No mirror row, no button -- rather than a button that
+      // fails after the click.
+      portal: Boolean(subscription?.customer_id),
+      // A scheduled cancellation is a future intention, not a current state.
+      // It is said out loud here precisely because it revokes nothing yet.
+      scheduledCancelAt:
+        subscription?.scheduled_change_action === "cancel"
+          ? (subscription.scheduled_change_at ?? "").slice(0, 10) || null
+          : null,
       message,
       error,
     },
@@ -538,6 +602,43 @@ async function accountCancel(env: Env, request: Request, url: URL): Promise<Resp
   await endLicence(env, licence, "cancelled");
   const updated = (await licenceById(env, licence.id)) ?? licence;
   return accountView(env, ctx, updated, key, s.cancelled(updated.renews_at ?? s.endOfPaidPeriod));
+}
+
+/** Opens the Paddle-hosted customer portal, where the customer updates a card,
+ *  reads invoices or cancels.
+ *
+ *  Authentication first, and the licence key is the credential: this service
+ *  has no accounts and no cookies, so holding the key is what proves the
+ *  visitor is the customer. The Paddle customer id is then resolved from the
+ *  mirror on this side. Nothing the browser sent names a customer -- a form
+ *  field holding a `ctm_...` would be an invitation to read a stranger's
+ *  billing history.
+ *
+ *  The session URL is redirected to and never stored. Paddle expires these
+ *  quickly, and a cached one is exactly that stranger's billing history. */
+async function accountPortal(env: Env, request: Request, url: URL): Promise<Response> {
+  const form = await request.formData();
+  const ctx = pageContext(request, url, form.get("lang"));
+  const s = t(ctx.lang);
+  const key = String(form.get("key") ?? "").trim().toUpperCase();
+
+  const licence = key ? await licenceByKey(env, key) : null;
+  if (!licence) return accountPage(ctx, null, supportEmail(env), s.keyNotRecognised);
+
+  if (licence.provider !== "paddle" || !licence.provider_ref) {
+    return accountView(env, ctx, licence, key, undefined, s.portalNotAvailable);
+  }
+
+  const subscription = await subscriptionById(env, licence.provider_ref);
+  if (!subscription?.customer_id) {
+    return accountView(env, ctx, licence, key, undefined, s.portalNotAvailable);
+  }
+
+  const result = await portalSession(env, subscription.customer_id, [licence.provider_ref]);
+  if (!result.startsWith("http")) {
+    return accountView(env, ctx, licence, key, undefined, s[result as CancelFailure]);
+  }
+  return new Response(null, { status: 303, headers: { location: result } });
 }
 
 // -- development -------------------------------------------------------------
@@ -609,6 +710,8 @@ export default {
           return await checkoutPaddle(env, request);
         case "/account":
           return await account(env, request, url);
+        case "/account/portal":
+          return await accountPortal(env, request, url);
         case "/account/cancel":
           return await accountCancel(env, request, url);
       }
