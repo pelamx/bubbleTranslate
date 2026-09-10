@@ -14,11 +14,44 @@ APP="bubbleTranslate.app"
 # macOS treat the app as new and ask for permission again.
 BUNDLE_ID="com.pelamx.bubbleTranslate"
 
-cargo build --release
+STAGE_BIN="$(mktemp -t bubbleTranslate-bin)"
+trap 'rm -f "$STAGE_BIN"' EXIT
+
+# --- build a universal binary ------------------------------------------------
+#
+# Both architectures, joined with lipo. An arm64-only build simply does not
+# launch on an Intel Mac: Rosetta translates x86_64 to arm64, never the other
+# way, so there is no fallback to rely on.
+#
+# cargo runs whichever `rustc` comes first on PATH. If Homebrew's rust is
+# ahead of rustup's it will not know about any added target, and the build
+# fails claiming the target is not installed when it plainly is -- so prefer
+# rustup's toolchain here rather than depending on the caller's PATH.
+[[ -x "$HOME/.cargo/bin/rustc" ]] && export PATH="$HOME/.cargo/bin:$PATH"
+
+ARM="aarch64-apple-darwin"
+INTEL="x86_64-apple-darwin"
+
+cargo build --release --target "$ARM"
+
+# Intel is best-effort: without its std the build still produces a working
+# Apple Silicon app, which is better than failing the release outright. The
+# warning is loud because shipping that DMG excludes every Intel Mac.
+if rustup target list --installed 2>/dev/null | grep -qx "$INTEL"; then
+    cargo build --release --target "$INTEL"
+    lipo -create -output "$STAGE_BIN" \
+        "target/$ARM/release/bubbleTranslate" \
+        "target/$INTEL/release/bubbleTranslate"
+else
+    echo "warning: $INTEL not installed -- building Apple Silicon only." >&2
+    echo "         Intel Macs cannot run this build. Fix with:" >&2
+    echo "           rustup target add $INTEL" >&2
+    cp "target/$ARM/release/bubbleTranslate" "$STAGE_BIN"
+fi
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp target/release/bubbleTranslate "$APP/Contents/MacOS/bubbleTranslate"
+cp "$STAGE_BIN" "$APP/Contents/MacOS/bubbleTranslate"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
