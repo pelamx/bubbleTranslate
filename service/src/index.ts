@@ -418,6 +418,9 @@ async function accountView(
       // a webhook. No mirror row, no button -- rather than a button that
       // fails after the click.
       portal: Boolean(subscription?.customer_id),
+      // Handed to Retain on the page. Null until a webhook has named the
+      // customer, which is the same moment the portal button appears.
+      customerId: subscription?.customer_id ?? null,
       // A scheduled cancellation is a future intention, not a current state.
       // It is said out loud here precisely because it revokes nothing yet.
       scheduledCancelAt:
@@ -428,6 +431,13 @@ async function accountView(
       error,
     },
     supportEmail(env),
+    undefined,
+    // Only when Paddle is actually configured: `paddleEnvOrThrow` refuses to
+    // guess, and the account page must not fail to render over a Retain
+    // nicety.
+    paddleConfigured(env)
+      ? { clientToken: env.PADDLE_CLIENT_TOKEN, env: paddleEnvOrThrow(env) }
+      : undefined,
   );
 }
 

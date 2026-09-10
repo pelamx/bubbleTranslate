@@ -433,6 +433,12 @@ export interface AccountView {
   /** Whether the Paddle-hosted portal can be opened -- true only once a
    *  webhook has told us which Paddle customer this licence belongs to. */
   portal: boolean;
+  /** The Paddle customer this licence belongs to, `ctm_…`, or null until a
+   *  webhook has said so. Retain is initialised with it and nothing else on
+   *  the page needs it. It has to be Paddle's own id: an internal one, or an
+   *  email, would initialise cleanly and then attribute every session to
+   *  nobody -- worse than leaving Retain switched off. */
+  customerId: string | null;
   /** Set when Paddle is scheduled to cancel at the end of the paid period.
    *  Shown, not enforced: the subscription is live until that date. */
   scheduledCancelAt: string | null;
@@ -445,6 +451,7 @@ export function accountPage(
   view: AccountView | null,
   support: string,
   error?: string,
+  paddle?: { clientToken?: string; env?: "production" | "sandbox" },
 ): Response {
   const s = t(ctx.lang);
   const form = `
@@ -497,6 +504,31 @@ export function accountPage(
 
   const status = s.status[view.status] ?? view.status;
   const cycle = s.cycle[view.cycle] ?? view.cycle;
+
+  // Paddle Retain, which does nothing until Paddle.js has been told which
+  // customer is reading the page. The id is matched against Paddle's own shape
+  // rather than trusted: this is the one page with a real `ctm_…` to hand, and
+  // anything else here would be silently wrong rather than loudly broken.
+  // Without one, nothing is emitted at all -- no script, no token, no empty
+  // Initialize. Retain is a live-only product; on sandbox this initialises and
+  // simply has nothing to show, which is documented and not worth branching on.
+  const retainId =
+    view.customerId && /^ctm_[a-z0-9]+$/.test(view.customerId) ? view.customerId : null;
+  const retain =
+    retainId && paddle?.clientToken
+      ? {
+          head: `<script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>`,
+          body: `
+     <script>
+       Paddle.Environment.set(${JSON.stringify(paddle.env ?? "production")});
+       Paddle.Initialize({
+         token: ${JSON.stringify(paddle.clientToken)},
+         pwCustomer: { id: ${JSON.stringify(retainId)} },
+       });
+     </script>`,
+        }
+      : { head: "", body: "" };
+
   return page(
     title,
     `<h1>${s.yourSubscription}</h1>
@@ -514,8 +546,8 @@ export function accountPage(
      ${cancel}
      <hr>
      ${form}
-     <p class="muted">${s.questions}: ${escapeHtml(support)}</p>`,
-    "",
+     <p class="muted">${s.questions}: ${escapeHtml(support)}</p>${retain.body}`,
+    retain.head,
     false,
     ctx,
   );
