@@ -2,85 +2,72 @@ name = "bubbletranslate-licence"
 main = "src/index.ts"
 compatibility_date = "2026-09-01"
 
-# The hostname the app calls. Declared here, and top-level on purpose: in TOML
-# any key after a table header joins that table, so a `routes` written further
-# down would silently become part of it and a deploy would drop the domain.
-#
-# `custom_domain` rather than a route pattern because this is a Workers custom
-# domain: Cloudflare owns the DNS record and the certificate for it, which is
-# what makes `api.bubbletranslate.app` resolve at all.
-routes = [
-  { pattern = "api.bubbletranslate.app", custom_domain = true }
-]
+# Served only at the custom domain. The workers.dev address is switched off
+# so there is exactly one hostname the app, the processors and the buy page
+# ever see.
+workers_dev = false
+routes = [{ pattern = "api.bubbletranslate.app", custom_domain = true }]
 
 # Local `wrangler dev` ignores database_id and uses a SQLite file under
-# .wrangler/; the real one is what `--remote` and `wrangler deploy` bind to.
+# .wrangler/. Replace it with the real one from `wrangler d1 create` before
+# the first `wrangler deploy`.
 [[d1_databases]]
 binding = "DB"
 database_name = "bubbletranslate-licence"
 database_id = "2a1d9813-734e-4380-bee6-60ea0e91f704"
 
 [vars]
-# Everything here is deployed to production as written. Anything that must
-# differ locally belongs in `.dev.vars`, which is gitignored and overrides
-# these under `wrangler dev` — that is where DEV_MODE now lives.
-#
-# DEV_MODE is deliberately absent. It opens /v1/pubkey and /v1/dev/issue and
-# lets the service mint its own signing key; in production the key arrives as
-# a secret and licences are created only by a processor's webhook. Setting it
-# here once would ship a licence generator to the open internet.
+# DEV_MODE opens /v1/pubkey and /v1/dev/issue and lets the service mint its
+# own signing key. It is deliberately absent here: this file is what gets
+# deployed. For local work, `npm run dev` passes it through .dev.vars.
 
 # Where this service is reachable, without a trailing slash. It cannot be
-# inferred from the request: a PayTR callback arrives from PayTR, not from a
-# browser on the site, and the return URLs are built before either.
+# inferred from the request: the Paddle webhook arrives from Paddle, not from a
+# browser on the site, and the success URL is built before either.
 PUBLIC_BASE_URL = "https://api.bubbletranslate.app"
 
 SUPPORT_EMAIL = "support@bubbletranslate.app"
 
-# -- PayTR, for Turkey --------------------------------------------------------
+# -- Paddle -------------------------------------------------------------------
 #
-# ⚠ SET THESE BEFORE TAKING A LIRA PAYMENT. They are the two numbers in this
-# whole system that cannot be derived from anything else.
+# Paddle is the only processor: merchant of record everywhere, so it owns VAT,
+# sales tax and invoicing in every country at once.
 #
-# In kuruş: 4900 is ₺49,00. Kuruş rather than lira because it is the unit PayTR
-# is given, and the unit an integer cannot round wrongly.
-#
-# These are deliberately NOT a conversion of $2 and $20. PayTR settles in lira,
-# and a subscription whose price follows the exchange rate is one no customer
-# can budget for and no accountant can reconcile. Pick a number, and revisit it
-# when you mean to — a price change should be a decision, not a side effect.
-# Until both are set, /buy tells Turkish visitors that checkout is unavailable
-# and offers them the dollar page instead; it never charges zero.
-PAYTR_PRICE_MONTHLY_KURUS = ""
-PAYTR_PRICE_YEARLY_KURUS = ""
-
-# "1" runs PayTR in test mode, where no card is really charged.
-PAYTR_TEST_MODE = "1"
-
-# -- Paddle, for everywhere else ----------------------------------------------
-#
-# "sandbox" until it is "production". This chooses both the API host and the
-# Paddle.js environment, so the two can never disagree.
-PADDLE_ENV = "sandbox"
+# This chooses both the API host and the Paddle.js environment, so the two can
+# never disagree. Now "production": real cards, real money.
+PADDLE_ENV = "production"
 
 # From the Paddle catalogue, `pri_...`. The prices themselves ($2/month,
 # $20/year) are set in Paddle, not here — Paddle is the merchant of record and
 # owns what the customer is charged, including tax.
-PADDLE_PRICE_MONTHLY = ""
-PADDLE_PRICE_YEARLY = ""
+#
+# These four values move together, and they are live as of the switch to
+# production: the env, both price ids and the client token all name the live
+# account. A sandbox id left among them fails at checkout rather than at
+# deploy, which is why they are changed in one edit and never one at a time.
+# PADDLE_WEBHOOK_SECRET must be the live destination's signing secret to match.
+#
+# Live product: pro_01m20ka003t3cqdmvy25q1tey8
+#
+# The sandbox catalogue, kept for a run against the sandbox account:
+#
+#   PADDLE_ENV            = "sandbox"
+#   PADDLE_PRICE_MONTHLY  = "pri_01m20cnzfc4qrtweh094467ws8"
+#   PADDLE_PRICE_YEARLY   = "pri_01m20cnzx8namfwybrcxbn3bg2"
+#   PADDLE_CLIENT_TOKEN   = "test_dea032ce3e79036ceb14475bd27"
+
+PADDLE_PRICE_MONTHLY = "pri_01m20ka0fmc6s2am1qc0aecjt0"
+PADDLE_PRICE_YEARLY = "pri_01m20ka0z5q29jekndxfxw5z16"
 
 # The browser-side token Paddle.js is initialised with. Publishable by design —
 # it appears in the page source — and not a secret.
-PADDLE_CLIENT_TOKEN = ""
+PADDLE_CLIENT_TOKEN = "live_b16bde0d516696e5290039b41e4"
 
 # Secrets, set with `wrangler secret put` and never written here:
 #
 #   SIGNING_KEY_PKCS8        base64url PKCS#8, the licence signing key
 #   SIGNING_KEY_PUBLIC       its public half as hex — also PUBLIC_KEY_HEX in
 #                            src/license.rs
-#   PAYTR_MERCHANT_ID
-#   PAYTR_MERCHANT_KEY
-#   PAYTR_MERCHANT_SALT
 #   PADDLE_API_KEY           server-side, for cancellations and customer lookup
 #   PADDLE_WEBHOOK_SECRET    the notification destination's signing secret
 #   RESEND_API_KEY           optional; without it the key is shown on the

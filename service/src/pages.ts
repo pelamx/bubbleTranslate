@@ -11,6 +11,7 @@
 // checkout.
 
 import type { Cycle } from "./env";
+import { TIERS } from "./tiers";
 import { DEFAULT_LANG, LANGS, type Lang, type Strings, switchedTo, t, withLang } from "./i18n";
 
 /// What the free tier allows per day. Display only: the number the client
@@ -26,12 +27,18 @@ export const escapeHtml = (value: unknown): string =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-/** Lira, from the integer kuruş the rest of the service deals in. */
-export const lira = (kurus: number) =>
-  `₺${(kurus / 100).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/** The marketing site, which is where the policies live. Paddle's domain
+ *  review fetches the *checkout* domain -- this service -- so the terms,
+ *  privacy notice and refund policy have to be reachable from here too, not
+ *  only from the site they are written on. */
+export const SITE = "https://bubbletranslate.app";
 
 const STYLE = `
   :root { color-scheme: dark; }
+  footer.legal { max-width: 620px; margin: 26px auto 40px; padding: 0 18px; text-align: center;
+    font-size: .82rem; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+  footer.legal a { color: #9fb0d4; text-decoration: none; }
+  footer.legal a:hover { color: #eaf0ff; text-decoration: underline; }
   * { box-sizing: border-box; }
   body {
     margin: 0; padding: 40px 20px; background: #1e1f22; color: #f0f0f0;
@@ -127,6 +134,23 @@ export interface PageContext {
   url: URL;
 }
 
+/** The policy links every page below carries.
+ *
+ *  Not decoration: a checkout domain whose terms, privacy notice and refund
+ *  policy cannot be reached from it is the documented reason Paddle sends a
+ *  domain review back as `action_required`. */
+function legalFooter(lang: Lang): string {
+  const s = t(lang);
+  const link = (href: string, label: string) =>
+    `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
+  return `<footer class="legal">${[
+    link(`${SITE}/`, s.legalHome),
+    link(`${SITE}/terms`, s.legalTerms),
+    link(`${SITE}/privacy`, s.legalPrivacy),
+    link(`${SITE}/refunds`, s.legalRefunds),
+  ].join("")}</footer>`;
+}
+
 export function page(
   title: string,
   body: string,
@@ -153,7 +177,7 @@ export function page(
     `<!doctype html><html lang="${lang}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title><style>${STYLE}</style>${head}</head>
-<body>${switcher}<div class="sheet${wide ? " wide" : ""}">${body}</div></body></html>`,
+<body>${switcher}<div class="sheet${wide ? " wide" : ""}">${body}</div>${legalFooter(lang)}</body></html>`,
     { headers },
   );
 }
@@ -162,7 +186,7 @@ const planCard = (s: Strings, cycle: Cycle, price: string, checked: boolean, not
   <label class="plan${checked ? " on" : ""}">
     <input type="radio" name="cycle" value="${cycle}"${checked ? " checked" : ""}>
     <div class="name">${cycle === "yearly" ? s.yearly : s.monthly}</div>
-    <div class="price">${escapeHtml(price)}</div>
+    <div class="price" data-cycle="${cycle}">${escapeHtml(price)}</div>
     <div class="note">${escapeHtml(note)}</div>
   </label>`;
 
@@ -181,20 +205,24 @@ const PLAN_SCRIPT = `
 
 export interface BuyOptions {
   ctx: PageContext;
-  turkey: boolean;
   configured: boolean;
   /** A key into the strings, so the reason reads in the page's language. */
-  reason?: "reasonPaytrUnconfigured" | "reasonPaddleUnconfigured";
+  reason?: "reasonPaddleUnconfigured";
   monthly: string;
   yearly: string;
   src: string;
-  otherUrl: string;
-  /** Paddle only. */
   clientToken?: string;
-  paddleEnv?: string;
+  paddleEnv?: "production" | "sandbox";
   priceMonthly?: string;
   priceYearly?: string;
   successUrl?: string;
+  /** A real ISO 3166-1 alpha-2 code, or undefined. Never a sentinel:
+   *  Cloudflare sends XX for an address it cannot place and T1 for Tor.
+   *  Neither is a country, and Paddle rejects them. When this is undefined
+   *  the browser omits `address` entirely and Paddle geolocates the visitor's
+   *  IP, which is both more accurate than our guess and the documented
+   *  behaviour. */
+  country?: string;
 }
 
 export function buyPage(opts: BuyOptions): Response {
@@ -212,61 +240,26 @@ export function buyPage(opts: BuyOptions): Response {
     );
   }
 
-  // The plan cards are radio inputs, so on the PayTR page they have to sit
-  // *inside* the form that posts them — a radio outside the form it belongs to
-  // is simply not submitted, and the server would be left guessing which plan
-  // was bought. Hence `heading` and `plans` separately rather than one block:
-  // the Paddle page reads the selection with JavaScript and does not care, but
-  // this one is a plain form post and cares a great deal.
-  //
   // The free tier is described here, next to Pro, because this is the page
   // the bubble sends someone to at the moment they hit the wall — the one
   // place they will read what the wall is and what removes it.
   const heading = `
     <h1>${s.proTitle}</h1>
-    <p>${opts.turkey ? s.introPaytr : s.introPaddle}</p>
+    <p>${s.introPaddle}</p>
     <div class="tiers">
-      <div class="tier">
-        <div class="name">${s.tierFreeName}</div>
-        ${s.tierFree(FREE_DAILY_TRANSLATIONS)}
-      </div>
-      <div class="tier pro">
-        <div class="name">${s.tierProName}</div>
-        ${s.tierPro}
-      </div>
+      ${TIERS.map(
+        (tier) => `
+      <div class="tier${tier.purchasable ? " pro" : ""}" data-tier="${tier.id}">
+        <div class="name">${s[tier.nameKey]}</div>
+        ${tier.id === "free" ? s.tierFree(FREE_DAILY_TRANSLATIONS) : s.tierPro}
+      </div>`,
+      ).join("")}
     </div>`;
   const plans = `
     <div class="plans">
       ${planCard(s, "monthly", opts.monthly, false, s.billedMonthly)}
-      ${planCard(s, "yearly", opts.yearly, true, opts.turkey ? s.yearlyNotePaytr : s.yearlyNotePaddle)}
+      ${planCard(s, "yearly", opts.yearly, true, s.yearlyNotePaddle)}
     </div>`;
-
-  const other = escapeHtml(withLang(opts.otherUrl, ctx.lang));
-  const footer = `
-    <hr>
-    <p class="muted">${opts.turkey ? s.footerTurkey(other) : s.footerOther(other)}</p>`;
-
-  if (opts.turkey) {
-    return page(
-      s.proTitle,
-      `${heading}
-       <form method="post" action="/checkout/paytr">
-         ${plans}
-         <input type="hidden" name="src" value="${escapeHtml(opts.src)}">
-         <input type="hidden" name="lang" value="${ctx.lang}">
-         <label class="field" for="email">${s.emailLabel}</label>
-         <input id="email" type="email" name="email" required autocomplete="email"
-                placeholder="${escapeHtml(s.emailPlaceholder)}">
-         <button type="submit">${s.continueToPayment}</button>
-       </form>
-       <p class="muted" style="margin-top:14px">${s.paytrNote}</p>
-       ${footer}
-       <script>${PLAN_SCRIPT}</script>`,
-      "",
-      false,
-      ctx,
-    );
-  }
 
   // Paddle. The overlay wants the price id, and carries our order ref through
   // to the webhook in `customData` — that ref is how the success page knows
@@ -280,15 +273,47 @@ export function buyPage(opts: BuyOptions): Response {
     <input id="email" type="email" required autocomplete="email" placeholder="${escapeHtml(s.emailPlaceholder)}">
     <button id="pay" type="button">${s.continueToPayment}</button>
     <p class="muted" style="margin-top:14px">${s.paddleNote}</p>
-    ${footer}
     <script>
       ${PLAN_SCRIPT}
-      Paddle.Environment.set(${JSON.stringify(opts.paddleEnv === "production" ? "production" : "sandbox")});
+      Paddle.Environment.set(${JSON.stringify(opts.paddleEnv)});
       Paddle.Initialize({ token: ${JSON.stringify(opts.clientToken ?? "")} });
       const prices = {
         monthly: ${JSON.stringify(opts.priceMonthly ?? "")},
         yearly: ${JSON.stringify(opts.priceYearly ?? "")},
       };
+      // Undefined unless the edge actually placed the visitor. See the note on
+      // BuyOptions.country: a sentinel must never reach Paddle as a country.
+      const country = ${JSON.stringify(opts.country ?? null)};
+
+      // The cards are rendered with the dollar price, then corrected to the
+      // buyer's own currency by Paddle. The figures shown are Paddle's
+      // formatted strings exactly as returned -- the totals it will actually
+      // charge, tax included, in the currency it will charge them in. Nothing
+      // here parses, converts or re-formats a price: the dollar amount is a
+      // fallback for a failed request, not an input to arithmetic.
+      (async () => {
+        const items = Object.entries(prices)
+          .filter(([, id]) => id)
+          .map(([cycle, id]) => ({ cycle, priceId: id }));
+        if (!items.length) return;
+        try {
+          const preview = await Paddle.PricePreview({
+            items: items.map((item) => ({ priceId: item.priceId, quantity: 1 })),
+            ...(country ? { address: { countryCode: country } } : {}),
+          });
+          for (const line of preview.data.details.lineItems) {
+            const match = items.find((item) => item.priceId === line.price.id);
+            if (!match) continue;
+            const cell = document.querySelector('.price[data-cycle="' + match.cycle + '"]');
+            if (cell) cell.textContent = line.formattedTotals.total;
+          }
+        } catch (err) {
+          // A failed preview leaves the dollar prices standing. It must never
+          // blank the cards or block the buy button: the checkout overlay
+          // prices the transaction itself regardless of what this showed.
+          console.error('price preview failed', err);
+        }
+      })();
       const words = ${JSON.stringify({ planUnavailable: s.planUnavailable, checkoutFailed: s.checkoutFailed })};
       document.getElementById('pay').addEventListener('click', async () => {
         const email = document.getElementById('email');
@@ -309,6 +334,8 @@ export function buyPage(opts: BuyOptions): Response {
           customer: { email: email.value },
           customData: { ref: created.ref },
           settings: {
+            displayMode: 'overlay',
+            variant: 'one-page',
             successUrl: ${JSON.stringify(withLang(opts.successUrl ?? "", ctx.lang))} + '&ref=' + created.ref,
           },
         });
@@ -317,25 +344,8 @@ export function buyPage(opts: BuyOptions): Response {
   return page(s.proTitle, body, paddleScript, false, ctx);
 }
 
-// -- the PayTR iframe --------------------------------------------------------
 
-export function paytrPage(ctx: PageContext, iframeSrc: string, ref: string): Response {
-  const s = t(ctx.lang);
-  return page(
-    `${s.paymentTitle} — ${s.proTitle}`,
-    `<h1>${s.paymentTitle}</h1>
-     <p class="muted">${s.order} ${escapeHtml(ref.slice(0, 12))}</p>
-     <iframe src="${escapeHtml(iframeSrc)}"
-             id="paytriframe" frameborder="0" scrolling="no"></iframe>
-     <script src="https://www.paytr.com/js/iframeResizer.min.js"></script>
-     <script>iFrameResize({}, '#paytriframe');</script>`,
-    "",
-    false,
-    ctx,
-  );
-}
-
-// -- /done -------------------------------------------------------------------
+// -- /welcome ----------------------------------------------------------------
 
 export function donePage(ctx: PageContext, ref: string, support: string): Response {
   const s = t(ctx.lang);
@@ -424,6 +434,18 @@ export interface AccountView {
   seatLimit: number;
   provider: string;
   cancellable: boolean;
+  /** Whether the Paddle-hosted portal can be opened -- true only once a
+   *  webhook has told us which Paddle customer this licence belongs to. */
+  portal: boolean;
+  /** The Paddle customer this licence belongs to, `ctm_…`, or null until a
+   *  webhook has said so. Retain is initialised with it and nothing else on
+   *  the page needs it. It has to be Paddle's own id: an internal one, or an
+   *  email, would initialise cleanly and then attribute every session to
+   *  nobody -- worse than leaving Retain switched off. */
+  customerId: string | null;
+  /** Set when Paddle is scheduled to cancel at the end of the paid period.
+   *  Shown, not enforced: the subscription is live until that date. */
+  scheduledCancelAt: string | null;
   message?: string;
   error?: string;
 }
@@ -433,6 +455,7 @@ export function accountPage(
   view: AccountView | null,
   support: string,
   error?: string,
+  paddle?: { clientToken?: string; env?: "production" | "sandbox" },
 ): Response {
   const s = t(ctx.lang);
   const form = `
@@ -474,8 +497,42 @@ export function accountPage(
          ${s.fixedTerm(escapeHtml(view.renews ?? s.itsExpiryDate), buyUrl)}
        </p>`;
 
+  const portal = view.portal
+    ? `<form method="post" action="/account/portal" style="margin-top:18px">
+         <input type="hidden" name="key" value="${escapeHtml(view.key)}">
+         <input type="hidden" name="lang" value="${ctx.lang}">
+         <button class="quiet" type="submit">${s.manageBilling}</button>
+         <p class="muted" style="margin-top:8px">${s.manageBillingNote}</p>
+       </form>`
+    : "";
+
   const status = s.status[view.status] ?? view.status;
   const cycle = s.cycle[view.cycle] ?? view.cycle;
+
+  // Paddle Retain, which does nothing until Paddle.js has been told which
+  // customer is reading the page. The id is matched against Paddle's own shape
+  // rather than trusted: this is the one page with a real `ctm_…` to hand, and
+  // anything else here would be silently wrong rather than loudly broken.
+  // Without one, nothing is emitted at all -- no script, no token, no empty
+  // Initialize. Retain is a live-only product; on sandbox this initialises and
+  // simply has nothing to show, which is documented and not worth branching on.
+  const retainId =
+    view.customerId && /^ctm_[a-z0-9]+$/.test(view.customerId) ? view.customerId : null;
+  const retain =
+    retainId && paddle?.clientToken
+      ? {
+          head: `<script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>`,
+          body: `
+     <script>
+       Paddle.Environment.set(${JSON.stringify(paddle.env ?? "production")});
+       Paddle.Initialize({
+         token: ${JSON.stringify(paddle.clientToken)},
+         pwCustomer: { id: ${JSON.stringify(retainId)} },
+       });
+     </script>`,
+        }
+      : { head: "", body: "" };
+
   return page(
     title,
     `<h1>${s.yourSubscription}</h1>
@@ -486,13 +543,15 @@ export function accountPage(
        ${s.statusLabel}: <b class="${view.status === "active" ? "ok" : "warn"}">${escapeHtml(status)}</b><br>
        ${view.renews ? `${s.ends} ${escapeHtml(view.renews)}<br>` : ""}
        ${s.devices(view.seats, view.seatLimit)}<br>
-       ${s.paidThrough} ${escapeHtml(view.provider === "paytr" ? "PayTR" : "Paddle")}
+       ${s.paidThrough} Paddle
      </p>
+     ${view.scheduledCancelAt ? `<p class="muted">${s.scheduledToCancel(escapeHtml(view.scheduledCancelAt))}</p>` : ""}
+     ${portal}
      ${cancel}
      <hr>
      ${form}
-     <p class="muted">${s.questions}: ${escapeHtml(support)}</p>`,
-    "",
+     <p class="muted">${s.questions}: ${escapeHtml(support)}</p>${retain.body}`,
+    retain.head,
     false,
     ctx,
   );

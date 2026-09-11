@@ -6,25 +6,14 @@
 // production is a support task that eventually gets done wrong. Everything
 // here is something that came up as a real question: how many subscribers are
 // there, who is this person who emailed, extend them, free their devices,
-// give them a working key again, sell one without a card.
+// give them a working key again.
 //
 // It is deliberately small. There is no charging, no refunding and no
-// cancelling of a processor subscription from here — that lives with PayTR and
-// Paddle, which own the money, and doing it in two places is how the two
-// disagree.
+// cancelling of a subscription from here — that lives with Paddle, which owns
+// the money, and doing it in two places is how the two disagree.
 
-import { type Cycle, type Env, TERM_SECONDS, isCycle, supportEmail } from "./env";
-import {
-  DEFAULT_SEATS,
-  type Licence,
-  MANUAL_PROVIDER,
-  deliverKey,
-  endLicence,
-  isLive,
-  issueLicence,
-  licenceById,
-  rotateKey,
-} from "./licences";
+import { type Env, supportEmail } from "./env";
+import { type Licence, endLicence, isLive, licenceById, rotateKey } from "./licences";
 import { escapeHtml, page } from "./pages";
 import { constantTimeEqual, now, sha256Hex } from "./tokens";
 
@@ -83,9 +72,7 @@ interface Stats {
   live: number;
   monthly: number;
   yearly: number;
-  paytr: number;
   paddle: number;
-  manual: number;
   winding_down: number;
   expiring: number;
   fresh: number;
@@ -102,16 +89,14 @@ async function stats(env: Env): Promise<Stats> {
        SUM(CASE WHEN status != 'refunded' AND expires_at > ?  THEN 1 ELSE 0 END) AS live,
        SUM(CASE WHEN status != 'refunded' AND expires_at > ?  AND cycle = 'monthly' THEN 1 ELSE 0 END) AS monthly,
        SUM(CASE WHEN status != 'refunded' AND expires_at > ?  AND cycle = 'yearly'  THEN 1 ELSE 0 END) AS yearly,
-       SUM(CASE WHEN status != 'refunded' AND expires_at > ?  AND provider = 'paytr'  THEN 1 ELSE 0 END) AS paytr,
        SUM(CASE WHEN status != 'refunded' AND expires_at > ?  AND provider = 'paddle' THEN 1 ELSE 0 END) AS paddle,
-       SUM(CASE WHEN status != 'refunded' AND expires_at > ?  AND provider = 'manual' THEN 1 ELSE 0 END) AS manual,
        SUM(CASE WHEN status  = 'cancelled' AND expires_at > ? THEN 1 ELSE 0 END) AS winding_down,
        SUM(CASE WHEN status != 'refunded' AND expires_at > ?  AND expires_at < ? THEN 1 ELSE 0 END) AS expiring,
        SUM(CASE WHEN created_at > ? THEN 1 ELSE 0 END) AS fresh,
        COUNT(*) AS total
      FROM licences`,
   )
-    .bind(t, t, t, t, t, t, t, t, t + 7 * DAY, t - 30 * DAY)
+    .bind(t, t, t, t, t, t, t + 7 * DAY, t - 30 * DAY)
     .first<Stats>();
 
   return (
@@ -119,9 +104,7 @@ async function stats(env: Env): Promise<Stats> {
       live: 0,
       monthly: 0,
       yearly: 0,
-      paytr: 0,
       paddle: 0,
-      manual: 0,
       winding_down: 0,
       expiring: 0,
       fresh: 0,
@@ -280,31 +263,7 @@ function rowsTable(rows: Row[]): string {
 interface Notice {
   message?: string;
   error?: string;
-  /** Keys to show exactly once. A rotation produces one, the generator any
-   *  number; both land here because both have the same problem — this is the
-   *  only moment the plaintext exists. */
-  keys?: string[];
-}
-
-/** The one place a key is ever legible.
- *
- *  `licences` holds only a hash, and a hand-issued licence writes no `orders`
- *  row, so nothing sweeps a plaintext copy an hour later for the simple reason
- *  that no copy is kept at all. If the operator closes this page without
- *  copying what is on it, the only way back is a rotation. The wording says
- *  so, because a warning after the fact is not a warning. */
-function keysBlock(keys: string[]): string {
-  if (!keys.length) return "";
-  const warning =
-    keys.length === 1
-      ? "Give this to the customer. It is shown once and cannot be looked up again:"
-      : `${keys.length} keys, shown once. Copy them now — they cannot be looked up again:`;
-  const body =
-    keys.length === 1
-      ? `<div class="key">${escapeHtml(keys[0])}</div>`
-      : `<textarea class="keys" rows="${Math.min(keys.length, 14)}" readonly spellcheck="false"
-           onclick="this.select()">${escapeHtml(keys.join("\n"))}</textarea>`;
-  return `<p class="warn">${escapeHtml(warning)}</p>${body}`;
+  key?: string;
 }
 
 async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
@@ -338,51 +297,22 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
     `<h1>Subscribers</h1>
      ${notice.message ? `<p class="ok">${escapeHtml(notice.message)}</p>` : ""}
      ${notice.error ? `<p class="err">${escapeHtml(notice.error)}</p>` : ""}
-     ${keysBlock(notice.keys ?? [])}
+     ${
+       notice.key
+         ? `<p class="warn">Give this to the customer. It is shown once and cannot be
+             looked up again:</p><div class="key">${escapeHtml(notice.key)}</div>`
+         : ""
+     }
 
      <div class="tiles">
        ${tile(s.live, "live subscribers")}
        ${tile(s.monthly, "monthly")}
        ${tile(s.yearly, "yearly")}
-       ${tile(s.paytr, "via PayTR")}
        ${tile(s.paddle, "via Paddle")}
-       ${s.manual ? tile(s.manual, "issued by hand") : ""}
        ${tile(s.fresh, "new in 30 days")}
        ${tile(s.expiring, "ending in 7 days")}
        ${tile(s.winding_down, "cancelled, still paid")}
      </div>
-
-     <h2>Generate keys</h2>
-     <p class="muted">
-       For a sale that did not come through a processor — a bank transfer, an
-       invoice, a reviewer's copy, or a payment that landed while its webhook
-       did not. These are real licences on the usual terms; the only difference
-       is that nobody was charged, so they are marked <code>manual</code> and
-       counted apart from revenue.
-     </p>
-     <form method="post" action="/admin/issue" class="row">
-       <div style="flex:0 1 220px">
-         <label class="field" for="cycle">Plan</label>
-         <select id="cycle" name="cycle">
-           <option value="monthly">Monthly — ${TERM_SECONDS.monthly / DAY} days</option>
-           <option value="yearly">Yearly — ${TERM_SECONDS.yearly / DAY} days</option>
-         </select>
-       </div>
-       <div style="flex:0 1 90px">
-         <label class="field" for="count">How many</label>
-         <input id="count" type="number" name="count" value="1" min="1" max="${MAX_BATCH}">
-       </div>
-       <div style="flex:0 1 90px">
-         <label class="field" for="seats">Devices</label>
-         <input id="seats" type="number" name="seats" value="${DEFAULT_SEATS}" min="1" max="${MAX_SEATS}">
-       </div>
-       <div style="flex:1 1 220px">
-         <label class="field" for="issue-email">Email — optional, for the record and for delivery</label>
-         <input id="issue-email" type="email" name="email" placeholder="musteri@ornek.com"
-                spellcheck="false">
-       </div>
-       <button type="submit">Generate</button>
-     </form>
 
      <form method="get" action="/admin" class="row">
        <div style="flex:1 1 260px">
@@ -398,89 +328,13 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
      ${failureTable}
      <hr>
      <p class="muted">
-       Refunds and cancellations should normally be done in PayTR or Paddle — their
+       Refunds and cancellations should normally be done in Paddle — its
        webhook updates this automatically. The Refund button here only marks the
        licence, and does not move any money. Support: ${escapeHtml(supportEmail(env))}
      </p>`,
     "",
     true,
   );
-}
-
-// -- generating a key without a payment --------------------------------------
-
-/** Enough for a batch of review copies or a reseller's block, few enough that
- *  a slipped keypress in the box cannot mint a thousand free licences. */
-const MAX_BATCH = 50;
-
-/** A generous ceiling on seats, not a plan. The two plans differ in how long
- *  they last, never in how many machines they cover. */
-const MAX_SEATS = 100;
-
-/** Issues fresh Pro keys on one of the two plans.
- *
- *  Before this the only ways to bring a licence into existence were a real
- *  card and `/v1/dev/issue`, which is refused in production for good reason —
- *  so the answer to "someone paid me by bank transfer" was hand-written SQL,
- *  which is exactly what this panel exists to avoid.
- *
- *  The plan is the term and nothing else: monthly and yearly buy the same
- *  unlimited Pro on the same number of machines, and differ only in how long
- *  they last. They are the same terms a purchase gets, deliberately — a comped
- *  licence that behaved differently from a bought one would be a second code
- *  path through expiry, renewal and grace, and the rare one is the one that
- *  breaks quietly. */
-async function issueKeys(env: Env, request: Request): Promise<Response> {
-  if (!sameOrigin(request)) return new Response("Cross-site request refused.", { status: 403 });
-
-  const form = await request.formData();
-
-  // No default plan. Guessing which of the two someone meant is guessing how
-  // much to give away, and the difference between them is twelvefold.
-  const cycle = String(form.get("cycle") ?? "");
-  if (!isCycle(cycle)) return dashboard(env, "", { error: "Choose the monthly or the yearly plan." });
-
-  const count = Number(form.get("count") ?? 1);
-  if (!Number.isInteger(count) || count < 1 || count > MAX_BATCH) {
-    return dashboard(env, "", { error: `Ask for between 1 and ${MAX_BATCH} keys.` });
-  }
-
-  const seats = Number(form.get("seats") ?? DEFAULT_SEATS);
-  if (!Number.isInteger(seats) || seats < 1 || seats > MAX_SEATS) {
-    return dashboard(env, "", { error: `Devices must be between 1 and ${MAX_SEATS}.` });
-  }
-
-  const email = String(form.get("email") ?? "").trim() || null;
-  if (email && !email.includes("@")) {
-    return dashboard(env, "", { error: "That does not look like an email address." });
-  }
-
-  // One at a time rather than in parallel: each is an independent licence, and
-  // a batch that half-succeeded should leave the keys it did issue in the
-  // database rather than in doubt.
-  const issued: { id: string; key: string; expiresAt: number }[] = [];
-  for (let i = 0; i < count; i++) {
-    issued.push(
-      await issueLicence(env, { provider: MANUAL_PROVIDER, cycle: cycle as Cycle, email, seats }),
-    );
-  }
-  console.log(`issued ${count} ${cycle} licence(s) by hand: ${issued.map((l) => l.id).join(", ")}`);
-
-  // One key to an address is a delivery. Ten to the same address is a list the
-  // operator is going to hand over themselves, and ten separate emails each
-  // saying "your licence key" is not what anyone asked for.
-  const mailed = Boolean(email) && issued.length === 1;
-  if (mailed) {
-    await deliverKey(env, email, issued[0].key, cycle, issued[0].expiresAt);
-  }
-
-  const plural = count === 1 ? "key" : "keys";
-  return dashboard(env, email ?? "", {
-    keys: issued.map((l) => l.key),
-    message:
-      `Issued ${count} ${cycle} ${plural}, ending ${date(issued[0].expiresAt)}` +
-      (mailed ? ` — and emailed to ${email}, if a mailer is configured.` : "."),
-  });
 }
 
 // -- acting on it ------------------------------------------------------------
@@ -526,7 +380,7 @@ async function act(env: Env, request: Request, action: string): Promise<Response
     case "rotate": {
       const key = await rotateKey(env, licence);
       return dashboard(env, id, {
-        keys: [key],
+        key,
         message:
           "New key issued. Machines already activated keep working — only the old key is dead.",
       });
@@ -574,9 +428,6 @@ export async function handleAdmin(
   }
   if (request.method === "POST") {
     const action = pathname.slice("/admin/".length);
-    // Generating is routed apart from the rest because it is the one action
-    // that does not begin by finding an existing licence.
-    if (action === "issue") return issueKeys(env, request);
     if (["extend", "seats", "rotate", "end"].includes(action)) {
       return act(env, request, action);
     }

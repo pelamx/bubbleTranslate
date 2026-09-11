@@ -34,10 +34,9 @@ pub const FREE_DAILY_TRANSLATIONS: u32 = 10;
 /// window so the bubble and the account panel cannot drift apart from each
 /// other, or from the checkout page the button opens.
 ///
-/// These are the display prices. The amounts actually charged live in the
-/// service, per processor and per currency, because that is where a price can
-/// be changed without cutting a release — and where the Turkish lira price has
-/// to live, since it is not a conversion of this one.
+/// These are the display prices. The amount actually charged lives in Paddle,
+/// which prices the transaction in the buyer's own currency and adds tax, so
+/// this is what the app says rather than what the card is debited.
 pub const PRICE_MONTHLY: &str = "$2/month";
 pub const PRICE_YEARLY: &str = "$20/year";
 
@@ -45,19 +44,11 @@ pub const PRICE_YEARLY: &str = "$20/year";
 /// subscriber who wants to cancel. Both take a `?src=` so the funnel can be
 /// measured by the surface the click came from.
 ///
-/// The buy link is a holding page for now. `api.bubbletranslate.app` does not
-/// resolve yet, and a button that opens nothing is worse than one that opens a
-/// page saying what is coming — the click costs the user the same either way,
-/// and only one of the two looks like a working app.
-///
-/// It moves back to the service's own `/buy` once that is up. That is the one
-/// page which has to know the visitor's country: Turkey is routed to PayTR and
-/// everywhere else to Paddle — see `service/src/index.ts`.
-pub const BUY_URL: &str = "https://pelamx.github.io";
-
-/// Left pointing at the service, because nothing can reach it yet: the account
-/// page is only ever opened by someone who already holds a licence, and no
-/// licence can be issued until the service exists.
+/// `/buy` is served by the licence service rather than by a separate site: it
+/// is the one page that has to know the visitor's country, and the service is
+/// already the thing sitting behind Cloudflare that gets told it. Checkout is
+/// Paddle everywhere — see `service/src/index.ts`.
+pub const BUY_URL: &str = "https://api.bubbletranslate.app/buy";
 pub const MANAGE_URL: &str = "https://api.bubbletranslate.app/account";
 
 /// The licence service. Overridable in debug builds so the client can be
@@ -66,15 +57,12 @@ const LICENSE_API: &str = "https://api.bubbletranslate.app";
 
 /// Ed25519 public key of the licence service, hex-encoded.
 ///
-/// The public half of the keypair `service/scripts/keygen.mjs` generated; its
-/// private half lives only in the Worker secret `SIGNING_KEY_PKCS8`. Every
-/// entitlement this binary will ever accept is checked against these 32 bytes,
-/// so changing them invalidates every token already in the field.
-///
-/// An all-zero value is still refused rather than treated as a key — see
-/// [`key_from_hex`] — so a build that loses this constant fails closed, onto
-/// the free tier, instead of trusting anything that arrives.
-const PUBLIC_KEY_HEX: &str = "fcbcd28ac32a0f70b3ce9f7bd304e702e71adc519c0bb7e890cbce5b0eb78a8c";
+/// The production key, generated once with `service/scripts/keygen.mjs` and
+/// matching the `SIGNING_KEY_PUBLIC` secret on api.bubbletranslate.app. A
+/// build with the all-zero placeholder instead fails every token and stays on
+/// the free tier, which [`verify`] reports explicitly rather than as a generic
+/// bad signature.
+const PUBLIC_KEY_HEX: &str = "f8b0c8b4609a516230d71f019fe4a0e9ad432a5d3ce5b5bce27a10a1c4f46200";
 
 /// Salt for the device fingerprint. Its only job is to keep the value from
 /// being the machine id itself — see [`device_id`].
@@ -401,15 +389,21 @@ fn service_key() -> Result<VerifyingKey, VerifyError> {
     #[cfg(not(debug_assertions))]
     let hex = PUBLIC_KEY_HEX.to_string();
 
-    key_from_hex(&hex)
+    parse_service_key(&hex)
 }
 
-/// Turns the compiled-in hex into a key, refusing a placeholder.
+/// Turns a hex-encoded service key into a verifier.
 ///
-/// Separate from [`service_key`] so the refusal can be tested directly: once a
-/// real key is compiled in, asserting on the constant no longer proves that an
-/// empty one would be rejected, and that is the property worth keeping.
-fn key_from_hex(hex: &str) -> Result<VerifyingKey, VerifyError> {
+/// Split out from [`service_key`] so the placeholder rule can be tested on a
+/// value rather than on whatever this branch happens to have compiled in —
+/// `main` ships the all-zero placeholder on purpose, and the Pro branch ships
+/// the real key, so a test that read the constant could only pass on one of
+/// them.
+fn parse_service_key(hex: &str) -> Result<VerifyingKey, VerifyError> {
+    let hex = hex.trim();
+    // An all-zero key — and an empty one — is the "no service yet" placeholder,
+    // never a key. Reported as its own error so the settings window can say the
+    // build is at fault rather than the user's licence.
     if hex.trim_matches('0').is_empty() {
         return Err(VerifyError::NoServiceKey);
     }
@@ -676,14 +670,9 @@ pub mod dev {
         }
         // /dev/urandom rather than a rand crate: this is a development tool on
         // two Unixes, and it is not worth a dependency the app never ships.
-        //
-        // Read to a fixed length, never to EOF: /dev/urandom is an endless
-        // stream, so `fs::read` on it does not return.
-        use std::io::Read as _;
         let mut seed = [0u8; 32];
-        std::fs::File::open("/dev/urandom")
-            .and_then(|mut file| file.read_exact(&mut seed))
-            .expect("no /dev/urandom");
+        let random = std::fs::read("/dev/urandom").expect("no /dev/urandom");
+        seed.copy_from_slice(&random[..32]);
 
         let path = seed_path();
         if let Some(dir) = path.parent() {
@@ -730,25 +719,28 @@ pub mod dev {
 mod tests {
     use super::*;
 
-    /// A placeholder must never verify anything. If this ever passes by
-    /// accident, a build ships an entitlement anyone can mint.
+    /// The placeholder must never verify anything. If this ever passes by
+    /// accident, every build ships an entitlement anyone can mint.
     #[test]
-    fn a_placeholder_key_is_not_a_key() {
-        for empty in [
-            "0000000000000000000000000000000000000000000000000000000000000000",
-            "0",
-            "",
-        ] {
-            assert!(matches!(key_from_hex(empty), Err(VerifyError::NoServiceKey)));
+    fn the_placeholder_key_is_not_a_key() {
+        for placeholder in ["0".repeat(64), "0".repeat(32), String::new()] {
+            assert!(
+                matches!(parse_service_key(&placeholder), Err(VerifyError::NoServiceKey)),
+                "{placeholder:?} was treated as a key",
+            );
         }
     }
 
-    /// ...and the key this binary actually ships is a usable one. A typo here
-    /// would not fail the build, it would fail every activation in the field.
+    /// Whatever this branch compiles in has to be either the placeholder or a
+    /// usable key — never a typo. The constant is pasted in by hand from
+    /// `service/scripts/keygen.mjs`, and a mangled paste would otherwise only
+    /// surface as a failed activation on a user's machine.
     #[test]
-    fn the_compiled_in_service_key_is_real() {
-        assert_eq!(PUBLIC_KEY_HEX.len(), 64);
-        assert!(key_from_hex(PUBLIC_KEY_HEX).is_ok());
+    fn the_compiled_in_key_is_never_malformed() {
+        match parse_service_key(PUBLIC_KEY_HEX) {
+            Ok(_) | Err(VerifyError::NoServiceKey) => {}
+            Err(err) => panic!("PUBLIC_KEY_HEX is not a usable key: {err}"),
+        }
     }
 
     #[test]

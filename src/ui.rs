@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 
 use crate::capture;
-use crate::config::{Config, LANGUAGES, Provider, language_name};
+use crate::config::{Config, LANGUAGES, Provider, TriggerKey, language_name};
 use crate::engine::{Engine, Request, UiEvent};
 use crate::license::{self, Licensing};
 use crate::main_window::{self, MainState};
@@ -399,7 +399,10 @@ impl BubbleApp {
         let display = crate::platform::preferred_zoom(native).unwrap_or(1.0);
         let wanted = display * self.config.lock().unwrap().ui_scale.clamp(0.5, 2.0);
 
-        if self.applied_zoom.is_none_or(|applied| (applied - wanted).abs() > 0.001) {
+        if self
+            .applied_zoom
+            .is_none_or(|applied| (applied - wanted).abs() > 0.001)
+        {
             crate::trace!("zoom      native={native} display={display} -> {wanted}");
             self.applied_zoom = Some(wanted);
             ctx.set_zoom_factor(wanted);
@@ -571,7 +574,11 @@ impl eframe::App for BubbleApp {
         // to a new selection in the app underneath.
         let hovered = self.visible && self.pointer_over_bubble(ctx);
         monitor::set_paused(hovered);
-        monitor::set_watch_clipboard(self.config.lock().unwrap().watch_clipboard);
+        {
+            let cfg = self.config.lock().unwrap();
+            monitor::set_watch_clipboard(cfg.watch_clipboard);
+            monitor::set_trigger_key(cfg.trigger_key);
+        }
 
         if matches!(self.state, State::Hidden) {
             if self.visible {
@@ -687,7 +694,9 @@ impl BubbleApp {
             // byline sits just inside it.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
                 if ui
-                    .add(egui::Button::new(egui::RichText::new(CLOSE_GLYPH).size(17.0)).frame(false))
+                    .add(
+                        egui::Button::new(egui::RichText::new(CLOSE_GLYPH).size(17.0)).frame(false),
+                    )
                     .on_hover_text("Close")
                     .clicked()
                 {
@@ -711,8 +720,9 @@ impl BubbleApp {
                     ui.spinner();
                     ui.label(
                         egui::RichText::new(match via {
-                            CaptureSource::Accessibility
-                            | CaptureSource::PrimarySelection => "Translating…",
+                            CaptureSource::Accessibility | CaptureSource::PrimarySelection => {
+                                "Translating…"
+                            }
                             CaptureSource::Clipboard => "Translating (via copy)…",
                         })
                         .size(13.5)
@@ -905,6 +915,32 @@ impl BubbleApp {
         {
             dirty = true;
         }
+
+        // The same choice as the main window's, kept here because this panel
+        // is the one within reach the moment a bubble appears somewhere it was
+        // not wanted — which is exactly when someone goes looking for it.
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("Hold while selecting")
+                    .size(12.0)
+                    .color(TEXT_SECONDARY),
+            );
+            egui::ComboBox::from_id_salt("bubble-trigger-key")
+                .selected_text(egui::RichText::new(cfg.trigger_key.label()).size(12.0))
+                .width(150.0)
+                .height(LANG_POPUP_HEIGHT)
+                .show_ui(ui, |ui| {
+                    for key in TriggerKey::ALL {
+                        if ui
+                            .selectable_label(*key == cfg.trigger_key, key.label())
+                            .clicked()
+                        {
+                            cfg.trigger_key = *key;
+                            dirty = true;
+                        }
+                    }
+                });
+        });
 
         let mut chosen: Option<String> = None;
         let mut popup_open = false;

@@ -25,6 +25,66 @@ impl Provider {
     }
 }
 
+/// The key that has to be held for a selection to be translated.
+///
+/// A selection is a gesture people make all day for reasons that have nothing
+/// to do with translating — re-reading a line, dragging text, positioning a
+/// caret — and a translator that answers every one of them is noise. Holding a
+/// key makes the request explicit, and it costs nothing when it is not wanted:
+/// [`TriggerKey::Always`] is the old behaviour, kept as a choice rather than
+/// as the default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TriggerKey {
+    /// No key at all: every selection pops a bubble.
+    Always,
+    Shift,
+    Ctrl,
+    Alt,
+    /// Command on macOS, the Windows/Meta key on Linux.
+    Super,
+}
+
+impl TriggerKey {
+    pub const ALL: &'static [TriggerKey] = &[
+        TriggerKey::Shift,
+        TriggerKey::Ctrl,
+        TriggerKey::Alt,
+        TriggerKey::Super,
+        TriggerKey::Always,
+    ];
+
+    /// What to call the key in the interface, in the name the keyboard in
+    /// front of the user actually uses.
+    pub fn label(self) -> &'static str {
+        match self {
+            TriggerKey::Always => "Any selection (no key)",
+            TriggerKey::Shift => "Shift",
+            TriggerKey::Ctrl => {
+                if cfg!(target_os = "macos") {
+                    "Control"
+                } else {
+                    "Ctrl"
+                }
+            }
+            TriggerKey::Alt => {
+                if cfg!(target_os = "macos") {
+                    "Option"
+                } else {
+                    "Alt"
+                }
+            }
+            TriggerKey::Super => {
+                if cfg!(target_os = "macos") {
+                    "Command"
+                } else {
+                    "Super"
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -46,6 +106,13 @@ pub struct Config {
     pub license_key: String,
     /// Pop the bubble automatically when a selection is made.
     pub auto_translate: bool,
+    /// Which key has to be held while selecting for the bubble to appear.
+    ///
+    /// Shift by default: it is already a selection key everywhere — holding it
+    /// extends a selection rather than doing something else — so the gesture
+    /// stays one gesture. Set to [`TriggerKey::Always`] to go back to
+    /// translating every selection.
+    pub trigger_key: TriggerKey,
     /// Selections shorter/longer than these bounds are ignored. The upper bound
     /// keeps a stray Cmd+A out of the translation queue.
     pub min_chars: usize,
@@ -102,6 +169,7 @@ impl Default for Config {
             mymemory_email: String::new(),
             license_key: String::new(),
             auto_translate: true,
+            trigger_key: TriggerKey::Shift,
             min_chars: 2,
             max_chars: 4000,
             debounce_ms: 180,
@@ -198,4 +266,30 @@ pub fn language_name(code: &str) -> &str {
         .find(|(c, _)| *c == base)
         .map(|(_, name)| *name)
         .unwrap_or(code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A config written before the trigger key existed gains Shift, not
+    /// "no key". Worth pinning: it is the one upgrade in this change that a
+    /// user feels — selections stop translating until Shift is held — and it
+    /// is deliberate rather than an oversight in the defaults.
+    #[test]
+    fn an_older_config_gains_the_shift_gate() {
+        let cfg: Config = toml::from_str("target_lang = \"tr\"\n").unwrap();
+        assert_eq!(cfg.target_lang, "tr");
+        assert_eq!(cfg.trigger_key, TriggerKey::Shift);
+    }
+
+    #[test]
+    fn the_trigger_key_survives_a_round_trip() {
+        for key in TriggerKey::ALL {
+            let mut cfg = Config::default();
+            cfg.trigger_key = *key;
+            let back: Config = toml::from_str(&toml::to_string_pretty(&cfg).unwrap()).unwrap();
+            assert_eq!(back.trigger_key, *key);
+        }
+    }
 }

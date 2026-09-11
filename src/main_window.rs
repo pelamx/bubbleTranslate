@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 
-use crate::config::{Config, LANGUAGES, Provider, language_name};
+use crate::config::{Config, LANGUAGES, Provider, TriggerKey, language_name};
 use crate::engine::Request;
 use crate::license::{self, Licensing, Status};
 use crate::platform::Readiness;
@@ -774,7 +774,10 @@ fn account(
                     .desired_width(190.0),
             );
             let ready = !state.key_input.trim().is_empty() && !busy;
-            if ui.add_enabled(ready, egui::Button::new("Activate")).clicked() {
+            if ui
+                .add_enabled(ready, egui::Button::new("Activate"))
+                .clicked()
+            {
                 // Saved before the exchange, not after: a key that the service
                 // could not be reached about is still the key the user owns,
                 // and they should not have to find the email again.
@@ -824,11 +827,43 @@ fn behaviour(ui: &mut egui::Ui, cfg: &mut Config) -> bool {
     dirty |= ui
         .checkbox(&mut cfg.auto_translate, "Translate on selection")
         .changed();
+
+    ui.horizontal(|ui| {
+        ui.label("Hold");
+        egui::ComboBox::from_id_salt("trigger-key")
+            .selected_text(cfg.trigger_key.label())
+            .show_ui(ui, |ui| {
+                for key in TriggerKey::ALL {
+                    if ui
+                        .selectable_label(*key == cfg.trigger_key, key.label())
+                        .clicked()
+                    {
+                        cfg.trigger_key = *key;
+                        dirty = true;
+                    }
+                }
+            });
+        ui.label("while selecting");
+    });
+    ui.label(
+        egui::RichText::new(match crate::monitor::trigger_key_blocked() {
+            None => "Only a selection made with that key held pops a bubble, so \
+                     selecting text for any other reason stays quiet."
+                .to_string(),
+            // The reason travels from the platform rather than being written
+            // here, because what the user can do about it differs: a group to
+            // join is worth saying, a protocol that does not exist is not.
+            Some(reason) => format!(
+                "Not in force: {reason}. Every selection is translated until then — \
+                 or bind a key to `bubbleTranslate --translate-selection`, which \
+                 needs nothing from the session."
+            ),
+        })
+        .size(11.0)
+        .color(TEXT_MUTED),
+    );
     dirty |= ui
-        .checkbox(
-            &mut cfg.watch_clipboard,
-            "Also translate on copy (Ctrl+C)",
-        )
+        .checkbox(&mut cfg.watch_clipboard, "Also translate on copy (Ctrl+C)")
         .on_hover_text(
             "Selecting text publishes it to the desktop by itself, which is how the \
              bubble works without the other application's help. A few — anything \
@@ -913,8 +948,8 @@ fn behaviour(ui: &mut egui::Ui, cfg: &mut Config) -> bool {
             "How still the selection must be to count as finished. Raise it if the \
              bubble appears mid-sweep or an app returns a stale selection.",
         )
-            .size(10.5)
-            .color(TEXT_MUTED),
+        .size(10.5)
+        .color(TEXT_MUTED),
     );
 
     ui.add_space(6.0);

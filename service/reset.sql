@@ -9,3 +9,5 @@ DROP TABLE IF EXISTS orders;
 DROP TABLE IF EXISTS seats;
 DROP TABLE IF EXISTS licences;
 DROP TABLE IF EXISTS service_keys;
+DROP TABLE IF EXISTS paddle_subscriptions;
+DROP TABLE IF EXISTS paddle_customers;

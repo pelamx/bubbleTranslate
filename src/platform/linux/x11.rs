@@ -13,6 +13,8 @@
 
 use std::time::{Duration, Instant};
 
+use crate::config::TriggerKey;
+
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::xfixes;
@@ -69,13 +71,14 @@ pub fn probe() -> Result<(), String> {
 }
 
 /// Watches the primary selection until the process ends, calling `on_change`
-/// with the text every time it moves to a new owner.
+/// with the text — and with whether it came from the clipboard rather than the
+/// primary selection — every time it moves to a new owner.
 ///
 /// Blocks, so it wants a thread of its own. Two connections: one parked in
 /// `wait_for_event` for XFixes notifications, one for the request/reply
 /// conversation that reads the text. Splitting them keeps a conversion from
 /// having to step over selection events that arrive mid-read.
-pub fn watch(mut on_change: impl FnMut(String) + Send + 'static) -> Result<(), String> {
+pub fn watch(mut on_change: impl FnMut(String, bool) + Send + 'static) -> Result<(), String> {
     let (notify_conn, screen_num) = x11rb::connect(None).map_err(|e| e.to_string())?;
     let (read_conn, _) = x11rb::connect(None).map_err(|e| e.to_string())?;
 
@@ -117,7 +120,8 @@ pub fn watch(mut on_change: impl FnMut(String) + Send + 'static) -> Result<(), S
         }
         // Which selection changed is carried on the event, and it is read back
         // on the other connection under the same atom.
-        let selection = if notify.selection == notify_atoms.clipboard {
+        let from_clipboard = notify.selection == notify_atoms.clipboard;
+        let selection = if from_clipboard {
             atoms.clipboard
         } else {
             atoms.primary
@@ -125,9 +129,47 @@ pub fn watch(mut on_change: impl FnMut(String) + Send + 'static) -> Result<(), S
         // The owner has only just claimed the selection; asking it to convert
         // immediately is normal and it will answer when ready.
         if let Some(text) = read_selection(&read_conn, read_window, &atoms, selection) {
-            on_change(text);
+            on_change(text, from_clipboard);
         }
     }
+}
+
+/// The mask that stands for a trigger key on this display.
+///
+/// `None` for [`TriggerKey::Always`], which has no key to look for.
+fn modifier_mask(key: TriggerKey) -> Option<KeyButMask> {
+    match key {
+        TriggerKey::Always => None,
+        TriggerKey::Shift => Some(KeyButMask::SHIFT),
+        TriggerKey::Ctrl => Some(KeyButMask::CONTROL),
+        // X11 names modifiers by slot rather than by keycap. Mod1 is where
+        // every desktop puts Alt and Mod4 is where it puts Super; a remapped
+        // keyboard could disagree, and the picker is then the way out.
+        TriggerKey::Alt => Some(KeyButMask::MOD1),
+        TriggerKey::Super => Some(KeyButMask::MOD4),
+    }
+}
+
+/// Whether the trigger key is held down right now.
+///
+/// `None` when X will not say, which the caller reads as "no evidence either
+/// way" rather than as "not held" — a translator that goes silent because a
+/// query failed is worse than one that translates a selection it need not
+/// have.
+pub fn modifier_held(key: TriggerKey) -> Option<bool> {
+    let mask = modifier_mask(key)?;
+    let (conn, screen_num) = x11rb::connect(None).ok()?;
+    held_on(&conn, screen_num, mask)
+}
+
+/// The same question, put to a connection the caller already has.
+///
+/// Split out so the test below can ask it of its own throwaway server without
+/// having to move `DISPLAY` out from under every other thread in the process.
+fn held_on(conn: &RustConnection, screen_num: usize, mask: KeyButMask) -> Option<bool> {
+    let root = conn.setup().roots.get(screen_num)?.root;
+    let reply = conn.query_pointer(root).ok()?.reply().ok()?;
+    Some(reply.mask.intersects(mask))
 }
 
 /// Blocks while a mouse button is held down, so a selection being dragged out
@@ -142,7 +184,13 @@ pub fn watch(mut on_change: impl FnMut(String) + Send + 'static) -> Result<(), S
 /// button — or one held for a reason of its own, a game or a scrollbar — can
 /// never stop the bubble for good, and it returns immediately if X will not
 /// answer, leaving [`crate::engine`]'s settle window as the only filter.
-pub fn wait_while_dragging(timeout: Duration) {
+///
+/// Returns whether `key` was seen held at any point during the wait. The
+/// question is asked here rather than only at the end because the key is
+/// released the moment the user is done — often in the same breath as the
+/// button — and a gate that only looked afterwards would miss the gesture it
+/// exists to recognise.
+pub fn wait_while_dragging(timeout: Duration, key: TriggerKey) -> bool {
     /// Fast enough to feel like the bubble follows the mouse-up, cheap enough
     /// to be nothing next to the round trip a translation costs.
     const POLL: Duration = Duration::from_millis(15);
@@ -151,22 +199,28 @@ pub fn wait_while_dragging(timeout: Duration) {
     // same instant, so waiting on it would be waiting on nothing.
     let buttons = KeyButMask::BUTTON1 | KeyButMask::BUTTON2 | KeyButMask::BUTTON3;
 
+    let wanted = modifier_mask(key);
+
     let Ok((conn, screen_num)) = x11rb::connect(None) else {
-        return;
+        return false;
     };
     let Some(root) = conn.setup().roots.get(screen_num).map(|screen| screen.root) else {
-        return;
+        return false;
     };
 
+    let mut held = false;
     let deadline = Instant::now() + timeout;
     let mut waited = false;
     while Instant::now() < deadline {
-        let held = conn
+        let mask = conn
             .query_pointer(root)
             .ok()
             .and_then(|cookie| cookie.reply().ok())
-            .map(|reply| reply.mask.intersects(buttons));
-        match held {
+            .map(|reply| reply.mask);
+        if let (Some(mask), Some(wanted)) = (mask, wanted) {
+            held |= mask.intersects(wanted);
+        }
+        match mask.map(|mask| mask.intersects(buttons)) {
             Some(true) => {
                 waited = true;
                 std::thread::sleep(POLL);
@@ -177,11 +231,12 @@ pub fn wait_while_dragging(timeout: Duration) {
                 if waited {
                     crate::trace!("x11: the drag ended; taking the selection");
                 }
-                return;
+                return held;
             }
         }
     }
     crate::trace!("x11: a button is still down after {timeout:?}; taking the selection anyway");
+    held
 }
 
 /// Where the pointer is, in root-window coordinates.
@@ -287,4 +342,136 @@ fn read_selection(
     }
     crate::trace!("x11: the selection owner never answered");
     None
+}
+
+/// The gate is the whole point of the trigger key, so it is proved against a
+/// real X server rather than reasoned about: a throwaway Xvfb, a key held down
+/// through XTEST, and the same query the monitor makes.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::process::{Child, Command};
+
+    use x11rb::protocol::xproto::Keysym;
+    use x11rb::protocol::xtest::ConnectionExt as _;
+
+    /// An X server of our own, on a display number nothing else answers on.
+    struct Server {
+        child: Child,
+    }
+
+    impl Server {
+        /// A running server and a connection to it that has already completed
+        /// a round trip.
+        ///
+        /// The connection is handed back rather than reopened by the caller
+        /// because Xvfb accepts connections before it has finished setting up
+        /// its keyboard and resets them when it does — so "it answered once"
+        /// is not yet "it is up", and only a completed request proves it.
+        fn start() -> Option<(Self, RustConnection, usize)> {
+            // Tried in turn rather than derived from the pid: a server from a
+            // previous run can still be winding down on the number this one
+            // would have picked, and a display that is taken is not an error,
+            // only the wrong one.
+            (90..99).find_map(|number| {
+                let display = format!(":{number}");
+                if x11rb::connect(Some(&display)).is_ok() {
+                    return None;
+                }
+                let child = Command::new("Xvfb")
+                    .args([&display, "-screen", "0", "640x480x24", "-nolisten", "tcp"])
+                    .spawn()
+                    .ok()?;
+                let server = Server { child };
+                for _ in 0..100 {
+                    if let Some(ready) = settled(&display) {
+                        return Some((server, ready.0, ready.1));
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                None
+            })
+        }
+    }
+
+    /// A connection that has been proved, or `None` while the server is still
+    /// coming up.
+    fn settled(display: &str) -> Option<(RustConnection, usize)> {
+        let (conn, screen) = x11rb::connect(Some(display)).ok()?;
+        let root = conn.setup().roots.get(screen)?.root;
+        conn.query_pointer(root).ok()?.reply().ok()?;
+        Some((conn, screen))
+    }
+
+    impl Drop for Server {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    /// The keycode that produces `keysym` on this server's layout.
+    fn keycode_for(conn: &RustConnection, keysym: Keysym) -> Option<u8> {
+        let setup = conn.setup();
+        let first = setup.min_keycode;
+        let count = setup.max_keycode - first + 1;
+        let mapping = conn.get_keyboard_mapping(first, count).ok()?.reply().ok()?;
+        let per = mapping.keysyms_per_keycode as usize;
+        mapping
+            .keysyms
+            .chunks(per)
+            .position(|syms| syms.contains(&keysym))
+            .map(|index| first + index as u8)
+    }
+
+    fn press(conn: &RustConnection, keycode: u8, down: bool) {
+        let event = if down {
+            x11rb::protocol::xproto::KEY_PRESS_EVENT
+        } else {
+            x11rb::protocol::xproto::KEY_RELEASE_EVENT
+        };
+        conn.xtest_fake_input(event, keycode, 0, 0u32, 0, 0, 0)
+            .expect("XTEST refused the key")
+            .check()
+            .expect("XTEST refused the key");
+    }
+
+    #[test]
+    fn a_held_key_is_seen_and_an_unheld_one_is_not() {
+        const SHIFT_L: Keysym = 0xffe1;
+
+        let Some((_server, conn, screen)) = Server::start() else {
+            // Xvfb is not on every machine, and a missing test server is not a
+            // failing gate. The assertions are the test; skipping beats a red
+            // build on a machine with no X server to borrow.
+            eprintln!("skipping: no Xvfb to test against");
+            return;
+        };
+
+        let shift = keycode_for(&conn, SHIFT_L).expect("no Shift on the test layout");
+        let held = |key| held_on(&conn, screen, modifier_mask(key)?);
+
+        assert_eq!(held(TriggerKey::Shift), Some(false), "nothing is held yet");
+
+        press(&conn, shift, true);
+        assert_eq!(
+            held(TriggerKey::Shift),
+            Some(true),
+            "Shift is down and the gate has to see it"
+        );
+        assert_eq!(
+            held(TriggerKey::Ctrl),
+            Some(false),
+            "a different key being down is not this key being down"
+        );
+        assert_eq!(
+            held(TriggerKey::Always),
+            None,
+            "no key to look for means nothing to gate on"
+        );
+
+        press(&conn, shift, false);
+        assert_eq!(held(TriggerKey::Shift), Some(false), "the key came back up");
+    }
 }

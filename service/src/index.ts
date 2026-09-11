@@ -7,10 +7,9 @@
 // thirty days. If this service is down, every install degrades to the free
 // daily allowance rather than to a broken app.
 //
-// Two processors, split by where the buyer is: PayTR settles in lira for
-// Turkey, Paddle acts as merchant of record everywhere else. Which one a
-// visitor sees is decided in `/buy` and nowhere else — past that point the
-// difference is a `provider` column and a webhook.
+// Paddle is the single processor: it acts as merchant of record everywhere,
+// so it owns VAT, sales tax and invoicing. Buying is decided in `/buy`; past
+// that point the difference is a `provider` column and a webhook.
 
 import {
   type Cycle,
@@ -19,9 +18,8 @@ import {
   baseUrl,
   isCycle,
   paddleConfigured,
+  paddleEnvOrThrow,
   paddlePriceId,
-  paytrConfigured,
-  paytrPriceKurus,
   supportEmail,
 } from "./env";
 import {
@@ -45,10 +43,25 @@ import {
   sweepRevealedKeys,
 } from "./licences";
 import { handleAdmin } from "./admin";
-import { cancelSubscription, customerEmail, cycleFromItems, verifyWebhook } from "./paddle";
+import {
+  type CancelFailure,
+  cancelSubscription,
+  customerEmail,
+  cycleFromItems,
+  fromPaddle,
+  portalSession,
+  verifyWebhook,
+} from "./paddle";
+import {
+  grantsAccess,
+  mirrorCustomer,
+  mirrorSubscription,
+  noteCustomer,
+  occurredAt,
+  subscriptionById,
+} from "./mirror";
 import { isLang, pickLang, t, withLang } from "./i18n";
-import { type PageContext, accountPage, buyPage, donePage, lira, paytrPage } from "./pages";
-import { createCharge, iframeUrl, readCallback } from "./paytr";
+import { SITE, type PageContext, accountPage, buyPage, donePage } from "./pages";
 import { keys, now, open } from "./tokens";
 
 // -- replies -----------------------------------------------------------------
@@ -160,119 +173,50 @@ async function deactivate(env: Env, body: any) {
 
 // -- buying it ---------------------------------------------------------------
 
-/** Turkey gets PayTR, everywhere else gets Paddle — with an escape hatch.
+/** The visitor's country, or undefined when we genuinely do not know.
  *
- *  `?country=` overrides the header, and both variants of the page link to the
- *  other one. Geolocation is a guess: a Turkish customer on a VPN, or someone
- *  living abroad who wants to pay in lira, must not be stuck with the wrong
- *  processor because Cloudflare read an IP address a certain way. */
-function inTurkey(request: Request, url: URL): boolean {
-  const override = url.searchParams.get("country");
-  if (override) return override.toUpperCase() === "TR";
-  return (request.headers.get("CF-IPCountry") ?? "").toUpperCase() === "TR";
+ *  Three different things mean "unknown" here and none of them is a country.
+ *  Cloudflare sends `XX` when it cannot place an address and `T1` when the
+ *  request came out of Tor. Passing either to Paddle as a country code is an
+ *  error; omitting the address instead lets Paddle geolocate the IP, which is
+ *  what it does best. */
+function visitorCountry(request: Request, url: URL): string | undefined {
+  const raw = (url.searchParams.get("country") ?? request.headers.get("CF-IPCountry") ?? "")
+    .trim()
+    .toUpperCase();
+  if (!/^[A-Z]{2}$/.test(raw)) return undefined;
+  if (raw === "XX" || raw === "T1") return undefined;
+  return raw;
 }
 
 function buy(env: Env, request: Request, url: URL): Response {
   const ctx = pageContext(request, url);
-  const turkey = inTurkey(request, url);
   const src = url.searchParams.get("src") ?? "direct";
   const base = baseUrl(env, request);
-  const otherUrl = `/buy?country=${turkey ? "XX" : "TR"}&src=${encodeURIComponent(src)}`;
-
-  if (turkey) {
-    const monthly = paytrPriceKurus(env, "monthly");
-    const yearly = paytrPriceKurus(env, "yearly");
-    if (!paytrConfigured(env) || monthly === null || yearly === null) {
-      return buyPage({
-        ctx,
-        turkey,
-        configured: false,
-        reason: "reasonPaytrUnconfigured",
-        monthly: "",
-        yearly: "",
-        src,
-        otherUrl,
-      });
-    }
-    return buyPage({
-      ctx,
-      turkey,
-      configured: true,
-      monthly: lira(monthly),
-      yearly: lira(yearly),
-      src,
-      otherUrl,
-    });
-  }
 
   if (!paddleConfigured(env)) {
     return buyPage({
       ctx,
-      turkey,
       configured: false,
       reason: "reasonPaddleUnconfigured",
       monthly: "",
       yearly: "",
       src,
-      otherUrl,
     });
   }
   return buyPage({
     ctx,
-    turkey,
     configured: true,
     monthly: USD_PRICE.monthly,
     yearly: USD_PRICE.yearly,
     src,
-    otherUrl,
     clientToken: env.PADDLE_CLIENT_TOKEN,
-    paddleEnv: env.PADDLE_ENV,
+    paddleEnv: paddleEnvOrThrow(env),
     priceMonthly: paddlePriceId(env, "monthly") ?? "",
     priceYearly: paddlePriceId(env, "yearly") ?? "",
-    successUrl: `${base}/done`,
+    country: visitorCountry(request, url),
+    successUrl: `${base}/welcome`,
   });
-}
-
-async function checkoutPaytr(env: Env, request: Request, url: URL): Promise<Response> {
-  const form = await request.formData();
-  const ctx = pageContext(request, url, form.get("lang"));
-  const s = t(ctx.lang);
-  const plain = (text: string, status: number) =>
-    new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
-  // No default. A missing plan is a bug or a hand-made request, and guessing
-  // which one someone meant to buy is guessing what to charge them.
-  const cycleRaw = String(form.get("cycle") ?? "");
-  const email = String(form.get("email") ?? "").trim();
-
-  if (!isCycle(cycleRaw)) return plain(s.invalidPlan, 400);
-  if (!email.includes("@")) return plain(s.invalidEmail, 400);
-  if (!paytrConfigured(env)) return plain(s.paytrNotConfigured, 503);
-
-  const amount = paytrPriceKurus(env, cycleRaw);
-  if (amount === null) return plain(s.priceNotSet, 503);
-
-  const base = baseUrl(env, request);
-  const ref = newOrderRef();
-  // The order row exists before PayTR is told anything, so the callback can
-  // never arrive for an order this service has not heard of.
-  await createOrder(env, { ref, provider: "paytr", cycle: cycleRaw, email, amount, currency: "TRY" });
-
-  const charge = await createCharge(env, {
-    ref,
-    cycle: cycleRaw,
-    email,
-    userIp: request.headers.get("CF-Connecting-IP") ?? "127.0.0.1",
-    okUrl: withLang(`${base}/done?ref=${ref}`, ctx.lang),
-    failUrl: withLang(`${base}/done?ref=${ref}`, ctx.lang),
-  });
-
-  if (!charge.ok || !charge.token) {
-    // The detail goes on the order row for the operator; the buyer gets the
-    // sentence in their own language.
-    await markOrderFailed(env, ref, charge.error ?? "token request failed");
-    return plain(s.paymentCouldNotStart, 502);
-  }
-  return paytrPage(ctx, iframeUrl(charge.token), ref);
 }
 
 async function checkoutPaddle(env: Env, request: Request): Promise<Response> {
@@ -314,8 +258,7 @@ async function orderStatus(env: Env, ref: string): Promise<Response> {
 
 /** Turns a paid order into a licence, exactly once.
  *
- *  Both webhooks funnel through here, and both processors retry: PayTR until
- *  it is answered `OK`, Paddle on any non-2xx. So the first thing this does is
+ *  Paddle retries the webhook on any non-2xx, so the first thing this does is
  *  ask whether the order has already been paid, because the alternative is
  *  issuing a second licence — and a second charge's worth of seats — for one
  *  payment. */
@@ -342,60 +285,23 @@ async function fulfil(
   await deliverKey(env, opts.email ?? order.email, key, opts.cycle, expiresAt);
 }
 
-/** PayTR's callback.
- *
- *  It must be answered with the literal string `OK` and nothing else, or PayTR
- *  keeps retrying and eventually flags the merchant account. That includes the
- *  cases where we reject it: a callback whose signature does not verify is
- *  answered `OK` too, because there is nothing PayTR could usefully retry, and
- *  the refusal has already been logged. */
-async function paytrWebhook(env: Env, request: Request): Promise<Response> {
-  const ok = () => new Response("OK", { headers: { "content-type": "text/plain" } });
-
-  const form = await request.formData().catch(() => null);
-  if (!form) return ok();
-
-  const callback = await readCallback(env, form);
-  if (!callback) return ok();
-
-  const order = await orderByRef(env, callback.ref);
-  if (!order) {
-    console.error(`PayTR callback for unknown order ${callback.ref}`);
-    return ok();
-  }
-
-  if (!callback.paid) {
-    await markOrderFailed(env, callback.ref, callback.reason);
-    return ok();
-  }
-
-  // The amount is checked rather than trusted. A callback that says success
-  // for less than the plan costs is either a misconfiguration or an attempt,
-  // and both should stop here rather than become a licence.
-  if (order.amount !== null && callback.totalAmount < order.amount) {
-    console.error(
-      `PayTR callback for ${callback.ref} paid ${callback.totalAmount}, expected ${order.amount}`,
-    );
-    await markOrderFailed(env, callback.ref, "Ödenen tutar plan bedelinden düşük.");
-    return ok();
-  }
-
-  const cycle: Cycle = isCycle(order.cycle) ? order.cycle : "monthly";
-  await fulfil(env, callback.ref, {
-    provider: "paytr",
-    cycle,
-    email: order.email,
-    providerRef: callback.ref,
-  });
-  return ok();
-}
-
 async function paddleWebhook(env: Env, request: Request): Promise<Response> {
+  // The address first, then the MAC. Neither stands in for the other: this
+  // drops anything that did not arrive from Paddle's own network, and the
+  // signature below is what proves the payload is theirs. A refusal here is
+  // not 2xx, so Paddle retries -- which is the right outcome if the address
+  // check is ever wrong.
+  if (!(await fromPaddle(request))) return refuse("Forbidden.", 403);
+
   const raw = await request.text();
   const event = await verifyWebhook(env, raw, request.headers.get("Paddle-Signature"));
   if (!event) return refuse("Bad signature.", 401);
 
   const data = event.data ?? {};
+  // Paddle's own idea of when this happened. Deliveries are at-least-once and
+  // unordered, so every mirror write is guarded by it: an old payload arriving
+  // late must not overwrite a newer status.
+  const eventAt = occurredAt(event);
 
   switch (event.eventType) {
     case "transaction.completed": {
@@ -403,6 +309,7 @@ async function paddleWebhook(env: Env, request: Request): Promise<Response> {
       const subscriptionId = data.subscription_id ? String(data.subscription_id) : null;
       const ref = data?.custom_data?.ref ? String(data.custom_data.ref) : null;
       const email = await customerEmail(env, data);
+      await noteCustomer(env, data?.customer_id ? String(data.customer_id) : null, email);
 
       // A renewal has the same shape as a first payment, minus our ref: the
       // subscription already exists, so this extends it rather than selling
@@ -424,10 +331,30 @@ async function paddleWebhook(env: Env, request: Request): Promise<Response> {
       return json({ ok: true });
     }
 
+    case "subscription.created":
+    case "subscription.updated": {
+      // The mirror takes every one of these; the licence is only moved by a
+      // status that actually stops the entitlement. A `scheduled_change` to
+      // cancel is not one: it says what Paddle will do at the end of a period
+      // the customer has already paid for, and acting on it now would take
+      // back time they bought. `subscription.canceled` is what does that.
+      await mirrorSubscription(env, data, eventAt);
+      return json({ ok: true });
+    }
+
     case "subscription.canceled": {
+      await mirrorSubscription(env, data, eventAt);
       const licence = await licenceByProviderRef(env, "paddle", String(data.id ?? ""));
       // Cancelling leaves the paid term alone — it has been paid for.
       if (licence) await endLicence(env, licence, "cancelled");
+      return json({ ok: true });
+    }
+
+    case "customer.created":
+    case "customer.updated": {
+      // One write for both: the second delivery of a create and the first of
+      // an update are indistinguishable, and should leave the same row.
+      await mirrorCustomer(env, data, eventAt);
       return json({ ok: true });
     }
 
@@ -460,6 +387,15 @@ async function accountView(
     .bind(licence.id)
     .first<{ count: number }>())!;
 
+  // What Paddle believes, if a webhook has told us. It only ever decorates
+  // this page -- the licence row is what entitles anyone to anything, and a
+  // mirror that is empty (an old licence, a webhook not yet delivered) must
+  // not make the page refuse to work.
+  const subscription =
+    licence.provider === "paddle" && licence.provider_ref
+      ? await subscriptionById(env, licence.provider_ref)
+      : null;
+
   return accountPage(
     ctx,
     {
@@ -471,13 +407,37 @@ async function accountView(
       seats: count,
       seatLimit: licence.seat_limit,
       provider: licence.provider,
-      // PayTR licences are fixed-term and do not recur, so there is nothing to
-      // cancel — see the note at the top of `paytr.ts`.
-      cancellable: licence.provider === "paddle" && licence.status === "active",
+      // Only Paddle subscriptions recur, so only they can be cancelled.
+      cancellable:
+        licence.provider === "paddle" &&
+        licence.status === "active" &&
+        // A subscription Paddle has already stopped billing has nothing left
+        // to cancel; the button would only produce an API error.
+        (!subscription || grantsAccess(subscription)),
+      // The portal needs a customer id, and the only place one comes from is
+      // a webhook. No mirror row, no button -- rather than a button that
+      // fails after the click.
+      portal: Boolean(subscription?.customer_id),
+      // Handed to Retain on the page. Null until a webhook has named the
+      // customer, which is the same moment the portal button appears.
+      customerId: subscription?.customer_id ?? null,
+      // A scheduled cancellation is a future intention, not a current state.
+      // It is said out loud here precisely because it revokes nothing yet.
+      scheduledCancelAt:
+        subscription?.scheduled_change_action === "cancel"
+          ? (subscription.scheduled_change_at ?? "").slice(0, 10) || null
+          : null,
       message,
       error,
     },
     supportEmail(env),
+    undefined,
+    // Only when Paddle is actually configured: `paddleEnvOrThrow` refuses to
+    // guess, and the account page must not fail to render over a Retain
+    // nicety.
+    paddleConfigured(env)
+      ? { clientToken: env.PADDLE_CLIENT_TOKEN, env: paddleEnvOrThrow(env) }
+      : undefined,
   );
 }
 
@@ -518,6 +478,43 @@ async function accountCancel(env: Env, request: Request, url: URL): Promise<Resp
   return accountView(env, ctx, updated, key, s.cancelled(updated.renews_at ?? s.endOfPaidPeriod));
 }
 
+/** Opens the Paddle-hosted customer portal, where the customer updates a card,
+ *  reads invoices or cancels.
+ *
+ *  Authentication first, and the licence key is the credential: this service
+ *  has no accounts and no cookies, so holding the key is what proves the
+ *  visitor is the customer. The Paddle customer id is then resolved from the
+ *  mirror on this side. Nothing the browser sent names a customer -- a form
+ *  field holding a `ctm_...` would be an invitation to read a stranger's
+ *  billing history.
+ *
+ *  The session URL is redirected to and never stored. Paddle expires these
+ *  quickly, and a cached one is exactly that stranger's billing history. */
+async function accountPortal(env: Env, request: Request, url: URL): Promise<Response> {
+  const form = await request.formData();
+  const ctx = pageContext(request, url, form.get("lang"));
+  const s = t(ctx.lang);
+  const key = String(form.get("key") ?? "").trim().toUpperCase();
+
+  const licence = key ? await licenceByKey(env, key) : null;
+  if (!licence) return accountPage(ctx, null, supportEmail(env), s.keyNotRecognised);
+
+  if (licence.provider !== "paddle" || !licence.provider_ref) {
+    return accountView(env, ctx, licence, key, undefined, s.portalNotAvailable);
+  }
+
+  const subscription = await subscriptionById(env, licence.provider_ref);
+  if (!subscription?.customer_id) {
+    return accountView(env, ctx, licence, key, undefined, s.portalNotAvailable);
+  }
+
+  const result = await portalSession(env, subscription.customer_id, [licence.provider_ref]);
+  if (!result.startsWith("http")) {
+    return accountView(env, ctx, licence, key, undefined, s[result as CancelFailure]);
+  }
+  return new Response(null, { status: 303, headers: { location: result } });
+}
+
 // -- development -------------------------------------------------------------
 
 async function devIssue(env: Env, body: any) {
@@ -549,11 +546,21 @@ export default {
       if (admin) return admin;
 
       if (request.method === "GET") {
+        // The checkout domain is reviewed as a site in its own right: Paddle
+        // fetches it and looks for a real front page and the three policies.
+        // They are written once, on the marketing site, so this points at
+        // them rather than answering 404 and failing the review.
+        if (pathname === "/") return redirect(SITE + "/");
+        if (pathname === "/terms" || pathname === "/privacy" || pathname === "/refunds") {
+          return redirect(SITE + pathname);
+        }
         if (pathname === "/buy") return buy(env, request, url);
         if (pathname === "/account") {
           return accountPage(pageContext(request, url), null, supportEmail(env));
         }
-        if (pathname === "/done") {
+        // /welcome is where Paddle returns the buyer. It polls for the licence
+        // key using the ref in the query string.
+        if (pathname === "/welcome") {
           const ctx = pageContext(request, url);
           const ref = url.searchParams.get("ref") ?? "";
           if (!ref) return redirect(withLang("/buy", ctx.lang));
@@ -574,16 +581,14 @@ export default {
       // over its raw bytes, the others are form-encoded — so they are routed
       // before anything tries to parse the body as JSON.
       switch (pathname) {
-        case "/webhooks/paytr":
-          return await paytrWebhook(env, request);
         case "/webhooks/paddle":
           return await paddleWebhook(env, request);
-        case "/checkout/paytr":
-          return await checkoutPaytr(env, request, url);
         case "/checkout/paddle":
           return await checkoutPaddle(env, request);
         case "/account":
           return await account(env, request, url);
+        case "/account/portal":
+          return await accountPortal(env, request, url);
         case "/account/cancel":
           return await accountCancel(env, request, url);
       }

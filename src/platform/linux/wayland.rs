@@ -79,7 +79,7 @@ pub fn probe() -> Result<(), String> {
 /// watch starts is recorded but not reported: it is whatever the user was
 /// doing before bubbleTranslate existed, and translating it unbidden at
 /// startup would be a surprise.
-pub fn watch(on_change: impl FnMut(String) + Send + 'static) -> Result<(), String> {
+pub fn watch(on_change: impl FnMut(String, bool) + Send + 'static) -> Result<(), String> {
     let conn = Connection::connect_to_env()
         .map_err(|err| format!("could not connect to the Wayland compositor: {err}"))?;
 
@@ -149,10 +149,8 @@ fn serve_clipboard(text: String) -> Result<(), String> {
     conn.display().get_registry(&qh, ());
     queue.roundtrip(&mut server).map_err(|e| e.to_string())?;
 
-    let (Some(manager), Some(seat)) = (
-        server.globals.manager.clone(),
-        server.globals.seat.clone(),
-    ) else {
+    let (Some(manager), Some(seat)) = (server.globals.manager.clone(), server.globals.seat.clone())
+    else {
         return Err("no data-control manager".to_string());
     };
 
@@ -271,7 +269,9 @@ struct Watcher {
     /// MIME types announced per offer. An offer arrives empty and is described
     /// by a burst of `offer` events before the selection event that uses it.
     offers: HashMap<ObjectId, Vec<String>>,
-    on_change: Box<dyn FnMut(String) + Send>,
+    /// Called with the text and whether it came from the clipboard rather
+    /// than from a selection.
+    on_change: Box<dyn FnMut(String, bool) + Send>,
     /// False until the compositor has told us what the selection already was.
     primed: bool,
     /// The same, for the clipboard, which is announced separately.
@@ -315,7 +315,7 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for Watcher {
                     return;
                 }
                 if let Some(text) = text {
-                    (state.on_change)(text);
+                    (state.on_change)(text, false);
                 }
             }
             zwlr_data_control_device_v1::Event::Selection { id } => {
@@ -338,7 +338,7 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for Watcher {
                     return;
                 }
                 if let Some(text) = text {
-                    (state.on_change)(text);
+                    (state.on_change)(text, true);
                 }
             }
             zwlr_data_control_device_v1::Event::Finished => {
