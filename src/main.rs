@@ -13,6 +13,7 @@
 
 mod config;
 mod engine;
+mod ipc;
 mod license;
 mod main_window;
 mod platform;
@@ -61,6 +62,19 @@ fn main() -> eframe::Result<()> {
     if let Some(pos) = args.iter().position(|a| a == "--translate") {
         let text = args[pos + 1..].join(" ");
         std::process::exit(translate_once(&text));
+    }
+    if args.iter().any(|a| a == "--translate-selection") {
+        // The command a keybinding runs. It carries no text: the instance
+        // that is already watching has the selection, and it is the one that
+        // knows where the pointer is.
+        if ipc::request_translate() {
+            std::process::exit(0);
+        }
+        eprintln!(
+            "bubbleTranslate: nothing is running to translate the selection — \
+             start bubbleTranslate first."
+        );
+        std::process::exit(1);
     }
     if args.iter().any(|a| a == "--check") {
         std::process::exit(check_providers());
@@ -155,6 +169,22 @@ fn main() -> eframe::Result<()> {
             // nothing yet, which is why closing the window quits instead.
             shell::install(cc.egui_ctx.clone());
 
+            // The keybinding route into the same pipeline a selection takes.
+            // It asks for no anchor of its own: the bubble goes to the pointer
+            // exactly as it would have, which on a session that will not say
+            // where that is means the same corner as always.
+            {
+                let requests = engine.sender();
+                if let Err(err) = ipc::listen(move || {
+                    let _ = requests.send(Request::Hotkey(crate::platform::Trigger {
+                        at: crate::platform::cursor_position(),
+                        clipboard_before: None,
+                    }));
+                }) {
+                    crate::trace!("ipc: not listening for the hotkey — {err}");
+                }
+            }
+
             let requests = engine.sender();
             if let Err(err) = monitor::spawn(move |trigger| {
                 // Nothing here may block. This runs inside the event tap
@@ -214,7 +244,11 @@ fn license_status() -> i32 {
                 quota.used_today(),
                 quota.remaining(&licence.entitlement).unwrap_or(0),
             );
-            println!("pro       {} or {}", license::PRICE_MONTHLY, license::PRICE_YEARLY);
+            println!(
+                "pro       {} or {}",
+                license::PRICE_MONTHLY,
+                license::PRICE_YEARLY
+            );
         }
     }
 

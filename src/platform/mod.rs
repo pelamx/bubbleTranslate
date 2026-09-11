@@ -69,6 +69,28 @@ pub struct Trigger {
     pub clipboard_before: Option<isize>,
 }
 
+/// Where the pointer is, in the same space a [`Trigger`] anchor is given in.
+///
+/// Only the hotkey path asks: a selection's trigger carries its own anchor,
+/// taken at the moment the gesture ended, and this is for the case where there
+/// was no gesture to take one from.
+///
+/// A null event is the documented way to ask the window server for the cursor
+/// without an event to read it off, and it answers in the top-left origin the
+/// bubble is placed in.
+#[cfg(target_os = "macos")]
+pub fn cursor_position() -> Option<(f64, f64)> {
+    use core_graphics::event::CGEvent;
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+    let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState).ok()?;
+    let point = CGEvent::new(source).ok()?.location();
+    Some((point.x, point.y))
+}
+
+#[cfg(target_os = "linux")]
+pub use linux::cursor::position as cursor_position;
+
 /// Whether the pointer is inside `rect`, which is given in the same
 /// coordinate space the bubble is positioned in.
 ///

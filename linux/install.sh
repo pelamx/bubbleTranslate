@@ -23,6 +23,21 @@ if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
     fi
     echo "    Wayland: selections are read over wlr-data-control."
     echo "    GNOME does not implement it; the bubble will stay quiet there."
+    # The trigger key is the one setting a Wayland session cannot honour on
+    # its own: no protocol reports the keyboard to an unfocused application,
+    # so the key is read from /dev/input, which is group-owned. Said here
+    # rather than only in the app, because it is fixed before the first run.
+    if ! id -nG | grep -qw input; then
+        echo
+        echo "    Note: bubbleTranslate only translates a selection made with"
+        echo "    Shift held. Reading that key on Wayland needs one permission:"
+        echo
+        echo "        sudo usermod -aG input \"$USER\"     # then log out and back in"
+        echo
+        echo "    Without it every selection is translated, as before. The other"
+        echo "    way round is a keybinding on:"
+        echo "        bubbleTranslate --translate-selection"
+    fi
 else
     echo "    X11: selections are read from the primary selection."
 fi

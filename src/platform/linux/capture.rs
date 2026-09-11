@@ -16,10 +16,15 @@ use crate::platform::{Capture, CaptureSource, Readiness};
 
 use super::{Backend, backend, wayland};
 
-/// The selection behind the trigger the engine has not consumed yet.
+/// The most recent selection, whether or not a trigger was fired for it.
 ///
 /// One slot rather than a queue on purpose: while the engine debounces, later
 /// selections supersede earlier ones, and only the last is worth translating.
+///
+/// It is read rather than consumed, because the gate means a selection can
+/// arrive without a trigger — the user had not taken the key yet — and the
+/// hotkey has to be able to translate exactly that. The engine's own repeat
+/// window is what keeps a stale slot from translating twice.
 static LATCHED: Mutex<Option<String>> = Mutex::new(None);
 
 /// Handed the text by whichever backend is watching, just before it fires the
@@ -33,7 +38,7 @@ pub(super) fn latch(text: String) {
 // latches selections as they happen, so there is never our own copy to
 // discount, and the sample is ignored.
 pub fn selected_text(_allow_clipboard: bool, _clipboard_before: Option<isize>) -> Option<Capture> {
-    let text = LATCHED.lock().unwrap().take()?;
+    let text = LATCHED.lock().unwrap().clone()?;
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return None;
@@ -54,7 +59,9 @@ pub fn readiness() -> Readiness {
     match backend() {
         Backend::WaylandDataControl | Backend::X11Primary => Readiness::ready(),
         Backend::Unavailable(reason) => Readiness::blocked(
-            format!("Selections cannot be watched here — {reason}. Typing into the box above still works."),
+            format!(
+                "Selections cannot be watched here — {reason}. Typing into the box above still works."
+            ),
             format!(
                 "Selections cannot be watched on this desktop: {reason}. This is the \
                  compositor's policy, not a setting — GNOME's Wayland session, in \

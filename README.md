@@ -447,6 +447,7 @@ deepl_api_key = ""
 mymemory_email = ""         # raises the MyMemory quota
 license_key = ""            # Pro key; the signed token it buys lives elsewhere
 auto_translate = true       # bubble on selection
+trigger_key = "shift"       # hold this while selecting; "always" for no key
 min_chars = 2
 max_chars = 4000            # keeps a stray Cmd+A out of the queue
 debounce_ms = 180           # settle time before reading the selection
@@ -457,12 +458,76 @@ font_size = 15.0
 ui_scale = 1.0              # whole-interface scale, on top of the display's
 ```
 
-Target language, auto-translate and the DeepL key are also editable from the
-bubble's ⚙ menu. Changing the language re-translates the text already captured.
+Target language, auto-translate, the trigger key and the DeepL key are also
+editable from the bubble's ⚙ menu. Changing the language re-translates the text
+already captured.
+
+### The trigger key
+
+Text gets selected all day for reasons that have nothing to do with translating
+it, so by default the bubble only appears for a selection made with **Shift**
+held. Any of `shift`, `ctrl`, `alt` or `super` will do — Control, Option and
+Command on macOS — and `always` restores the old behaviour of translating every
+selection.
+
+Holding the key at either end of the gesture counts: taking it before the drag
+starts and letting go before the button comes up are the same request. A copy,
+when `watch_clipboard` is on, is never gated — it is already a deliberate
+gesture with a key in it.
+
+**Where the key is read from.** No Wayland protocol tells an unfocused
+application which keys are down — the same omission that hides the pointer, and
+a deliberate one: an interface for that is an interface for writing a
+keylogger. So the answer is looked for in three places, in this order, and the
+first one that will say wins:
+
+| Session | Asked | Needs |
+|---|---|---|
+| macOS | the event tap, which carries the modifiers on every event | nothing beyond Accessibility |
+| X11 | the X server, on the same query the drag already makes | nothing |
+| Hyprland | the compositor's own IPC — `hl.is_key_down` over its socket | nothing |
+| Other Wayland | the kernel, through `/dev/input` | membership of the `input` group |
+
+Only the last row asks for anything, and only because nobody else on that
+session will answer:
+
+```sh
+sudo usermod -aG input "$USER"   # then log out and back in
+```
+
+Until that is done the settings panel says the gate is not in force and every
+selection is translated, exactly as before. What is read there is kept as
+narrow as the job allows: only devices that have a Shift key, and only the
+eight modifier keycodes — every other key is dropped inside the read loop, and
+nothing else is stored or sent anywhere.
+
+### Translating from a keybinding
+
+The other way round the same problem, and the one that needs no permission at
+all: select the text, then press a key. A compositor will not say what the
+keyboard is doing, but it will run a command on a key combination.
+
+```sh
+bubbleTranslate --translate-selection
+```
+
+It asks the running instance to translate whatever is selected right now and
+exits; the bubble appears at the pointer as usual. Bind it in Hyprland with
+
+```
+bindd = SUPER, T, Translate selection, exec, bubbleTranslate --translate-selection
+```
+
+or in GNOME under Settings › Keyboard › Custom Shortcuts. This works on every
+session, GNOME's Wayland included, and alongside whatever `trigger_key` is set
+to.
 
 ## Known limits
 
 - GNOME's Wayland session cannot be watched at all; see above.
+- On a Wayland session that is not Hyprland, the trigger key needs membership
+  of the `input` group; without it the gate is not in force. A keybinding on
+  `--translate-selection` is the alternative that needs nothing.
 - The prebuilt Linux binary needs glibc 2.43 or newer, which rules out the
   current Debian and Ubuntu releases. Build from source there.
 - A Linux session with no StatusNotifierItem host gets no tray icon, and there

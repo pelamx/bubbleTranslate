@@ -26,6 +26,16 @@ const MAX_SETTLE: Duration = Duration::from_secs(5);
 pub enum Request {
     /// The monitor saw a selection gesture finish.
     Selection(Trigger),
+    /// A key bound in the desktop asked for the current selection to be
+    /// translated.
+    ///
+    /// Separate from [`Request::Selection`] because it means the opposite
+    /// thing about intent: a selection is a guess that the user wants a
+    /// translation, and this is the user saying so. It therefore ignores the
+    /// auto-translate switch — turning that off and binding a key is the way
+    /// to get a translator that never interrupts, and a hotkey that went quiet
+    /// with it would leave no way to ask at all.
+    Hotkey(Trigger),
     /// The user changed the target language; redo the last selection.
     Retranslate,
     /// Text typed into the main window's translate box. Deliberately separate
@@ -74,7 +84,10 @@ pub enum UiEvent {
     },
     /// The same, for the main window's translate box. The user pressed a
     /// button and is owed an answer every time they press it.
-    ManualCapped { used: u32, limit: u32 },
+    ManualCapped {
+        used: u32,
+        limit: u32,
+    },
 }
 
 /// Phrase used to probe the backends. Short, unambiguously non-English, and
@@ -198,7 +211,12 @@ fn run(
                 continue;
             }
             Request::RefreshLicense => {
-                let token = licensing.license.lock().unwrap().token().map(str::to_string);
+                let token = licensing
+                    .license
+                    .lock()
+                    .unwrap()
+                    .token()
+                    .map(str::to_string);
                 if let Some(token) = token {
                     match license::refresh(&licence_agent, &token) {
                         Ok(grant) => {
@@ -215,7 +233,12 @@ fn run(
                 continue;
             }
             Request::DeactivateLicense => {
-                let token = licensing.license.lock().unwrap().token().map(str::to_string);
+                let token = licensing
+                    .license
+                    .lock()
+                    .unwrap()
+                    .token()
+                    .map(str::to_string);
                 if let Some(token) = token {
                     license::deactivate(&licence_agent, &token);
                 }
@@ -253,6 +276,12 @@ fn run(
             }
         }
 
+        // Whether the user asked for this translation outright, which changes
+        // two decisions below: the auto-translate switch does not apply to a
+        // request, and neither does the repeat window — pressing the key twice
+        // on the same words means "again", not "the same gesture twice".
+        let asked_for = matches!(request, Request::Hotkey(_));
+
         // The last element is whether the allowance applies. Re-reading the
         // same selection in another language is the same translation, so
         // switching target language must never cost anything.
@@ -272,10 +301,11 @@ fn run(
                 // it says about where the text came from.
                 (last_text.clone(), last_at, last_via, false)
             }
-            Request::Selection(trigger) => {
+            Request::Selection(trigger) | Request::Hotkey(trigger) => {
                 // Applied here rather than in the tap callback, which must not
-                // touch the config mutex.
-                if !cfg.auto_translate {
+                // touch the config mutex. A hotkey is exempt: it is a request,
+                // not a guess.
+                if !cfg.auto_translate && !asked_for {
                     crate::trace!("skip      auto-translate is off");
                     continue;
                 }
@@ -304,7 +334,7 @@ fn run(
                 // succession (a click that lands inside an existing selection
                 // re-reads it). Selecting the same words again later is a
                 // deliberate act and does go through.
-                if text == last_text && last_started.elapsed() < REPEAT_WINDOW {
+                if !asked_for && text == last_text && last_started.elapsed() < REPEAT_WINDOW {
                     crate::trace!("skip      same text within repeat window");
                     continue;
                 }
@@ -464,7 +494,10 @@ mod tests {
     /// has to reach the screen, at the place the translation would have been.
     #[test]
     fn a_spent_allowance_still_answers_the_gesture() {
-        let spent = Verdict::Capped { used: 10, limit: 10 };
+        let spent = Verdict::Capped {
+            used: 10,
+            limit: 10,
+        };
         match gate(spent, Some((120.0, 340.0))) {
             Gate::Refuse(UiEvent::Capped { at, limit }) => {
                 // Where the translation would have appeared, not wherever the
