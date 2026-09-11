@@ -14,38 +14,30 @@ existed, and the reason it should stay that way.
 
 **bubbleTranslate Pro** — unlimited translations, three machines.
 
-| | Turkey | Everywhere else |
-|---|---|---|
-| Processor | PayTR | Paddle |
-| Monthly | set in `wrangler.toml` | $2 |
-| Yearly | set in `wrangler.toml` | $20 |
-| Renews itself | no — fixed term | yes |
-| Tax and invoicing | yours | Paddle's, as merchant of record |
+| | Everywhere |
+|---|---|
+| Processor | Paddle |
+| Monthly | $2 |
+| Yearly | $20 |
+| Renews itself | yes |
+| Tax and invoicing | Paddle's, as merchant of record |
+
+Paddle prices the transaction in the buyer's own currency and adds the local
+tax, so $2/$20 are the figures the product quotes rather than what every card
+is debited.
 
 The free tier is ten translations a day, counted at the user's local midnight.
 The number travels in the token as `lim` and falls back to the compiled-in ten
 when there is no token. See `src/quota.rs` in the client.
 
-### The two prices that are not in this repo
+### Where the prices live
 
-`PAYTR_PRICE_MONTHLY_KURUS` and `PAYTR_PRICE_YEARLY_KURUS` in `wrangler.toml`
-start empty, and until they are set `/buy` tells Turkish visitors that checkout
-is unavailable and offers them the dollar page instead. It never charges zero.
-
-They are deliberately not a conversion of $2 and $20. PayTR settles in lira,
-and a price that follows the exchange rate is one no customer can budget for
-and no accountant can reconcile. Pick a number and revisit it when you mean to.
-
-### Why Turkish licences do not auto-renew
-
-PayTR's recurring product has to be enabled per merchant account and is not
-available to every seller, so the default here is a term the buyer chooses and
-re-buys. `extendTerm` already handles a renewal arriving for an existing
-licence, so switching this on later is a webhook change rather than a redesign.
-
-The consequence is visible to customers and worth being deliberate about: a
-Turkish buyer gets a licence that ends on a date, and the account page says so
-instead of offering a cancel button.
+The dollar figures are the product's, and they appear in three places that
+must agree: `USD_PRICE` in `src/env.ts`, `PRICE_MONTHLY` / `PRICE_YEARLY` in
+the client's `src/license.rs`, and the `price.*` keys on the website. The
+amount actually charged is Paddle's, set on the price ids in the catalogue —
+`paddleConfigured` degrades `/buy` to "checkout unavailable" if a price id or
+the client token is missing, and never to a charge of zero.
 
 ## Running it locally
 
@@ -85,10 +77,16 @@ behaviour is exercised without waiting a year.
 
 In development the service generates its own Ed25519 key on first use and
 keeps it in D1, so the public key you started the app with still verifies
-tomorrow's tokens. `DEV_MODE` in `wrangler.toml` is what opens `/v1/pubkey`
-and `/v1/dev/issue`; it must never be set in production.
+tomorrow's tokens. `DEV_MODE` is what opens `/v1/pubkey` and `/v1/dev/issue`.
+It lives in `.dev.vars`, which `wrangler dev` reads and `wrangler deploy`
+ignores, so it cannot reach production by accident:
 
-Processor credentials for local work go in `.dev.vars`, which is gitignored.
+```
+DEV_MODE = "1"
+PUBLIC_BASE_URL = "http://localhost:8787"
+```
+
+Processor credentials for local work go in the same file, which is gitignored.
 
 ## The contract
 
@@ -118,24 +116,23 @@ one is not a new seat; *Remove from this device* in the Account tab frees it.
 
 | Route | What it does |
 |---|---|
-| `GET /buy` | Country-routed pricing. `?country=TR` overrides the guess |
-| `POST /checkout/paytr` | Opens a PayTR session and serves its iframe |
+| `GET /buy` | The pricing page and the Paddle.js overlay |
 | `POST /checkout/paddle` | Mints an order ref for the Paddle.js overlay |
-| `GET /done?ref=` | Polls until the payment lands, then shows the key |
+| `GET /welcome?ref=` | Polls until the payment lands, then shows the key |
 | `GET /v1/order/:ref` | What that page polls |
 | `GET|POST /account` | Licence status, and cancellation where it applies |
 
-Geolocation is a guess, so both variants of `/buy` link to the other. A Turkish
-customer on a VPN, or someone abroad who wants to pay in lira, must not be
-stuck with the wrong processor because Cloudflare read an IP a certain way.
+`/buy` passes the edge's country to Paddle only as a hint for its price
+preview, and never a sentinel: Cloudflare's `XX` (cannot place) and `T1` (Tor)
+are dropped, and Paddle geolocates the IP itself instead.
 
 ### Languages
 
 Every page speaks English, Turkish and Spanish, switched from the EN / TR / ES
 links at the top right. English is the default for everyone — the language is
-never guessed from the IP address; only the payment processor is. The choice
-rides on `?lang=`, on a hidden field in each form, and on a `lang` cookie so
-the return trip from a processor comes back in the same language. The strings
+never guessed from the IP address. The choice rides on `?lang=`, on a hidden
+field in each form, and on a `lang` cookie so the return trip from Paddle comes
+back in the same language. The strings
 live in `src/i18n.ts`, one object per language, typed against the English one
 so a string added without its two translations fails to compile.
 
@@ -153,17 +150,11 @@ key is cleared once `reveal_until` passes — an hour. Set `RESEND_API_KEY` and
 
 | Route | Signature | Reply |
 |---|---|---|
-| `/webhooks/paytr` | `hash` field, HMAC-SHA256, base64 | the literal `OK`, always |
 | `/webhooks/paddle` | `Paddle-Signature: ts=…;h1=…` over `ts:body` | `{ok}` or 401 |
 
-PayTR must be answered `OK` and nothing else or it keeps retrying and
-eventually flags the merchant account — including when the signature does not
-verify, because there is nothing it could usefully retry.
-
-Both processors retry, so fulfilment is idempotent: an order already marked
-paid issues nothing further. PayTR callbacks are also checked against the
-amount the order was created for, so a success for less than the plan costs
-stops there rather than becoming a licence.
+Paddle retries on any non-2xx, so fulfilment is idempotent: an order already
+marked paid issues nothing further, and a licence is looked up by
+`provider_ref` before another is created.
 
 Paddle events handled: `transaction.completed` (a first payment when it
 carries our `custom_data.ref`, a renewal when it names a subscription we
@@ -223,8 +214,8 @@ undisturbed**, because `refresh` finds the licence by the token's `lic` claim
 rather than by the key. Only the old key stops working, which makes this the
 right tool for a key that leaked as well as one that was lost.
 
-Refunds and cancellations should normally be done in PayTR or Paddle, whose
-webhooks update this automatically. The Refund button only marks the licence;
+Refunds and cancellations should normally be done in Paddle, whose webhook
+updates this automatically. The Refund button only marks the licence;
 it moves no money. Doing it in both places is how the two come to disagree.
 
 Every state-changing route checks the request's `Origin`. A browser holding
@@ -244,28 +235,25 @@ including a form on someone else's page.
    The same hex goes into `PUBLIC_KEY_HEX` in `src/license.rs`. If that
    private key ever leaks, anyone can mint Pro licences and the only fix is
    shipping a new binary — treat it accordingly.
-3. Remove `DEV_MODE` from `wrangler.toml`, and set `PUBLIC_BASE_URL` to the
-   real hostname. The return URLs PayTR is given are built from it.
-4. **PayTR**: set the merchant secrets, set the two lira prices, set
-   `PAYTR_TEST_MODE = "0"`, and point the notification URL in the PayTR panel
-   at `/webhooks/paytr`.
-   ```sh
-   wrangler secret put PAYTR_MERCHANT_ID
-   wrangler secret put PAYTR_MERCHANT_KEY
-   wrangler secret put PAYTR_MERCHANT_SALT
-   ```
-5. `wrangler secret put ADMIN_PASSWORD`, or leave it unset and have no panel.
-6. **Paddle**: create the two prices in the catalogue, put their `pri_…` ids
+3. Check `PUBLIC_BASE_URL` in `wrangler.toml` is the real hostname. The
+   success URL Paddle returns the buyer to is built from it. `DEV_MODE` is
+   never in that file; see above.
+4. `wrangler secret put ADMIN_PASSWORD`, or leave it unset and have no panel.
+5. **Paddle**: create the two prices in the catalogue, put their `pri_…` ids
    and the client token in `wrangler.toml`, set `PADDLE_ENV = "production"`,
-   and add a notification destination pointing at `/webhooks/paddle`.
+   and add **one** notification destination pointing at `/webhooks/paddle`,
+   subscribed to `transaction.completed`, `subscription.created`,
+   `subscription.updated`, `subscription.canceled` and `adjustment.created`.
+   `PADDLE_WEBHOOK_SECRET` must be that destination's signing secret; never
+   delete and recreate a destination, because that rotates the secret.
    ```sh
    wrangler secret put PADDLE_API_KEY
    wrangler secret put PADDLE_WEBHOOK_SECRET
    ```
-7. Attach `api.bubbletranslate.app` as a custom domain, and only then cut a
+6. Attach `api.bubbletranslate.app` as a custom domain, and only then cut a
    release binary. `LICENSE_API` and `BUY_URL` are compiled in: ship against a
    temporary hostname and every install keeps calling it forever.
 
-Buy one of each with a real card before announcing it. The paths worth walking
-end to end are a Turkish purchase, an international one, a refund, and a
-cancellation — the last two because they are the ones that only fail later.
+Buy one with a real card before announcing it. The paths worth walking end to
+end are a purchase, a renewal, a refund, and a cancellation — the last three
+because they are the ones that only fail later.

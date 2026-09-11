@@ -9,9 +9,8 @@
 // give them a working key again.
 //
 // It is deliberately small. There is no charging, no refunding and no
-// cancelling of a processor subscription from here — that lives with PayTR and
-// Paddle, which own the money, and doing it in two places is how the two
-// disagree.
+// cancelling of a subscription from here — that lives with Paddle, which owns
+// the money, and doing it in two places is how the two disagree.
 
 import { type Env, supportEmail } from "./env";
 import { type Licence, endLicence, isLive, licenceById, rotateKey } from "./licences";
@@ -73,7 +72,6 @@ interface Stats {
   live: number;
   monthly: number;
   yearly: number;
-  paytr: number;
   paddle: number;
   winding_down: number;
   expiring: number;
@@ -91,7 +89,6 @@ async function stats(env: Env): Promise<Stats> {
        SUM(CASE WHEN status != 'refunded' AND expires_at > ?  THEN 1 ELSE 0 END) AS live,
        SUM(CASE WHEN status != 'refunded' AND expires_at > ?  AND cycle = 'monthly' THEN 1 ELSE 0 END) AS monthly,
        SUM(CASE WHEN status != 'refunded' AND expires_at > ?  AND cycle = 'yearly'  THEN 1 ELSE 0 END) AS yearly,
-       SUM(CASE WHEN status != 'refunded' AND expires_at > ?  AND provider = 'paytr'  THEN 1 ELSE 0 END) AS paytr,
        SUM(CASE WHEN status != 'refunded' AND expires_at > ?  AND provider = 'paddle' THEN 1 ELSE 0 END) AS paddle,
        SUM(CASE WHEN status  = 'cancelled' AND expires_at > ? THEN 1 ELSE 0 END) AS winding_down,
        SUM(CASE WHEN status != 'refunded' AND expires_at > ?  AND expires_at < ? THEN 1 ELSE 0 END) AS expiring,
@@ -99,7 +96,7 @@ async function stats(env: Env): Promise<Stats> {
        COUNT(*) AS total
      FROM licences`,
   )
-    .bind(t, t, t, t, t, t, t, t + 7 * DAY, t - 30 * DAY)
+    .bind(t, t, t, t, t, t, t + 7 * DAY, t - 30 * DAY)
     .first<Stats>();
 
   return (
@@ -107,7 +104,6 @@ async function stats(env: Env): Promise<Stats> {
       live: 0,
       monthly: 0,
       yearly: 0,
-      paytr: 0,
       paddle: 0,
       winding_down: 0,
       expiring: 0,
@@ -312,7 +308,6 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
        ${tile(s.live, "live subscribers")}
        ${tile(s.monthly, "monthly")}
        ${tile(s.yearly, "yearly")}
-       ${tile(s.paytr, "via PayTR")}
        ${tile(s.paddle, "via Paddle")}
        ${tile(s.fresh, "new in 30 days")}
        ${tile(s.expiring, "ending in 7 days")}
@@ -333,7 +328,7 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
      ${failureTable}
      <hr>
      <p class="muted">
-       Refunds and cancellations should normally be done in PayTR or Paddle — their
+       Refunds and cancellations should normally be done in Paddle — its
        webhook updates this automatically. The Refund button here only marks the
        licence, and does not move any money. Support: ${escapeHtml(supportEmail(env))}
      </p>`,

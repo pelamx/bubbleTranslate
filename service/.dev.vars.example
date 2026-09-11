@@ -1,0 +1,37 @@
+# Copy to `.dev.vars` for local `wrangler dev`. This file is the template and
+# is committed; `.dev.vars` holds the real values and is not.
+#
+# This stack has no `.env`: a Worker's non-secret configuration lives in
+# `wrangler.toml` [vars] and is deployed with the code, while `.dev.vars` is
+# read by `wrangler dev` and ignored by `wrangler deploy`. So the split is not
+# "public vs private" but "local vs deployed" -- the secrets below are set on
+# the deployed Worker with `wrangler secret put`, never written to a file.
+
+# Opens /v1/pubkey and /v1/dev/issue, and lets the service mint its own signing
+# key. Local only -- never put this in wrangler.toml.
+DEV_MODE = "1"
+PUBLIC_BASE_URL = "http://localhost:8787"
+
+# -- Paddle -------------------------------------------------------------------
+# PADDLE_ENV is NOT set here. It lives in wrangler.toml [vars] because it must
+# be identical for the deployed Worker and for local runs against the same
+# account, and because the service now refuses to start a checkout when it is
+# unset rather than assuming sandbox. See paddleEnvOrThrow in src/env.ts.
+#
+# Secrets, for local runs only. On the deployed Worker these are set with
+# `wrangler secret put` and exist nowhere on disk. None of them is ever sent to
+# the browser: PADDLE_API_KEY is used server-side for cancellations, customer
+# lookup and minting customer portal sessions, and the only Paddle value that
+# reaches the page is PADDLE_CLIENT_TOKEN, which is publishable by design.
+PADDLE_API_KEY = "pdl_sdbx_apikey_..."
+PADDLE_WEBHOOK_SECRET = "pdl_ntfset_..."
+
+# -- Licence signing ----------------------------------------------------------
+# Omit both locally and DEV_MODE mints an ephemeral pair on each run.
+# SIGNING_KEY_PKCS8 = ""
+# SIGNING_KEY_PUBLIC = ""
+
+# -- Optional -----------------------------------------------------------------
+# RESEND_API_KEY = ""
+# MAIL_FROM = "BubbleTranslate <no-reply@bubbletranslate.app>"
+# ADMIN_PASSWORD = ""

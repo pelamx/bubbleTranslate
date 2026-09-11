@@ -238,9 +238,8 @@ export interface Order {
  *  the orders table is not a standing list of live licences. */
 export const REVEAL_SECONDS = 3600;
 
-/** PayTR rejects a merchant_oid containing anything but letters and digits,
- *  and the same value is this order's whole access control — so: bare hex,
- *  128 bits of it. */
+/** The ref is this order's whole access control — the success page reveals the
+ *  key to whoever holds it — so it is unguessable: bare hex, 128 bits of it. */
 export const newOrderRef = () => randomHex(16);
 
 export async function createOrder(

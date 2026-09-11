@@ -28,6 +28,8 @@ pub mod cursor;
 pub mod monitor;
 pub mod shell;
 
+mod compositor;
+mod evdev;
 mod wayland;
 mod window;
 mod x11;
