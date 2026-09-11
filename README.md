@@ -1,7 +1,8 @@
 # bubbleTranslate
 
-Select text anywhere — a PDF, a terminal, a browser, an editor — and a small
-bubble appears at the cursor with the translation. Runs on macOS and Linux.
+Select text anywhere — a PDF, a terminal, a browser, an editor — with a key
+held (Shift by default) and a small bubble appears at the cursor with the
+translation. Runs on macOS and Linux.
 
 The translator, the provider chain and the interface are the same code on both.
 What differs is how a desktop lets an application find out what is selected,
@@ -12,7 +13,7 @@ which is a surprisingly large difference: see
 
 | | Download | What you get |
 |---|---|---|
-| **macOS** | [`bubbleTranslate.dmg`](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate.dmg) (7 MB) | An app bundle to drag into Applications |
+| **macOS** | [`bubbleTranslate.dmg`](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate.dmg) (14 MB, Intel + Apple Silicon) | An app bundle to drag into Applications |
 | **Linux** | [`bubbleTranslate-linux-x86_64`](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate-linux-x86_64) (20 MB) | One executable to `chmod +x` and run |
 
 The download is the metered build: ten free translations a day, and Pro to
