@@ -22,6 +22,7 @@ import {
   licenceById,
   rotateKey,
 } from "./licences";
+import { grantsAccess, subscriptionById } from "./mirror";
 import { escapeHtml, page } from "./pages";
 import { constantTimeEqual, now, sha256Hex } from "./tokens";
 
@@ -216,6 +217,69 @@ function statusCell(licence: Row): string {
   return '<span class="ok">active</span>';
 }
 
+/** The long way round: every field the operator might have to correct, in one
+ *  form, folded away behind a summary so the table stays a table.
+ *
+ *  The quick buttons on the row above are the gestures support actually makes
+ *  daily. This is for the rest -- a typo'd address, a term that has to land on
+ *  an exact date, a seat count agreed by mail -- and it exists so that none of
+ *  those ends in a hand-written UPDATE against production. */
+function editPanel(r: Row): string {
+  const option = (value: string, label: string, selected: string) =>
+    `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(label)}</option>`;
+
+  return `<details>
+    <summary>Edit ${escapeHtml(r.id)}</summary>
+    <form method="post" action="/admin/update" class="row edit">
+      <input type="hidden" name="id" value="${escapeHtml(r.id)}">
+      <div style="flex:2 1 220px">
+        <label class="field" for="e-mail-${escapeHtml(r.id)}">Email</label>
+        <input id="e-mail-${escapeHtml(r.id)}" type="email" name="email"
+               value="${escapeHtml(r.email ?? "")}" spellcheck="false">
+      </div>
+      <div style="flex:0 1 130px">
+        <label class="field" for="e-cyc-${escapeHtml(r.id)}">Cycle</label>
+        <select id="e-cyc-${escapeHtml(r.id)}" name="cycle">
+          ${option("monthly", "Monthly", r.cycle)}${option("yearly", "Yearly", r.cycle)}
+        </select>
+      </div>
+      <div style="flex:0 1 150px">
+        <label class="field" for="e-exp-${escapeHtml(r.id)}">Ends</label>
+        <input id="e-exp-${escapeHtml(r.id)}" type="date" name="expires_at"
+               value="${escapeHtml(date(r.expires_at))}">
+      </div>
+      <div style="flex:0 1 110px">
+        <label class="field" for="e-seat-${escapeHtml(r.id)}">Devices</label>
+        <input id="e-seat-${escapeHtml(r.id)}" type="number" name="seat_limit"
+               min="1" max="20" value="${r.seat_limit}">
+      </div>
+      <div style="flex:0 1 140px">
+        <label class="field" for="e-st-${escapeHtml(r.id)}">Status</label>
+        <select id="e-st-${escapeHtml(r.id)}" name="status">
+          ${option("active", "Active", r.status)}${option("cancelled", "Cancelled", r.status)}${option("refunded", "Refunded", r.status)}
+        </select>
+      </div>
+      <div style="flex:0 1 130px">
+        <label class="field" for="e-lim-${escapeHtml(r.id)}">Translations</label>
+        <input id="e-lim-${escapeHtml(r.id)}" type="number" name="translation_limit" min="0"
+               value="${r.translation_limit ?? ""}">
+      </div>
+      <button type="submit">Save</button>
+    </form>
+    <form method="post" action="/admin/delete" class="row">
+      <input type="hidden" name="id" value="${escapeHtml(r.id)}">
+      <button class="danger" type="submit"
+        onclick="return confirm('Delete ${escapeHtml(r.id)} and its devices for good? The key stops working and nothing here can bring it back.')">Delete this licence</button>
+    </form>
+    <p class="muted">
+      Blank translations means unlimited, which is what a paid licence is.
+      Created ${escapeHtml(date(r.created_at))} · provider <code>${escapeHtml(r.provider)}</code>${
+        r.provider_ref ? ` · ref <code>${escapeHtml(r.provider_ref)}</code>` : ""
+      }
+    </p>
+  </details>`;
+}
+
 function rowsTable(rows: Row[]): string {
   if (!rows.length) return '<p class="muted">Nothing matched.</p>';
   const body = rows
@@ -257,7 +321,8 @@ function rowsTable(rows: Row[]): string {
               : ""
           }
         </td>
-      </tr>`,
+      </tr>
+      <tr class="editrow"><td colspan="7">${editPanel(r)}</td></tr>`,
     )
     .join("");
 
@@ -471,6 +536,85 @@ async function act(env: Env, request: Request, action: string): Promise<Response
       });
     }
 
+    case "update": {
+      const email = String(form.get("email") ?? "").trim() || null;
+
+      const cycle = String(form.get("cycle") ?? "");
+      if (!isCycle(cycle)) return dashboard(env, id, { error: "Cycle must be monthly or yearly." });
+
+      const status = String(form.get("status") ?? "");
+      if (!["active", "cancelled", "refunded"].includes(status)) {
+        return dashboard(env, id, { error: "Status must be active, cancelled or refunded." });
+      }
+
+      const seatLimit = Number(form.get("seat_limit"));
+      if (!Number.isInteger(seatLimit) || seatLimit < 1 || seatLimit > 20) {
+        return dashboard(env, id, { error: "Devices must be between 1 and 20." });
+      }
+
+      // A date, not a duration: this is the field you reach for when the term
+      // has to land on a day someone was promised, rather than a month from
+      // whenever the button was pressed.
+      const day = String(form.get("expires_at") ?? "").trim();
+      const expiresAt = Math.floor(Date.parse(`${day}T00:00:00Z`) / 1000);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(expiresAt)) {
+        return dashboard(env, id, { error: "Ends must be a date." });
+      }
+
+      // Blank is unlimited, matching the NULL the column already means.
+      const rawLimit = String(form.get("translation_limit") ?? "").trim();
+      const limit = rawLimit ? Number(rawLimit) : null;
+      if (limit !== null && (!Number.isInteger(limit) || limit < 0)) {
+        return dashboard(env, id, { error: "Translations must be a whole number, or blank." });
+      }
+
+      await env.DB.prepare(
+        `UPDATE licences
+            SET email = ?, cycle = ?, status = ?, seat_limit = ?,
+                expires_at = ?, renews_at = ?, translation_limit = ?
+          WHERE id = ?`,
+      )
+        .bind(email, cycle, status, seatLimit, expiresAt, date(expiresAt), limit, licence.id)
+        .run();
+
+      return dashboard(env, id, { message: `Saved. Ends ${date(expiresAt)}.` });
+    }
+
+    case "delete": {
+      // The one irreversible thing in here, and the one place the panel can
+      // quietly break the processor's side.
+      //
+      // A renewal arrives as `transaction.completed` carrying the subscription
+      // id and no order ref. The handler finds the licence by `provider_ref`,
+      // and when there is no row to find it logs `no ref` and answers 2xx --
+      // so Paddle goes on charging a card every month for a licence that will
+      // never exist again, and nothing anywhere says so. Cancelling in Paddle
+      // first is what stops the money; then there is nothing left to break.
+      if (licence.provider === "paddle" && licence.provider_ref) {
+        const subscription = await subscriptionById(env, licence.provider_ref);
+        if (subscription && grantsAccess(subscription)) {
+          return dashboard(env, id, {
+            error:
+              `${licence.id} still has a live Paddle subscription (${licence.provider_ref}). ` +
+              "Cancel it in Paddle first, or the card keeps being charged for a licence " +
+              "this would delete. Refund or Cancel here if you only meant to end the term.",
+          });
+        }
+      }
+
+      const batch = await env.DB.batch([
+        env.DB.prepare("DELETE FROM seats WHERE licence_id = ?").bind(licence.id),
+        env.DB.prepare("DELETE FROM licences WHERE id = ?").bind(licence.id),
+      ]);
+      const freed = batch[0]?.meta?.changes ?? 0;
+
+      // Back to the unfiltered list: searching for the id just deleted would
+      // render "Nothing matched", which reads like a failure.
+      return dashboard(env, "", {
+        message: `Deleted ${licence.id} and ${freed} device slot${freed === 1 ? "" : "s"}. Its key is dead.`,
+      });
+    }
+
     case "end": {
       const status = String(form.get("status") ?? "");
       if (status !== "refunded" && status !== "cancelled") {
@@ -514,7 +658,7 @@ export async function handleAdmin(
   if (request.method === "POST") {
     const action = pathname.slice("/admin/".length);
     if (action === "issue") return issue(env, request);
-    if (["extend", "seats", "rotate", "end"].includes(action)) {
+    if (["extend", "seats", "rotate", "end", "update", "delete"].includes(action)) {
       return act(env, request, action);
     }
   }

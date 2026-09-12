@@ -85,11 +85,22 @@ const STYLE = `
   .tier.pro { border-color: #78d28c; }
   .tier.pro .name { color: #78d28c; }
   label.field { display: block; font-size: 13px; color: #b8b8b8; margin: 0 0 6px; }
-  input[type=text], input[type=email] {
+  input[type=text], input[type=email], input[type=number], input[type=date], select {
     width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid #3a3c41;
     background: #17181a; color: #f0f0f0; font-size: 15px; font-family: inherit;
   }
-  input:focus { outline: 2px solid #78d28c; outline-offset: -1px; }
+  input:focus, select:focus { outline: 2px solid #78d28c; outline-offset: -1px; }
+  /* The admin edit panel: folded away so the listing stays a listing. */
+  tr.editrow td { border-bottom: 1px solid #2e3034; padding-top: 0; }
+  tr.editrow details > summary {
+    cursor: pointer; color: #9a9a9a; font-size: 12px; padding: 2px 0; list-style: none;
+  }
+  tr.editrow details > summary::-webkit-details-marker { display: none; }
+  tr.editrow details > summary::before { content: "▸ "; }
+  tr.editrow details[open] > summary::before { content: "▾ "; }
+  tr.editrow details[open] > summary { color: #dcdcdc; margin-bottom: 10px; }
+  .row.edit { margin-bottom: 12px; }
+  button.danger { background: #4a2326; color: #ffb4b4; }
   button {
     width: 100%; padding: 12px 16px; border-radius: 8px; border: 0; cursor: pointer;
     background: #78d28c; color: #14261a; font-size: 15px; font-weight: 600;
