@@ -1,0 +1,10 @@
+# The Windows build links the C runtime statically.
+#
+# Windows ships the UCRT itself, but not the Visual C++ runtime that a Rust
+# binary otherwise leans on, and a machine that has never had a C++ program
+# installed does not have it. The symptom is the worst kind: the download runs
+# on every developer's machine and fails on a fresh install with a dialog about
+# a missing DLL. Six hundred kilobytes of binary is a cheap price for an .exe
+# that is genuinely one file.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

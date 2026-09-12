@@ -14,4 +14,9 @@ bubbleTranslate-free*
 # binary in every release commit.
 bubbleTranslate.app/
 
+# What windows\make-icon.ps1 leaves behind for eyeballing the mark. The .ico it
+# writes beside them is the one that ships, and that one is tracked.
+windows/preview-*.png
+
 .DS_Store
+Thumbs.db

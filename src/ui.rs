@@ -56,6 +56,93 @@ const BUBBLE_BG: egui::Color32 = egui::Color32::from_rgb(30, 31, 34);
 const BUBBLE_BORDER: egui::Color32 = egui::Color32::from_gray(88);
 const TEXT_ERROR: egui::Color32 = egui::Color32::from_rgb(255, 150, 150);
 
+/// The controls: a button at rest, then under the pointer, then pressed.
+/// Dark enough to sit on [`BUBBLE_BG`] without glowing, light enough to read as
+/// something that can be clicked.
+pub const CONTROL: egui::Color32 = egui::Color32::from_rgb(52, 54, 60);
+pub const CONTROL_HOVER: egui::Color32 = egui::Color32::from_rgb(66, 69, 77);
+pub const CONTROL_ACTIVE: egui::Color32 = egui::Color32::from_rgb(82, 86, 96);
+/// Behind text the user types into: a well, darker than anything around it.
+pub const FIELD_BG: egui::Color32 = egui::Color32::from_rgb(22, 23, 26);
+/// The one colour in the app that is not a grey. Selected text, the filled
+/// half of a slider, the focus ring.
+pub const ACCENT: egui::Color32 = egui::Color32::from_rgb(92, 156, 226);
+/// Outlines: a control at rest, and one being pointed at.
+const CONTROL_EDGE: egui::Color32 = egui::Color32::from_rgb(70, 73, 81);
+const CONTROL_EDGE_HOVER: egui::Color32 = egui::Color32::from_rgb(104, 108, 118);
+
+/// Whether the bubble's window can have a transparent background.
+///
+/// Everywhere but Windows it can, and that is what lets the bubble be a
+/// rounded card with a drop shadow floating over the desktop.
+///
+/// Windows composites a window's alpha only when the graphics stack cooperates
+/// — a DWM blur-behind region, a surface with an alpha mode, and a driver that
+/// preserves it — and where any of that is missing the transparent pixels are
+/// composited as black. The result is the worst of both: a black frame around
+/// the bubble and a black smear where the shadow should be. Since a translator
+/// has to work on every machine rather than on the ones with the right driver,
+/// the Windows bubble is an opaque card — which is what a Windows tooltip is
+/// anyway — with the window's own corners rounded by the desktop manager.
+pub const TRANSPARENT_BUBBLE: bool = !cfg!(target_os = "windows");
+
+/// The app's own dark theme, pinned.
+///
+/// Pinned because it is *the* theme: every panel, every frame and every label
+/// in this app names its own colour, and they are all dark ones. Left to
+/// follow the system, egui hands the widgets it draws itself — buttons, text
+/// fields, checkboxes, sliders — to the light palette on a machine set to
+/// light mode, and the result is a dark window with white boxes scattered
+/// through it. Nothing here adapts to a light theme, so nothing here should
+/// pretend to.
+fn install_theme(ctx: &egui::Context) {
+    let mut visuals = egui::Visuals::dark();
+    visuals.window_fill = BUBBLE_BG;
+    visuals.panel_fill = BUBBLE_BG;
+    // Applies to widget labels that do not set a colour themselves;
+    // explicit RichText colours still win.
+    visuals.override_text_color = Some(TEXT_PRIMARY);
+
+    // Text fields and other "sunken" surfaces.
+    visuals.extreme_bg_color = FIELD_BG;
+    visuals.faint_bg_color = egui::Color32::from_rgb(38, 39, 43);
+    visuals.selection.bg_fill = ACCENT.gamma_multiply(0.45);
+    visuals.selection.stroke = egui::Stroke::new(1.0, TEXT_PRIMARY);
+
+    for (widget, fill, edge) in [
+        (&mut visuals.widgets.inactive, CONTROL, CONTROL_EDGE),
+        (
+            &mut visuals.widgets.hovered,
+            CONTROL_HOVER,
+            CONTROL_EDGE_HOVER,
+        ),
+        (&mut visuals.widgets.active, CONTROL_ACTIVE, ACCENT),
+    ] {
+        widget.bg_fill = fill;
+        widget.weak_bg_fill = fill;
+        widget.bg_stroke = egui::Stroke::new(1.0, edge);
+        widget.fg_stroke = egui::Stroke::new(1.0, TEXT_PRIMARY);
+        widget.corner_radius = egui::CornerRadius::same(6);
+    }
+    // What a disabled control looks like: the same shape, sunk into the
+    // background, with text that has visibly given up.
+    visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(40, 42, 47);
+    visuals.widgets.noninteractive.weak_bg_fill = egui::Color32::from_rgb(40, 42, 47);
+    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, CONTROL_EDGE);
+    visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, TEXT_MUTED);
+    visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(6);
+    visuals.widgets.open.bg_fill = CONTROL_HOVER;
+    visuals.widgets.open.weak_bg_fill = CONTROL_HOVER;
+    visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0, CONTROL_EDGE_HOVER);
+    visuals.widgets.open.fg_stroke = egui::Stroke::new(1.0, TEXT_PRIMARY);
+    visuals.widgets.open.corner_radius = egui::CornerRadius::same(6);
+
+    ctx.set_visuals(visuals);
+    // Both halves are needed: the visuals above are stored against the dark
+    // theme, and this is what says the dark theme is the one to use.
+    ctx.set_theme(egui::ThemePreference::Dark);
+}
+
 /// Multiplier on the font size for line spacing. Translated paragraphs are
 /// often long sentences with no visual breaks, and the extra leading is what
 /// makes them scannable.
@@ -65,10 +152,10 @@ const LINE_HEIGHT_RATIO: f32 = 1.45;
 /// Korean, Arabic and Cyrillic output renders instead of showing
 /// missing-glyph boxes. egui's bundled fonts are Latin-only.
 ///
-/// macOS ships one font that covers nearly everything. Linux distributions
-/// split the same coverage across several Noto families and put them wherever
-/// they like, so the list is longer and the search is by name as well as by
-/// path — see [`find_fallback_font`].
+/// macOS ships one font that covers nearly everything. Windows splits the same
+/// coverage across three that are always present. Linux distributions split it
+/// across several Noto families and put them wherever they like, so the list is
+/// longer and there is a search behind it — see [`find_fallback_fonts`].
 #[cfg(target_os = "macos")]
 const FALLBACK_FONTS: &[&str] = &["/System/Library/Fonts/Supplemental/Arial Unicode.ttf"];
 
@@ -81,6 +168,19 @@ const FALLBACK_FONTS: &[&str] = &[
     "/usr/share/fonts/noto/NotoSans-Regular.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+];
+
+/// In coverage order, not in preference order: Chinese and Japanese first
+/// because they are the bulk of what a translator has to draw, then Korean,
+/// then Segoe UI for Arabic, Hebrew, Greek and Cyrillic. All three ship with
+/// every Windows 10 and 11 install, including the ones that never had an East
+/// Asian language pack added — the font files are always there even when the
+/// input methods are not.
+#[cfg(target_os = "windows")]
+const FALLBACK_FONTS: &[&str] = &[
+    r"C:\Windows\Fonts\msyh.ttc",
+    r"C:\Windows\Fonts\malgun.ttf",
+    r"C:\Windows\Fonts\segoeui.ttf",
 ];
 
 enum State {
@@ -110,6 +210,9 @@ pub struct BubbleApp {
     /// `None` when the pointer's position is not knowable here.
     anchor: Option<(f64, f64)>,
     visible: bool,
+    /// How many frames have been painted since startup, counted only as far as
+    /// [`BubbleApp::settle_hidden`] needs it.
+    startup_frames: u8,
     /// Height requested for the viewport last frame, to avoid re-sending an
     /// identical resize every frame.
     last_height: f32,
@@ -181,14 +284,7 @@ impl BubbleApp {
         started_hidden: bool,
     ) -> Self {
         install_fonts(&cc.egui_ctx);
-
-        let mut visuals = egui::Visuals::dark();
-        visuals.window_fill = BUBBLE_BG;
-        visuals.panel_fill = BUBBLE_BG;
-        // Applies to widget labels that do not set a colour themselves;
-        // explicit RichText colours still win.
-        visuals.override_text_color = Some(TEXT_PRIMARY);
-        cc.egui_ctx.set_visuals(visuals);
+        install_theme(&cc.egui_ctx);
 
         Self {
             config_for_main: config.clone(),
@@ -200,6 +296,7 @@ impl BubbleApp {
             state: State::Hidden,
             anchor: None,
             visible: false,
+            startup_frames: 0,
             applied_zoom: None,
             marking_pending: true,
             workspace_pending: true,
@@ -314,6 +411,28 @@ impl BubbleApp {
         monitor::set_paused(false);
     }
 
+    /// Puts the bubble's window away at startup, once.
+    ///
+    /// The viewport is built hidden, and then shown anyway: the toolkit makes
+    /// the window visible itself after it has painted its first frame, so that
+    /// no application it hosts can ever flash an unpainted window. For an app
+    /// whose main window *is* the thing that should not be seen yet, that is a
+    /// 400-pixel rectangle left on the desktop with nothing in it — invisible
+    /// for as long as the window is transparent, which is why it went unnoticed
+    /// until Windows, and a click-blocking hole in the desktop even there.
+    ///
+    /// It has to be undone on the frame *after* the first, because that is when
+    /// it happens; hence the extra repaint, which is the only one the hidden
+    /// bubble ever asks for.
+    fn settle_hidden(&mut self, ctx: &egui::Context) {
+        if self.startup_frames >= 2 {
+            return;
+        }
+        self.startup_frames += 1;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        ctx.request_repaint();
+    }
+
     /// Keeps the bubble fully on screen, flipping it above/left of the cursor
     /// when there isn't room below/right.
     fn clamped_position(&self, ctx: &egui::Context) -> egui::Pos2 {
@@ -380,7 +499,20 @@ impl BubbleApp {
             crate::platform::mark_as_notification(x11.window as u32);
             return true;
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(target_os = "windows")]
+        {
+            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+            let Ok(handle) = frame.window_handle() else {
+                return false;
+            };
+            let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+                return false;
+            };
+            crate::platform::mark_as_notification(win32.hwnd.get());
+            return true;
+        }
+        #[cfg(target_os = "macos")]
         true
     }
 
@@ -543,9 +675,15 @@ impl BubbleApp {
 
 impl eframe::App for BubbleApp {
     /// Transparent so the rounded corners of the bubble don't sit on a grey
-    /// rectangle.
+    /// rectangle — or, where transparency would be composited as black, the
+    /// bubble's own colour, so that the parts of the window the card does not
+    /// cover are indistinguishable from the card. See [`TRANSPARENT_BUBBLE`].
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        [0.0, 0.0, 0.0, 0.0]
+        if TRANSPARENT_BUBBLE {
+            [0.0, 0.0, 0.0, 0.0]
+        } else {
+            BUBBLE_BG.to_normalized_gamma_f32()
+        }
     }
 
     /// Runs even while the bubble is hidden, so this is where the engine's
@@ -584,10 +722,15 @@ impl eframe::App for BubbleApp {
             if self.visible {
                 self.hide(ctx);
             }
+            self.settle_hidden(ctx);
             // Nothing to draw; sleep until the engine wakes us.
             ctx.request_repaint_after(Duration::from_secs(3600));
             return;
         }
+
+        // The bubble resizes to whatever it has to say, and where the window
+        // has an outline of its own that outline has to follow the card's.
+        crate::platform::shape_bubble();
 
         // Revealed here rather than from the draw. eframe calls `ui` only for a
         // viewport that is *already* visible, so a bubble that waits for its own
@@ -636,11 +779,19 @@ impl eframe::App for BubbleApp {
             .stroke(egui::Stroke::new(1.0, BUBBLE_BORDER))
             .corner_radius(10.0)
             .inner_margin(egui::Margin::symmetric(16, 14))
-            .shadow(egui::Shadow {
-                offset: [0, 4],
-                blur: 18,
-                spread: 0,
-                color: egui::Color32::from_black_alpha(120),
+            // A shadow needs somewhere to fall. Where the window behind the
+            // card is opaque it would land on the card's own colour and read
+            // as a smear along the bottom edge, so there the desktop draws the
+            // window's shadow instead and this one is left off.
+            .shadow(if TRANSPARENT_BUBBLE {
+                egui::Shadow {
+                    offset: [0, 4],
+                    blur: 18,
+                    spread: 0,
+                    color: egui::Color32::from_black_alpha(120),
+                }
+            } else {
+                egui::Shadow::NONE
             });
 
         let mut dismiss = false;
@@ -659,7 +810,11 @@ impl eframe::App for BubbleApp {
         } else {
             0.0
         };
-        let wanted = (response.response.rect.height() + 20.0 + room).clamp(MIN_HEIGHT, MAX_HEIGHT);
+        // The window is the card plus room for the shadow to fall in. With no
+        // shadow there is nothing to leave room for, and leaving it anyway
+        // would put a strip of dead colour under the card.
+        let below = if TRANSPARENT_BUBBLE { 20.0 } else { 2.0 };
+        let wanted = (response.response.rect.height() + below + room).clamp(MIN_HEIGHT, MAX_HEIGHT);
         if (wanted - self.last_height).abs() > 1.0 {
             self.last_height = wanted;
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
@@ -1039,38 +1194,58 @@ impl BubbleApp {
 }
 
 fn install_fonts(ctx: &egui::Context) {
-    let Some((path, bytes)) = find_fallback_font() else {
+    let found = find_fallback_fonts();
+    if found.is_empty() {
         // Latin-only rendering is degraded but still usable, so this is not
         // worth failing startup over.
         eprintln!("bubbleTranslate: no Unicode fallback font found; non-Latin text may not render");
         return;
-    };
-    crate::trace!("fallback font: {path}");
+    }
+
     let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert(
-        "unicode-fallback".to_owned(),
-        Arc::new(egui::FontData::from_owned(bytes)),
-    );
-    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+    for (index, (path, bytes)) in found.into_iter().enumerate() {
+        crate::trace!("fallback font: {path}");
+        let name = format!("unicode-fallback-{index}");
         fonts
-            .families
-            .entry(family)
-            .or_default()
-            .push("unicode-fallback".to_owned());
+            .font_data
+            .insert(name.clone(), Arc::new(egui::FontData::from_owned(bytes)));
+        // Appended in the order they were found, which is the order they are
+        // searched in: the first font that has the glyph draws it.
+        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+            fonts.families.entry(family).or_default().push(name.clone());
+        }
     }
     ctx.set_fonts(fonts);
 }
 
-/// Finds a font with coverage past Latin, and reads it.
+/// Finds fonts with coverage past Latin, and reads them.
+///
+/// More than one, because no single file necessarily has the whole of it:
+/// macOS ships one font that covers nearly everything, while Windows splits
+/// Chinese, Korean and Arabic across three, and a Linux distribution splits
+/// the same coverage across several Noto families and puts them wherever it
+/// likes.
 ///
 /// The list is tried first because on most systems it is both instant and
 /// right. Asking fontconfig is the backstop: it knows where this particular
 /// distribution put its fonts, which no hardcoded list can keep up with.
-fn find_fallback_font() -> Option<(String, Vec<u8>)> {
+fn find_fallback_fonts() -> Vec<(String, Vec<u8>)> {
+    // A CJK font is tens of megabytes and stays resident, so this stops at
+    // three: enough for the split Windows has, and past the point where a
+    // Linux list of alternative paths for one font could load it twice over.
+    const LIMIT: usize = 3;
+
+    let mut found = Vec::new();
     for path in FALLBACK_FONTS {
-        if let Ok(bytes) = std::fs::read(path) {
-            return Some(((*path).to_string(), bytes));
+        if found.len() == LIMIT {
+            break;
         }
+        if let Ok(bytes) = std::fs::read(path) {
+            found.push(((*path).to_string(), bytes));
+        }
+    }
+    if !found.is_empty() {
+        return found;
     }
 
     #[cfg(target_os = "linux")]
@@ -1078,18 +1253,18 @@ fn find_fallback_font() -> Option<(String, Vec<u8>)> {
         // Asking for a Chinese sans-serif is a shortcut to "the font on this
         // machine with the widest coverage": whatever answers is almost
         // certainly a Noto CJK, which also carries Cyrillic, Greek and Arabic.
-        let out = std::process::Command::new("fc-match")
+        if let Ok(out) = std::process::Command::new("fc-match")
             .args(["-f", "%{file}", "sans-serif:lang=zh"])
             .output()
-            .ok()?;
-        let path = String::from_utf8(out.stdout).ok()?;
-        let path = path.trim();
-        if !path.is_empty() {
-            if let Ok(bytes) = std::fs::read(path) {
-                return Some((path.to_string(), bytes));
+        {
+            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !path.is_empty() {
+                if let Ok(bytes) = std::fs::read(&path) {
+                    found.push((path, bytes));
+                }
             }
         }
     }
 
-    None
+    found
 }

@@ -41,7 +41,7 @@ pub enum TriggerKey {
     Shift,
     Ctrl,
     Alt,
-    /// Command on macOS, the Windows/Meta key on Linux.
+    /// Command on macOS, the Windows key on Windows, Meta on Linux.
     Super,
 }
 
@@ -77,6 +77,8 @@ impl TriggerKey {
             TriggerKey::Super => {
                 if cfg!(target_os = "macos") {
                     "Command"
+                } else if cfg!(target_os = "windows") {
+                    "Windows key"
                 } else {
                     "Super"
                 }
@@ -188,8 +190,30 @@ impl Default for Config {
     }
 }
 
+/// An alternative home for everything this app writes: the config, the
+/// counter and the licence, all three together.
+///
+/// It exists for the integration tests, which drive the real binary and must
+/// not spend the real allowance or overwrite the real licence. The desktop
+/// conventions are not enough on their own — `XDG_CONFIG_HOME` is honoured on
+/// Linux and nowhere else, so on macOS and Windows a test without this would
+/// quietly be editing the user's own install.
+///
+/// It moves *where* the files are, never *what they mean*. A home with a
+/// config and no counter beside it is a fresh install like any other, because
+/// a home that has never been written to has neither — so this grants no
+/// allowance that editing the counter by hand would not.
+pub fn state_home() -> Option<PathBuf> {
+    std::env::var_os("BUBBLETRANSLATE_HOME")
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+}
+
 impl Config {
     pub fn path() -> PathBuf {
+        if let Some(home) = state_home() {
+            return home.join("config.toml");
+        }
         dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("bubbleTranslate")

@@ -1,10 +1,12 @@
 # bubbleTranslate
 
-A bubble translator for macOS and Linux. Select text in any application and a
-small bubble appears at the cursor with the translation.
+A bubble translator for macOS, Windows and Linux. Select text in any
+application and a small bubble appears at the cursor with the translation.
 
 - `src/` — the Rust client (egui bubble, selection monitor, translation chain,
-  licence check, daily allowance).
+  licence check, daily allowance). `src/platform/` holds the three
+  implementations of "what is selected, when did it finish, where is the
+  pointer"; everything above that line is the same code everywhere.
 - `service/` — the licence service, a Cloudflare Worker on D1. It sells Pro,
   issues licence keys and signs entitlement tokens. It is **never** on the path
   of a translation.

@@ -53,6 +53,45 @@ ksni = { version = "0.3.6", default-features = false, features = [
     "blocking",
 ] }
 
+# Windows draws through the same toolkit with nothing to choose: there is one
+# windowing system, and a toplevel may put itself at the cursor, which is the
+# whole reason the Linux side has to work as hard as it does.
+#
+# One dependency covers the rest of it — the Win32 API, as bindings generated
+# from the metadata Microsoft publishes. Every feature below is a namespace
+# rather than a library: UI Automation for reading a selection, the low-level
+# input hooks for noticing one, the notification area for the tray icon, and a
+# named pipe for the second copy of the binary to reach the first.
+[target.'cfg(target_os = "windows")'.dependencies]
+eframe = "0.35.0"
+raw-window-handle = "0.6"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_Console",
+    "Win32_System_DataExchange",
+    "Win32_System_IO",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Pipes",
+    "Win32_System_Registry",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_Time",
+    "Win32_UI_Accessibility",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+# The icon and the version stamp, linked into the .exe itself; see build.rs.
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winresource = "0.1"
+
 # Test-only, and Linux-only: pressing a key on a throwaway X server is how the
 # trigger-key gate gets proved rather than assumed. Kept out of the shipped
 # binary — a dev-dependency's features are not unified into a normal build.

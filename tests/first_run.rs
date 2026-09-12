@@ -21,7 +21,12 @@ use std::process::Command;
 
 const BIN: &str = env!("CARGO_BIN_EXE_bubbleTranslate");
 
-/// A private XDG home, so a test never reads or spends the real allowance.
+/// A private home, so a test never reads or spends the real allowance.
+///
+/// `BUBBLETRANSLATE_HOME` rather than the XDG variables: those are honoured on
+/// Linux and nowhere else, so on macOS and Windows a sandbox built out of them
+/// is not a sandbox at all — it is the user's own install, with this test
+/// deleting the counter out of it.
 struct Sandbox {
     root: PathBuf,
 }
@@ -40,18 +45,17 @@ impl Sandbox {
     fn run(&self, args: &[&str]) {
         Command::new(BIN)
             .args(args)
-            .env("XDG_CONFIG_HOME", self.root.join("config"))
-            .env("XDG_DATA_HOME", self.root.join("data"))
+            .env("BUBBLETRANSLATE_HOME", &self.root)
             .output()
             .expect("could not run the binary");
     }
 
     fn config(&self) -> PathBuf {
-        self.root.join("config/bubbleTranslate/config.toml")
+        self.root.join("config.toml")
     }
 
     fn usage(&self) -> PathBuf {
-        self.root.join("data/bubbleTranslate/usage.json")
+        self.root.join("usage.json")
     }
 }
 

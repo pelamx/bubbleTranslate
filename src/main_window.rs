@@ -31,8 +31,10 @@ const SCREEN_MARGIN_Y: f32 = 120.0;
 const MAX_RECENT: usize = 25;
 
 /// The window's own background, matching the bubble's panel so the two read as
-/// one application.
+/// one application. Two shades of it: the window is lit from the top, which
+/// gives a tall column of sections somewhere to start and somewhere to end.
 const WINDOW_BG: egui::Color32 = egui::Color32::from_rgb(30, 31, 34);
+const WINDOW_BG_TOP: egui::Color32 = egui::Color32::from_rgb(40, 42, 48);
 const TEXT_PRIMARY: egui::Color32 = egui::Color32::from_gray(240);
 const TEXT_SECONDARY: egui::Color32 = egui::Color32::from_gray(186);
 const TEXT_MUTED: egui::Color32 = egui::Color32::from_gray(155);
@@ -149,9 +151,7 @@ pub fn draw(
         .ctx()
         .input(|i| i.raw.screen_rect)
         .unwrap_or_else(|| ui.max_rect());
-    ui.ctx()
-        .layer_painter(egui::LayerId::background())
-        .rect_filled(window_rect, 0.0, WINDOW_BG);
+    paint_background(ui, window_rect);
 
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
@@ -212,6 +212,29 @@ fn place_window(ctx: &egui::Context) {
     let x = ((monitor.x - width) / 2.0).max(SCREEN_MARGIN_X / 2.0);
     let y = ((monitor.y - height) / 2.0).max(SCREEN_MARGIN_Y / 4.0);
     ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, y)));
+}
+
+/// Fills the window with a vertical gradient, lightest at the top.
+///
+/// A flat fill is what this was, and against it the section cards — barely
+/// eight shades lighter — read as a single slab of grey. The gradient gives
+/// the window a direction: the cards near the top sit *in* their background,
+/// the ones at the bottom sit on it, and the eye gets a horizon to judge them
+/// against.
+///
+/// Painted as two triangles rather than with a shader, which is all egui needs
+/// to interpolate a colour across a rectangle.
+fn paint_background(ui: &egui::Ui, rect: egui::Rect) {
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(rect.left_top(), WINDOW_BG_TOP);
+    mesh.colored_vertex(rect.right_top(), WINDOW_BG_TOP);
+    mesh.colored_vertex(rect.left_bottom(), WINDOW_BG);
+    mesh.colored_vertex(rect.right_bottom(), WINDOW_BG);
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(2, 1, 3);
+    ui.ctx()
+        .layer_painter(egui::LayerId::background())
+        .add(egui::Shape::mesh(mesh));
 }
 
 fn section(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
@@ -872,20 +895,26 @@ fn behaviour(ui: &mut egui::Ui, cfg: &mut Config) -> bool {
         )
         .changed();
 
-    // Only macOS has a capture strategy to fall back to. Elsewhere the
-    // desktop hands over the selection directly, so there is no second route
-    // to switch on and the setting would be a control over nothing.
-    if cfg!(target_os = "macos") {
+    // Only macOS and Windows have a capture strategy to fall back to: both ask
+    // the application for its selection and can synthesize a copy when it will
+    // not say. On Linux the desktop hands the selection over directly, so
+    // there is no second route to switch on and the setting would be a control
+    // over nothing.
+    if !cfg!(target_os = "linux") {
         dirty |= ui
             .checkbox(
                 &mut cfg.clipboard_fallback,
                 "Use copy fallback when an app hides its selection",
             )
-            .on_hover_text(
+            .on_hover_text(if cfg!(target_os = "windows") {
+                "Needed for PDF viewers and anything drawing its own text, which \
+                 expose nothing over UI Automation. Briefly borrows the clipboard \
+                 and restores the text afterwards."
+            } else {
                 "Needed for terminals and PDF viewers, which expose nothing over the \
                  Accessibility API. Briefly borrows the clipboard and restores the \
-                 text afterwards.",
-            )
+                 text afterwards."
+            })
             .changed();
     }
 

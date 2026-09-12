@@ -10,7 +10,10 @@
 //!
 //! macOS answers all three with one set of APIs, gated behind a single
 //! permission. Linux has no single answer — see [`linux`] for how the session
-//! type and the compositor's protocols decide which route is taken.
+//! type and the compositor's protocols decide which route is taken. Windows
+//! answers the last two freely and the first not at all: nothing there
+//! publishes a selection, so it has to be asked for at the moment the gesture
+//! ends — see [`windows`].
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -21,6 +24,11 @@ pub use macos::{capture, monitor, shell};
 mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::{capture, monitor, shell};
+
+#[cfg(target_os = "windows")]
+mod windows;
+#[cfg(target_os = "windows")]
+pub use windows::{capture, monitor, shell};
 
 /// How the selected text was obtained.
 ///
@@ -132,6 +140,14 @@ pub fn preferred_zoom(_native_pixels_per_point: f32) -> Option<f32> {
 #[cfg(target_os = "macos")]
 pub fn mark_as_notification(_window: u32) {}
 
+/// Cuts the bubble's window to the shape of the card painted inside it.
+///
+/// Nothing to do wherever the bubble's window is transparent, which is
+/// everywhere but Windows: there the card's own rounded corners are the only
+/// edge there is, because nothing outside them is painted at all.
+#[cfg(not(target_os = "windows"))]
+pub fn shape_bubble() {}
+
 /// Asks for the bubble to appear on every workspace.
 ///
 /// Nothing to do on macOS: a non-activating panel already shows on whichever
@@ -144,6 +160,12 @@ pub fn keep_on_all_workspaces() -> bool {
 #[cfg(target_os = "linux")]
 pub use linux::{
     keep_on_all_workspaces, mark_as_notification, pointer_over, preferred_zoom, to_points,
+};
+
+#[cfg(target_os = "windows")]
+pub use windows::{
+    cursor_position, keep_on_all_workspaces, mark_as_notification, pointer_over, preferred_zoom,
+    shape_bubble, to_points,
 };
 
 /// Whether selections can actually be watched here, and what to tell the user
@@ -170,6 +192,10 @@ impl Readiness {
         }
     }
 
+    /// Unused on Windows, which has nothing to block: reading another
+    /// application's selection there needs no permission and no protocol that
+    /// might be missing.
+    #[allow(dead_code)]
     pub fn blocked(summary: impl Into<String>, detail: impl Into<String>) -> Self {
         Self {
             ok: false,

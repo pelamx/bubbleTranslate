@@ -572,6 +572,47 @@ fn machine_id() -> Option<String> {
     id.or_else(hostname)
 }
 
+/// The machine GUID, which Windows writes once when it is installed and never
+/// changes afterwards.
+///
+/// It is the closest thing Windows has to `/etc/machine-id`, and it is read
+/// rather than derived from hardware on purpose: a disk swap or a new network
+/// card must not cost the user a device slot.
+#[cfg(target_os = "windows")]
+fn machine_id() -> Option<String> {
+    use windows::Win32::System::Registry::{
+        HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY, RegGetValueW,
+    };
+    use windows::core::w;
+
+    // Asked for as sixteen-bit characters, which is what the registry holds;
+    // a GUID is 36 of them plus a terminator.
+    let mut buffer = [0u16; 64];
+    let mut size = std::mem::size_of_val(&buffer) as u32;
+    let read = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            w!(r"SOFTWARE\Microsoft\Cryptography"),
+            w!("MachineGuid"),
+            // The 64-bit view explicitly: a 32-bit build of this binary would
+            // otherwise be redirected to a different key, and the same machine
+            // would introduce itself under two names.
+            RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY,
+            None,
+            Some(buffer.as_mut_ptr() as *mut std::ffi::c_void),
+            Some(&mut size),
+        )
+    };
+    if read.is_err() {
+        return hostname();
+    }
+    let chars = (size as usize / 2).saturating_sub(1).min(buffer.len());
+    let id = String::from_utf16_lossy(&buffer[..chars])
+        .trim()
+        .to_string();
+    if id.is_empty() { hostname() } else { Some(id) }
+}
+
 fn hostname() -> Option<String> {
     std::process::Command::new("hostname")
         .output()
@@ -595,6 +636,9 @@ struct Cached {
 /// so. Machine state that happens to be security-relevant should not sit in
 /// the same file as their choice of target language.
 pub fn path() -> PathBuf {
+    if let Some(home) = crate::config::state_home() {
+        return home.join("license.json");
+    }
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("bubbleTranslate")

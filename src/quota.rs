@@ -275,6 +275,9 @@ impl Quota {
 /// the config directory: `config.toml` is a file users are told to edit, and
 /// their target language should not share a file with their meter.
 pub fn path() -> PathBuf {
+    if let Some(home) = crate::config::state_home() {
+        return home.join("usage.json");
+    }
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("bubbleTranslate")
@@ -293,6 +296,7 @@ fn local_day() -> i64 {
 
 /// Seconds east of UTC at the given moment, which is what makes this correct
 /// across a daylight-saving change rather than only at the moment it is read.
+#[cfg(unix)]
 fn local_offset(unix: i64) -> i64 {
     // SAFETY: `localtime_r` fills a `tm` the caller owns and is the reentrant
     // form of `localtime`, so nothing here reads or writes shared state. A
@@ -304,6 +308,54 @@ fn local_offset(unix: i64) -> i64 {
             return 0;
         }
         tm.tm_gmtoff as i64
+    }
+}
+
+/// The same question, asked the way Windows answers it: convert the moment to
+/// a wall clock in the user's own time zone and take the difference.
+///
+/// Asked *about a moment* rather than about now, for the same reason as the
+/// Unix side: a counter written before the clocks changed must still be read
+/// as the day it was written on.
+#[cfg(target_os = "windows")]
+fn local_offset(unix: i64) -> i64 {
+    use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
+    use windows::Win32::System::Time::{
+        FileTimeToSystemTime, SystemTimeToFileTime, SystemTimeToTzSpecificLocalTime,
+    };
+
+    /// Seconds between 1601-01-01, where Windows starts counting, and the
+    /// Unix epoch.
+    const EPOCH_DIFFERENCE: i64 = 11_644_473_600;
+
+    let ticks = (unix + EPOCH_DIFFERENCE) * 10_000_000;
+    if ticks < 0 {
+        return 0;
+    }
+    let utc = FILETIME {
+        dwLowDateTime: ticks as u32,
+        dwHighDateTime: (ticks >> 32) as u32,
+    };
+
+    // SAFETY: every call below fills a structure this function owns, and each
+    // is checked before its result is used. A failure leaves UTC, which is the
+    // honest answer when the system will not say what zone it is in.
+    unsafe {
+        let mut universal = SYSTEMTIME::default();
+        if FileTimeToSystemTime(&utc, &mut universal).is_err() {
+            return 0;
+        }
+        let mut local = SYSTEMTIME::default();
+        if SystemTimeToTzSpecificLocalTime(None, &universal, &mut local).is_err() {
+            return 0;
+        }
+        let mut local_ticks = FILETIME::default();
+        if SystemTimeToFileTime(&local, &mut local_ticks).is_err() {
+            return 0;
+        }
+        let local_ticks =
+            ((local_ticks.dwHighDateTime as i64) << 32) | local_ticks.dwLowDateTime as i64;
+        (local_ticks - ticks) / 10_000_000
     }
 }
 

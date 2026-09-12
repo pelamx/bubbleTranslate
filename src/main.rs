@@ -11,6 +11,13 @@
 //!               them; see [`platform`]
 //!   engine    — capture + HTTP, kept off the UI thread
 
+// A Windows app that owns a console window flashes a black rectangle on every
+// launch from the Start menu, and leaves one sitting behind the interface for
+// the rest of the session. So it does not get one — and the commands below
+// that do print borrow the console of whatever terminal started them instead;
+// see `shell::attach_console`.
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 mod config;
 mod engine;
 mod ipc;
@@ -58,6 +65,11 @@ fn load_state() -> (Config, Quota) {
 }
 
 fn main() -> eframe::Result<()> {
+    // Before anything prints. Does nothing when there is no terminal to print
+    // to, which is every launch that came from an icon.
+    #[cfg(target_os = "windows")]
+    shell::attach_console();
+
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(pos) = args.iter().position(|a| a == "--translate") {
         let text = args[pos + 1..].join(" ");
@@ -91,6 +103,20 @@ fn main() -> eframe::Result<()> {
         std::process::exit(reset_quota());
     }
 
+    // Nothing on Windows stops a user launching the app again while it is
+    // already running, and two copies would mean two tray icons, two sets of
+    // input hooks and two translators racing for the same selection. So the
+    // second launch is read as what it almost always means — "show me the
+    // window" — and this process stands down.
+    //
+    // macOS routes the same gesture back into the running process itself, as a
+    // reopen event, which is why this is not shared code.
+    #[cfg(target_os = "windows")]
+    if ipc::request_open() {
+        crate::trace!("another copy is running; asked it to show its window");
+        std::process::exit(0);
+    }
+
     let (loaded_config, loaded_quota) = load_state();
     let config = Arc::new(Mutex::new(loaded_config));
     let licensing = Licensing {
@@ -120,7 +146,9 @@ fn main() -> eframe::Result<()> {
         .with_inner_size([BUBBLE_WIDTH, 120.0])
         .with_min_inner_size([BUBBLE_WIDTH, 60.0])
         .with_decorations(false)
-        .with_transparent(true)
+        // Not everywhere: see [`ui::TRANSPARENT_BUBBLE`] for why Windows gets
+        // an opaque card instead of a floating one.
+        .with_transparent(ui::TRANSPARENT_BUBBLE)
         .with_resizable(false)
         .with_always_on_top()
         // Start hidden: the bubble only exists once there is something to say.

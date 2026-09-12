@@ -2,11 +2,11 @@
 
 Select text anywhere — a PDF, a terminal, a browser, an editor — with a key
 held (Shift by default) and a small bubble appears at the cursor with the
-translation. Runs on macOS and Linux.
+translation. Runs on macOS, Windows and Linux.
 
-The translator, the provider chain and the interface are the same code on both.
-What differs is how a desktop lets an application find out what is selected,
-which is a surprisingly large difference: see
+The translator, the provider chain and the interface are the same code on all
+three. What differs is how a desktop lets an application find out what is
+selected, which is a surprisingly large difference: see
 [How it reads the selection](#how-it-reads-the-selection).
 
 ## Install
@@ -14,6 +14,7 @@ which is a surprisingly large difference: see
 | | Download | What you get |
 |---|---|---|
 | **macOS** | [`bubbleTranslate.dmg`](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate.dmg) (14 MB, Intel + Apple Silicon) | An app bundle to drag into Applications |
+| **Windows** | [`bubbleTranslate.exe`](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate.exe) (17 MB, Windows 10 and 11) | One executable to double-click |
 | **Linux** | [`bubbleTranslate-linux-x86_64`](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate-linux-x86_64) (20 MB) | One executable to `chmod +x` and run |
 
 The download is the metered build: ten free translations a day, and Pro to
@@ -61,6 +62,43 @@ open bubbleTranslate.app
 `bundle.sh` builds and assembles `bubbleTranslate.app` in place. Run
 `./setup-signing.sh` first if you expect to rebuild often; it is what keeps the
 Accessibility grant from going stale, explained below.
+
+### Windows — from the .exe
+
+Put `bubbleTranslate.exe` wherever you keep programs and double-click it.
+There is nothing to install: the C runtime is linked in, so no Visual C++
+redistributable is needed, and the settings are written to
+`%APPDATA%\bubbleTranslate` the first time it runs.
+
+The file is not code-signed, so SmartScreen stops the first launch with
+*"Windows protected your PC"*. Click **More info** and then **Run anyway**.
+That is once per machine, not once per launch, and it is a statement about a
+certificate we have not bought rather than about the file.
+
+No permission is needed after that — Windows lets any application read another
+one's selection within your own session — so it starts watching immediately.
+Two things are worth knowing:
+
+- **The tray icon starts hidden.** Windows 11 puts every new notification icon
+  behind the `^` chevron next to the clock. Drag the globe out of that flyout
+  onto the taskbar to keep it in view; it is how you reopen the window and how
+  you quit.
+- **A window running as administrator is invisible to it.** Windows blocks a
+  normal program from reading an elevated one, so a selection in, say, an
+  elevated PowerShell produces no bubble. Nothing can be granted to change
+  that short of running bubbleTranslate elevated too, which is not worth it.
+
+The diagnostics print to the terminal that started them:
+
+```powershell
+.\bubbleTranslate.exe --check      # are the backends answering?
+.\bubbleTranslate.exe --license    # what is this install entitled to?
+```
+
+Because the app is built for the windows subsystem — so that launching it from
+an icon never flashes a console — PowerShell does not wait for it, and the
+output arrives just after the prompt returns. `Start-Process -Wait -NoNewWindow
+.\bubbleTranslate.exe --check` keeps the two in order if that matters.
 
 ### Linux — from the binary
 
@@ -295,7 +333,19 @@ processor — see its README.
 Only macOS needs one. Linux ships as the executable itself — `cargo build
 --release` produces it, `linux/install.sh` puts it and its launcher under
 `~/.local`, and there is no signing, notarization or store to satisfy on the
-way. Everything below is about the DMG.
+way. Windows ships as an executable too:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File release.ps1   # -> bubbleTranslate.exe
+```
+
+which builds `x86_64-pc-windows-msvc` with a static C runtime, redraws
+`windows\bubbleTranslate.ico` and links it in, so the result is one file that
+runs on any Windows 10 or 11 — natively on x64, and under emulation on an ARM64
+machine, which is why there is no separate ARM build. It is unsigned unless
+`SIGN_THUMBPRINT` names a certificate; see the script's header.
+
+Everything below is about the DMG.
 
 ```sh
 ./release.sh          # -> bubbleTranslate.dmg
@@ -399,6 +449,34 @@ Only gestures that actually finish a selection trigger a capture: a drag longer
 than a few points, a double/triple click, shift+arrow navigation, or Cmd+A. A
 plain click never does — otherwise strategy 2 would fire a copy on every click
 in the OS.
+
+### Windows
+
+The same shape as macOS, for the same reason: nothing on Windows publishes a
+selection, so it has to be asked for at the moment a gesture ends.
+
+1. **UI Automation** — asks the focused element for its `TextPattern`
+   selection. Instant, and it never touches your clipboard. Win32 edit
+   controls, RichEdit, WPF, WinUI, Office, Firefox and Chromium-based browsers
+   all answer it.
+2. **Synthetic Ctrl+C** — presses the chord with `SendInput` and watches the
+   clipboard sequence number. PDF viewers, Java applications and anything that
+   draws its own text say nothing over UI Automation but copy fine. Your
+   previous clipboard **text** is restored afterwards; an image or file list is
+   not.
+
+`clipboard_fallback = false` disables strategy 2 here too.
+
+The gesture filter is the same — a drag, a double or triple click, shift+arrow,
+or Ctrl+A — but two details are Windows' own. A low-level hook is never told
+about a double-click, because Windows synthesizes that later for the window
+being clicked, so the clicks are counted here against your own double-click
+speed. And whatever key is held for the trigger is released before the
+synthetic copy and pressed back after: with Shift still down, Ctrl+C would
+arrive as Ctrl+Shift+C, which is "inspect element" in every Chromium browser.
+
+Nothing here needs a permission. The one thing it cannot reach is a window
+running as administrator — see [Windows — from the .exe](#windows--from-the-exe).
 
 ## Translation backends
 
@@ -523,6 +601,14 @@ or in GNOME under Settings › Keyboard › Custom Shortcuts. This works on ever
 session, GNOME's Wayland included, and alongside whatever `trigger_key` is set
 to.
 
+On Windows the same command works, and the nearest thing to a keybinding is a
+shortcut's own: make a shortcut to `bubbleTranslate.exe`, add
+`--translate-selection` to its Target, and set **Shortcut key** in its
+properties. The running copy does the work and the second process exits
+immediately — which is also what happens if you launch the app twice, except
+that a plain second launch means "show me the window" and brings the first
+copy's window forward instead of starting a rival translator.
+
 ## Known limits
 
 - GNOME's Wayland session cannot be watched at all; see above.
@@ -533,6 +619,13 @@ to.
   current Debian and Ubuntu releases. Build from source there.
 - A Linux session with no StatusNotifierItem host gets no tray icon, and there
   the main window is the only way back to the app, so closing it quits.
+- On Windows, a window running as administrator cannot be read by a
+  bubbleTranslate that is not: Windows blocks both the automation call and the
+  synthetic keystroke, and there is no permission to grant.
+- On Windows the bubble is an opaque card rather than a floating one with a
+  shadow. Transparent windows there are composited as black wherever the
+  graphics stack declines to blend them, and a translator that has to work on
+  every machine cannot bet on the driver.
 - Restoring the clipboard after a synthetic copy only preserves text.
 - The bubble never takes keyboard focus (by design — otherwise the source app
   would drop its selection), so it cannot be dismissed with Esc. Close it with
