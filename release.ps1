@@ -47,7 +47,22 @@ else { cargo build --release --target $TARGET }
 if ($LASTEXITCODE -ne 0) { throw "the build failed" }
 
 $built = Join-Path $PSScriptRoot "target\$TARGET\release\bubbleTranslate.exe"
-Copy-Item $built $OUT -Force
+
+# Windows will not let a running program be overwritten, and the program most
+# likely to be running while this builds is this one. It will, however, let a
+# running program be *renamed*: the handle follows the file rather than the
+# path. So the old download is moved aside, the new one takes its place, and
+# the leftover is swept up on the next release, once whatever was holding it
+# has exited.
+$aside = "$OUT.locked-old"
+if (Test-Path $aside) { Remove-Item $aside -Force -ErrorAction SilentlyContinue }
+try {
+    Copy-Item $built $OUT -Force -ErrorAction Stop
+} catch {
+    Write-Host "the old bubbleTranslate.exe is running; moving it aside"
+    Move-Item $OUT $aside -Force
+    Copy-Item $built $OUT -Force
+}
 
 if ($env:SIGN_THUMBPRINT) {
     # Timestamped, so the signature outlives the certificate.

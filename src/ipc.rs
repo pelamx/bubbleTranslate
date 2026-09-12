@@ -116,14 +116,15 @@ mod unix {
 #[cfg(target_os = "windows")]
 mod windows {
     use std::io::Write;
+    use std::time::{Duration, Instant};
 
-    use ::windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use ::windows::Win32::Foundation::{CloseHandle, ERROR_PIPE_BUSY, HANDLE};
     use ::windows::Win32::Storage::FileSystem::{
         FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_INBOUND, ReadFile,
     };
     use ::windows::Win32::System::Pipes::{
         ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE,
-        PIPE_TYPE_BYTE, PIPE_WAIT,
+        PIPE_TYPE_BYTE, PIPE_WAIT, PeekNamedPipe, WaitNamedPipeW,
     };
     use ::windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
     use ::windows::core::PCWSTR;
@@ -176,6 +177,12 @@ mod windows {
                     // not an error.
                     let _ = unsafe { ConnectNamedPipe(pipe.0, None) };
                     let message = read_message(pipe.0);
+                    // Always, including when nothing was read. The pipe has one
+                    // instance, so a connection left open is the whole service
+                    // gone: every later caller is told the pipe is busy, and a
+                    // second copy of the app, finding nobody to defer to,
+                    // starts as a rival with its own tray icon and its own
+                    // input hooks.
                     let _ = unsafe { DisconnectNamedPipe(pipe.0) };
 
                     match message.trim() {
@@ -220,13 +227,46 @@ mod windows {
         Ok(Pipe(handle))
     }
 
+    /// How long a connected caller has to say what it wants.
+    ///
+    /// Generous for a caller that writes nineteen bytes the instant it
+    /// connects, which is all any of ours do, and short enough that one that
+    /// never writes at all costs a pause rather than the service.
+    const SPEAK_UP: Duration = Duration::from_secs(2);
+
+    /// Reads one request, or gives up.
+    ///
+    /// The wait is a poll rather than a plain `ReadFile` because a read on a
+    /// pipe that is not overlapped cannot be given a deadline, and without one
+    /// a caller that connects and then says nothing blocks this thread for as
+    /// long as it lives. That is not hypothetical politeness: it happened, and
+    /// what it looked like from outside was the app quietly losing its ability
+    /// to notice a second launch.
     fn read_message(pipe: HANDLE) -> String {
-        let mut buffer = [0u8; MAX_MESSAGE as usize];
-        let mut read = 0u32;
-        if unsafe { ReadFile(pipe, Some(&mut buffer), Some(&mut read), None) }.is_err() {
-            return String::new();
+        let deadline = Instant::now() + SPEAK_UP;
+        loop {
+            let mut available = 0u32;
+            // A caller that has gone away fails this outright, which is the
+            // other way out of the loop and the common one: it connected,
+            // wrote, and closed before we looked.
+            if unsafe { PeekNamedPipe(pipe, None, 0, None, Some(&mut available), None) }.is_err() {
+                break;
+            }
+            if available > 0 {
+                let mut buffer = [0u8; MAX_MESSAGE as usize];
+                let mut read = 0u32;
+                if unsafe { ReadFile(pipe, Some(&mut buffer), Some(&mut read), None) }.is_err() {
+                    break;
+                }
+                return String::from_utf8_lossy(&buffer[..read as usize]).into_owned();
+            }
+            if Instant::now() >= deadline {
+                crate::trace!("ipc: a caller connected and said nothing");
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(15));
         }
-        String::from_utf8_lossy(&buffer[..read as usize]).into_owned()
+        String::new()
     }
 
     /// Owns the pipe handle for as long as the listener thread runs, which is
@@ -259,12 +299,31 @@ mod windows {
     }
 
     fn send(message: &str) -> bool {
-        // The ordinary file API speaks to a pipe perfectly well, and opening
-        // one that nobody is serving fails immediately — which is exactly the
-        // question being asked.
-        let Ok(mut pipe) = std::fs::OpenOptions::new().write(true).open(pipe_name()) else {
-            return false;
-        };
-        pipe.write_all(message.as_bytes()).is_ok()
+        let name = pipe_name();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            // The ordinary file API speaks to a pipe perfectly well, and
+            // opening one that nobody is serving fails immediately — which is
+            // exactly the question being asked.
+            match std::fs::OpenOptions::new().write(true).open(&name) {
+                Ok(mut pipe) => return pipe.write_all(message.as_bytes()).is_ok(),
+                // "Busy" is not "absent". The listener serves one caller at a
+                // time, so a pipe that exists and is mid-conversation answers
+                // this way, and reading it as "nothing is running" is how a
+                // second copy of the app talks itself into starting up
+                // alongside the first. Wait for the instance to come free.
+                Err(err) if err.raw_os_error() == Some(ERROR_PIPE_BUSY.0 as i32) => {
+                    if Instant::now() >= deadline {
+                        crate::trace!("ipc: the listener stayed busy");
+                        return false;
+                    }
+                    let wide = wide(&name);
+                    // The documented way to queue for a busy pipe; it returns
+                    // as soon as an instance frees up.
+                    let _ = unsafe { WaitNamedPipeW(PCWSTR(wide.as_ptr()), 500) };
+                }
+                Err(_) => return false,
+            }
+        }
     }
 }

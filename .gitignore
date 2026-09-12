@@ -18,5 +18,9 @@ bubbleTranslate.app/
 # writes beside them is the one that ships, and that one is tracked.
 windows/preview-*.png
 
+# The previous download, moved aside because it was running when release.ps1
+# rebuilt it. The next release deletes it; it is history's copy either way.
+bubbleTranslate.exe.locked-old
+
 .DS_Store
 Thumbs.db
