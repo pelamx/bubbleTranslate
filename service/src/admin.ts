@@ -16,6 +16,7 @@ import { type Cycle, type Env, isCycle, supportEmail } from "./env";
 import {
   DEFAULT_SEATS,
   type Licence,
+  MANUAL_PROVIDER,
   endLicence,
   isLive,
   issueLicence,
@@ -476,7 +477,7 @@ async function issue(env: Env, request: Request): Promise<Response> {
   }
 
   const { id, key, expiresAt } = await issueLicence(env, {
-    provider: "manual",
+    provider: MANUAL_PROVIDER,
     cycle,
     email,
     seats,

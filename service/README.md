@@ -189,13 +189,46 @@ wrangler secret put ADMIN_PASSWORD
 ```
 
 It shows live subscriber counts split by plan and processor, what is ending in
-the next seven days, and any checkout that failed in the last week — a run of
+the next seven days, keys issued by hand, and any checkout that failed in the
+last week — a run of
 those is a broken price, a wrong credential or a processor outage, and nothing
 else reports them.
 
 Search takes whatever support arrives with: an email address, a licence key
 (hashed before lookup, since that is the only form stored), an `lc_…` id, or a
 processor subscription ref.
+
+### Generating keys without a payment
+
+The **Generate keys** form issues live Pro keys on either plan — monthly or
+yearly — for a sale that did not come through a processor: a bank transfer, an
+invoice, a reviewer's copy, or a payment that landed while its webhook did not.
+Ask for up to 50 at a time; the email is optional, recorded on every licence in
+the batch so search finds them later, and a single key issued to an address is
+also mailed if a mailer is configured.
+
+The plan is the term and nothing else. Both give the same unlimited Pro on the
+same three machines, and differ only in how long they last — 31 days or 366,
+the same terms `TERM_SECONDS` gives a purchase. That is deliberate: a comped
+licence that behaved differently from a bought one would be a second path
+through expiry, renewal and grace, and the rare path is the one that breaks
+quietly.
+
+They are marked `provider = 'manual'` rather than borrowed from PayTR or
+Paddle, which does two things. A row nobody was charged for is never counted as
+revenue beside the ones that were — the panel tiles them separately, as *issued
+by hand* — and no webhook can find one by `provider_ref` and extend or cancel
+it. The account page offers them no cancel button, correctly: there is no
+recurring charge to stop.
+
+The keys are shown once, on the page that issued them, and cannot be looked up
+again — a hand-issued licence writes no `orders` row, so unlike a purchase
+there is not even a plaintext copy to sweep an hour later. If the page is
+closed without copying them, **New key** below is the only way back.
+
+`/v1/dev/issue` does the same thing over JSON and stays the more convenient
+route locally, but it is gated on `DEV_MODE` and so does not exist in
+production. This form is its production equivalent.
 
 Four actions per licence, which are the four things support actually has to do:
 

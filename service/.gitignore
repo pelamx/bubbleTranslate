@@ -9,3 +9,8 @@ node_modules/
 
 # ...but the template is the documentation, and is meant to be committed.
 !.dev.vars.example
+
+# The signing keypair. The private half must never be committed: it signs
+# every entitlement the app trusts, and a leak can only be fixed by shipping
+# a new binary.
+.keys/

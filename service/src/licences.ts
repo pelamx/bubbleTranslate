@@ -19,6 +19,15 @@ export const GRACE_SECONDS = 3 * 86_400;
 
 export const DEFAULT_SEATS = 3;
 
+/** The `provider` on a licence that was issued by hand rather than bought.
+ *
+ *  Kept distinct from `paytr` and `paddle` for two reasons. A row nobody was
+ *  charged for must not be counted as revenue alongside the ones that were;
+ *  and `licenceByProviderRef` looks a licence up by (provider, ref), so a
+ *  hand-issued licence can never be found — and extended, or cancelled — by a
+ *  webhook that happens to carry a matching reference. */
+export const MANUAL_PROVIDER = "manual";
+
 export interface Licence {
   id: string;
   plan: string;
