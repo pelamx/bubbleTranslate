@@ -12,8 +12,16 @@
 // cancelling of a subscription from here — that lives with Paddle, which owns
 // the money, and doing it in two places is how the two disagree.
 
-import { type Env, supportEmail } from "./env";
-import { type Licence, endLicence, isLive, licenceById, rotateKey } from "./licences";
+import { type Cycle, type Env, isCycle, supportEmail } from "./env";
+import {
+  DEFAULT_SEATS,
+  type Licence,
+  endLicence,
+  isLive,
+  issueLicence,
+  licenceById,
+  rotateKey,
+} from "./licences";
 import { escapeHtml, page } from "./pages";
 import { constantTimeEqual, now, sha256Hex } from "./tokens";
 
@@ -323,6 +331,38 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
        <button type="submit">Search</button>
      </form>
 
+     <h2>Issue a licence</h2>
+     <p class="muted">
+       For the cases that never go through checkout: a press copy, a support
+       apology, a beta tester. It creates a real licence with no payment behind
+       it, marked <code>manual</code> so no Paddle webhook will ever move it and
+       the account page offers it no cancel button. The key is shown once.
+     </p>
+     <form method="post" action="/admin/issue" class="row">
+       <div style="flex:2 1 240px">
+         <label class="field" for="issue-email">Email — for your records; delivery is up to you</label>
+         <input id="issue-email" type="email" name="email" spellcheck="false"
+                placeholder="gazeteci@ornek.com">
+       </div>
+       <div style="flex:0 1 150px">
+         <label class="field" for="issue-cycle">Term</label>
+         <select id="issue-cycle" name="cycle">
+           <option value="yearly">Yearly</option>
+           <option value="monthly">Monthly</option>
+         </select>
+       </div>
+       <div style="flex:0 1 130px">
+         <label class="field" for="issue-days">Days — overrides the term</label>
+         <input id="issue-days" type="number" name="days" min="1" max="400" placeholder="365">
+       </div>
+       <div style="flex:0 1 110px">
+         <label class="field" for="issue-seats">Devices</label>
+         <input id="issue-seats" type="number" name="seats" min="1" max="20"
+                value="${DEFAULT_SEATS}">
+       </div>
+       <button type="submit">Issue</button>
+     </form>
+
      <h2>${query ? "Results" : `Latest ${PAGE_SIZE}`}</h2>
      ${rowsTable(rows)}
      ${failureTable}
@@ -338,6 +378,51 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
 }
 
 // -- acting on it ------------------------------------------------------------
+
+/** Creates a licence nobody paid for.
+ *
+ *  Deliberately not a variant of `act`: everything there starts by finding an
+ *  existing licence, and this one has none to find.
+ *
+ *  `provider` is `manual` rather than `paddle`, which is what keeps it out of
+ *  the processor's way. A Paddle webhook finds its row by `provider_ref`, so a
+ *  row with none is never moved by one; and the cancel and portal routes both
+ *  check `provider === "paddle"` before offering anything, so the account page
+ *  shows this licence without a cancel button it could not honour. */
+async function issue(env: Env, request: Request): Promise<Response> {
+  if (!sameOrigin(request)) return new Response("Cross-site request refused.", { status: 403 });
+
+  const form = await request.formData();
+  const cycle: Cycle = isCycle(form.get("cycle")) ? (form.get("cycle") as Cycle) : "yearly";
+
+  const email = String(form.get("email") ?? "").trim() || null;
+
+  const rawSeats = String(form.get("seats") ?? "").trim();
+  const seats = rawSeats ? Number(rawSeats) : DEFAULT_SEATS;
+  if (!Number.isInteger(seats) || seats < 1 || seats > 20) {
+    return dashboard(env, "", { error: "Devices must be between 1 and 20." });
+  }
+
+  // Blank means "however long that cycle is", which is the common case.
+  const rawDays = String(form.get("days") ?? "").trim();
+  const days = rawDays ? Number(rawDays) : null;
+  if (days !== null && (!Number.isInteger(days) || days < 1 || days > 400)) {
+    return dashboard(env, "", { error: "Days must be between 1 and 400." });
+  }
+
+  const { id, key, expiresAt } = await issueLicence(env, {
+    provider: "manual",
+    cycle,
+    email,
+    seats,
+    termSeconds: days === null ? undefined : days * DAY,
+  });
+
+  return dashboard(env, id, {
+    key,
+    message: `Issued ${id} — ${cycle}, ${seats} device${seats === 1 ? "" : "s"}, ends ${date(expiresAt)}.`,
+  });
+}
 
 /** Every mutation ends by re-rendering the dashboard filtered to the licence
  *  that was touched, so the operator sees the result rather than a redirect to
@@ -428,6 +513,7 @@ export async function handleAdmin(
   }
   if (request.method === "POST") {
     const action = pathname.slice("/admin/".length);
+    if (action === "issue") return issue(env, request);
     if (["extend", "seats", "rotate", "end"].includes(action)) {
       return act(env, request, action);
     }
