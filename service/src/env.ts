@@ -35,6 +35,30 @@ export interface Env {
   RESEND_API_KEY?: string;
   MAIL_FROM?: string;
   SUPPORT_EMAIL?: string;
+  // -- Ad conversion attribution --------------------------------------------
+  //
+  // All optional. With none set, a sale pushes no conversion (see ads.ts): the
+  // feature is dark until its secrets are put, exactly like mail delivery.
+  // Everything but the numeric ids is a secret -- set with `wrangler secret put`.
+
+  /** Google Ads offline click-conversion upload. The customer id is digits
+   *  only, no dashes; login customer id is the MCC when the account is under
+   *  one; the conversion action is the full resource name
+   *  `customers/<id>/conversionActions/<id>`. */
+  GOOGLE_ADS_DEVELOPER_TOKEN?: string;
+  GOOGLE_ADS_CLIENT_ID?: string;
+  GOOGLE_ADS_CLIENT_SECRET?: string;
+  GOOGLE_ADS_REFRESH_TOKEN?: string;
+  GOOGLE_ADS_CUSTOMER_ID?: string;
+  GOOGLE_ADS_LOGIN_CUSTOMER_ID?: string;
+  GOOGLE_ADS_CONVERSION_ACTION?: string;
+
+  /** Meta (Facebook) Conversions API. The pixel id is not secret; the access
+   *  token is. A test event code, when set, routes events to the Test Events
+   *  tab instead of reporting. */
+  META_PIXEL_ID?: string;
+  META_ACCESS_TOKEN?: string;
+  META_TEST_EVENT_CODE?: string;
 
   /** Unlocks /admin. Unset means the route does not exist at all -- it answers
    *  404 rather than 401, so an unconfigured deployment does not advertise an
@@ -58,14 +82,24 @@ export const TERM_SECONDS: Record<Cycle, number> = {
   yearly: 366 * 86_400,
 };
 
+/** The product's price in whole US dollars, and the one place it is written.
+ *  Everything that needs a price derives from this: the display strings below,
+ *  the value reported to the ad networks (`ads.ts`) and the revenue in the
+ *  weekly report (`report.ts`). Those last two are money figures that nobody
+ *  eyeballs week to week, so a second hardcoded copy would drift silently. */
+export const USD_AMOUNT: Record<Cycle, number> = {
+  monthly: 2,
+  yearly: 20,
+};
+
 /** The display prices. These are the product's prices, and they are also what
  *  the app itself says — see `PRICE_MONTHLY` in `src/license.rs`, which has to
  *  agree with these. Paddle prices the transaction in the buyer's own
  *  currency; these dollar figures are the fallback the buy page shows before
  *  Paddle's preview returns. */
 export const USD_PRICE: Record<Cycle, string> = {
-  monthly: "$2",
-  yearly: "$20",
+  monthly: `$${USD_AMOUNT.monthly}`,
+  yearly: `$${USD_AMOUNT.yearly}`,
 };
 
 export function paddlePriceId(env: Env, cycle: Cycle): string | null {
@@ -104,3 +138,23 @@ export function baseUrl(env: Env, request: Request): string {
   if (env.PUBLIC_BASE_URL) return env.PUBLIC_BASE_URL.replace(/\/+$/, "");
   return new URL(request.url).origin;
 }
+
+
+// -- Ad conversion configuration ---------------------------------------------
+//
+// Each platform is independent: Google may be wired while Meta is not. A push
+// is only attempted for a platform that is fully configured, so a half-set
+// account never throws on the webhook path.
+
+export const googleAdsConfigured = (env: Env) =>
+  Boolean(
+    env.GOOGLE_ADS_DEVELOPER_TOKEN &&
+      env.GOOGLE_ADS_CLIENT_ID &&
+      env.GOOGLE_ADS_CLIENT_SECRET &&
+      env.GOOGLE_ADS_REFRESH_TOKEN &&
+      env.GOOGLE_ADS_CUSTOMER_ID &&
+      env.GOOGLE_ADS_CONVERSION_ACTION,
+  );
+
+export const metaAdsConfigured = (env: Env) =>
+  Boolean(env.META_PIXEL_ID && env.META_ACCESS_TOKEN);

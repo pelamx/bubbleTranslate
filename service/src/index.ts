@@ -43,6 +43,7 @@ import {
   sweepRevealedKeys,
 } from "./licences";
 import { handleAdmin } from "./admin";
+import { pushConversions, type ClickIds } from "./ads";
 import {
   type CancelFailure,
   cancelSubscription,
@@ -256,6 +257,20 @@ async function orderStatus(env: Env, ref: string): Promise<Response> {
 
 // -- the routes the processors call ------------------------------------------
 
+/** The ad click ids Paddle carried through in custom_data. Only the keys the
+ *  networks actually match on are kept, and each is a plain string or absent --
+ *  custom_data is attacker-influenced in principle, so nothing here is
+ *  trusted beyond being copied into an outbound conversion. */
+function readClickIds(customData: any): ClickIds {
+  const out: ClickIds = {};
+  if (!customData || typeof customData !== "object") return out;
+  for (const k of ["gclid", "gbraid", "wbraid", "fbc", "fbp"] as const) {
+    const v = customData[k];
+    if (typeof v === "string" && v) out[k] = v;
+  }
+  return out;
+}
+
 /** Turns a paid order into a licence, exactly once.
  *
  *  Paddle retries the webhook on any non-2xx, so the first thing this does is
@@ -266,13 +281,13 @@ async function fulfil(
   env: Env,
   ref: string,
   opts: { provider: string; cycle: Cycle; email: string | null; providerRef: string | null },
-): Promise<void> {
+): Promise<boolean> {
   const order = await orderByRef(env, ref);
   if (!order) {
     console.error(`fulfilment for an unknown order ${ref}`);
-    return;
+    return false;
   }
-  if (order.status === "paid") return;
+  if (order.status === "paid") return false;
 
   const { id, key, expiresAt } = await issueLicence(env, {
     provider: opts.provider,
@@ -283,6 +298,7 @@ async function fulfil(
   await markOrderPaid(env, ref, id, key);
   console.log(`issued licence ${id} for order ${ref} via ${opts.provider}`);
   await deliverKey(env, opts.email ?? order.email, key, opts.cycle, expiresAt);
+  return true;
 }
 
 async function paddleWebhook(env: Env, request: Request): Promise<Response> {
@@ -327,7 +343,25 @@ async function paddleWebhook(env: Env, request: Request): Promise<Response> {
         console.error("Paddle transaction with no order ref and no known subscription");
         return json({ ok: true, ignored: "no ref" });
       }
-      await fulfil(env, ref, { provider: "paddle", cycle, email, providerRef: subscriptionId });
+      const newlyPaid = await fulfil(env, ref, {
+        provider: "paddle",
+        cycle,
+        email,
+        providerRef: subscriptionId,
+      });
+      // First payment only: renewals return above and a retried webhook finds
+      // the order already paid, so the conversion is pushed exactly once.
+      if (newlyPaid) {
+        await pushConversions(env, {
+          clickIds: readClickIds(data?.custom_data),
+          cycle,
+          orderRef: ref,
+          email,
+          // occurredAt is in seconds; ads want ms, and a missing stamp (0)
+          // falls back to now rather than 1970.
+          eventTimeMs: eventAt ? eventAt * 1000 : Date.now(),
+        });
+      }
       return json({ ok: true });
     }
 

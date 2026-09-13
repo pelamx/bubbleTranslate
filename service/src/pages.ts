@@ -288,6 +288,19 @@ export function buyPage(opts: BuyOptions): Response {
       ${PLAN_SCRIPT}
       Paddle.Environment.set(${JSON.stringify(opts.paddleEnv)});
       Paddle.Initialize({ token: ${JSON.stringify(opts.clientToken ?? "")} });
+      // Ad click ids arrive on this page's own URL (the landing site stamps
+      // them onto the buy link -- a different origin, so localStorage cannot
+      // cross). They ride through Paddle in customData and come back on the
+      // transaction.completed webhook, which is where the conversion is pushed.
+      const clickIds = (() => {
+        const p = new URLSearchParams(location.search);
+        const out = {};
+        for (const k of ['gclid', 'gbraid', 'wbraid', 'fbc', 'fbp']) {
+          const v = p.get(k);
+          if (v) out[k] = v;
+        }
+        return out;
+      })();
       const prices = {
         monthly: ${JSON.stringify(opts.priceMonthly ?? "")},
         yearly: ${JSON.stringify(opts.priceYearly ?? "")},
@@ -343,7 +356,7 @@ export function buyPage(opts: BuyOptions): Response {
         Paddle.Checkout.open({
           items: [{ priceId: prices[cycle], quantity: 1 }],
           customer: { email: email.value },
-          customData: { ref: created.ref },
+          customData: { ref: created.ref, ...clickIds },
           settings: {
             displayMode: 'overlay',
             variant: 'one-page',
