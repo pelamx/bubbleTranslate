@@ -23,6 +23,7 @@ import {
   licenceById,
   rotateKey,
 } from "./licences";
+import { reportPage } from "./report";
 import { grantsAccess, subscriptionById } from "./mirror";
 import { escapeHtml, page } from "./pages";
 import { constantTimeEqual, now, sha256Hex } from "./tokens";
@@ -653,6 +654,9 @@ export async function handleAdmin(
   if (!env.ADMIN_PASSWORD) return new Response("Not found.", { status: 404 });
   if (!(await authorised(env, request))) return challenge();
 
+  if (request.method === "GET" && pathname === "/admin/report") {
+    return reportPage(env);
+  }
   if (request.method === "GET" && pathname === "/admin") {
     return dashboard(env, url.searchParams.get("q") ?? "");
   }

@@ -8,6 +8,12 @@ compatibility_date = "2026-09-01"
 workers_dev = false
 routes = [{ pattern = "api.bubbletranslate.app", custom_domain = true }]
 
+# The weekly founder's report (src/report.ts) runs off this schedule: every
+# Monday at 08:00 UTC. It reads D1 and emails a plain-language summary via
+# Resend. Off the request path entirely -- it never touches a checkout.
+[triggers]
+crons = ["0 8 * * 1"]
+
 # Local `wrangler dev` ignores database_id and uses a SQLite file under
 # .wrangler/. Replace it with the real one from `wrangler d1 create` before
 # the first `wrangler deploy`.

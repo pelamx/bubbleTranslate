@@ -35,6 +35,9 @@ export interface Env {
   RESEND_API_KEY?: string;
   MAIL_FROM?: string;
   SUPPORT_EMAIL?: string;
+  /** Where the weekly report is emailed. Falls back to SUPPORT_EMAIL. */
+  REPORT_EMAIL?: string;
+
   // -- Ad conversion attribution --------------------------------------------
   //
   // All optional. With none set, a sale pushes no conversion (see ads.ts): the

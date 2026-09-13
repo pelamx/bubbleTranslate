@@ -44,6 +44,7 @@ import {
 } from "./licences";
 import { handleAdmin } from "./admin";
 import { pushConversions, type ClickIds } from "./ads";
+import { sendWeeklyReport } from "./report";
 import {
   type CancelFailure,
   cancelSubscription,
@@ -567,6 +568,13 @@ async function devIssue(env: Env, body: any) {
 // -- the router --------------------------------------------------------------
 
 export default {
+  // The weekly report runs off a cron trigger (see wrangler.toml). waitUntil
+  // keeps the isolate alive until the mail is sent; the send is best-effort
+  // and never throws, so a mail failure cannot fail the scheduled run.
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(sendWeeklyReport(env));
+  },
+
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const { pathname } = url;
