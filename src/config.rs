@@ -87,6 +87,56 @@ impl TriggerKey {
     }
 }
 
+/// The bubble's colour scheme.
+///
+/// A theme is only the bubble's own palette — the floating card, its text and
+/// its controls. The main window keeps its fixed chrome; this is the surface
+/// that appears over other people's applications, so it is the one worth
+/// letting someone match to their desktop. [`BubbleTheme::Slate`] is the
+/// original grey; the rest are the palettes Omarchy ships for the desktop
+/// itself, so the bubble can be told to look like the rest of the screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BubbleTheme {
+    /// The original: near-white on a neutral dark grey, one blue accent.
+    #[default]
+    Slate,
+    TokyoNight,
+    Catppuccin,
+    Gruvbox,
+    Nord,
+    RosePine,
+    /// The light pair, for a pale desktop — or for reading a bubble in daylight.
+    CatppuccinLatte,
+    RosePineDawn,
+}
+
+impl BubbleTheme {
+    pub const ALL: &'static [BubbleTheme] = &[
+        BubbleTheme::Slate,
+        BubbleTheme::TokyoNight,
+        BubbleTheme::Catppuccin,
+        BubbleTheme::Gruvbox,
+        BubbleTheme::Nord,
+        BubbleTheme::RosePine,
+        BubbleTheme::CatppuccinLatte,
+        BubbleTheme::RosePineDawn,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            BubbleTheme::Slate => "Slate (original)",
+            BubbleTheme::TokyoNight => "Tokyo Night",
+            BubbleTheme::Catppuccin => "Catppuccin",
+            BubbleTheme::Gruvbox => "Gruvbox",
+            BubbleTheme::Nord => "Nord",
+            BubbleTheme::RosePine => "Rosé Pine",
+            BubbleTheme::CatppuccinLatte => "Catppuccin Latte (light)",
+            BubbleTheme::RosePineDawn => "Rosé Pine Dawn (light)",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -159,6 +209,8 @@ pub struct Config {
     /// worth in pixels, not how big a desktop's own applications choose to
     /// draw. Some run denser than others, and this is the dial for it.
     pub ui_scale: f32,
+    /// The bubble's colour scheme. See [`BubbleTheme`].
+    pub theme: BubbleTheme,
 }
 
 impl Default for Config {
@@ -186,6 +238,7 @@ impl Default for Config {
             // than its neighbours. This is a starting point, not a verdict —
             // the slider in the main window is the real answer.
             ui_scale: if cfg!(target_os = "linux") { 0.85 } else { 1.0 },
+            theme: BubbleTheme::default(),
         }
     }
 }
@@ -314,6 +367,20 @@ mod tests {
             cfg.trigger_key = *key;
             let back: Config = toml::from_str(&toml::to_string_pretty(&cfg).unwrap()).unwrap();
             assert_eq!(back.trigger_key, *key);
+        }
+    }
+
+    /// A config written before themes existed opens on the original grey, and
+    /// every theme survives being written out and read back.
+    #[test]
+    fn the_theme_survives_a_round_trip() {
+        let old: Config = toml::from_str("target_lang = \"tr\"\n").unwrap();
+        assert_eq!(old.theme, BubbleTheme::Slate);
+        for theme in BubbleTheme::ALL {
+            let mut cfg = Config::default();
+            cfg.theme = *theme;
+            let back: Config = toml::from_str(&toml::to_string_pretty(&cfg).unwrap()).unwrap();
+            assert_eq!(back.theme, *theme);
         }
     }
 }

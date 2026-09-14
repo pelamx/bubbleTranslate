@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 
-use crate::config::{Config, LANGUAGES, Provider, TriggerKey, language_name};
+use crate::config::{BubbleTheme, Config, LANGUAGES, Provider, TriggerKey, language_name};
 use crate::engine::Request;
 use crate::license::{self, Licensing, Status};
 use crate::platform::Readiness;
@@ -868,6 +868,32 @@ fn behaviour(ui: &mut egui::Ui, cfg: &mut Config) -> bool {
             });
         ui.label("while selecting");
     });
+
+    ui.horizontal(|ui| {
+        ui.label("Bubble theme");
+        egui::ComboBox::from_id_salt("bubble-theme-main")
+            .selected_text(cfg.theme.label())
+            .show_ui(ui, |ui| {
+                for theme in BubbleTheme::ALL {
+                    if ui
+                        .selectable_label(*theme == cfg.theme, theme.label())
+                        .clicked()
+                    {
+                        cfg.theme = *theme;
+                        dirty = true;
+                    }
+                }
+            });
+    });
+    ui.label(
+        egui::RichText::new(
+            "The colour scheme of the translation bubble. It changes the moment \
+             you pick one — the main window keeps its own look.",
+        )
+        .size(11.0)
+        .color(TEXT_MUTED),
+    );
+
     ui.label(
         egui::RichText::new(match crate::monitor::trigger_key_blocked() {
             None => "Only a selection made with that key held pops a bubble, so \
