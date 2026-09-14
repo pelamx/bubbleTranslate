@@ -157,7 +157,7 @@ pub fn draw(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.add_space(4.0);
-            header(ui, &state);
+            header(ui, &state, &cfg);
             ui.add_space(10.0);
 
             section(ui, "Translate", |ui| translate_box(ui, &mut state, &cfg));
@@ -284,7 +284,7 @@ fn footer(ui: &mut egui::Ui) {
     }
 }
 
-fn header(ui: &mut egui::Ui, state: &MainState) {
+fn header(ui: &mut egui::Ui, state: &MainState, cfg: &Config) {
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new("Bubble Translate")
@@ -306,11 +306,25 @@ fn header(ui: &mut egui::Ui, state: &MainState) {
                 .size(12.5)
                 .color(OK_GREEN),
         );
+        // Name the key the selection has to be made with. Without it this
+        // line describes a gesture that does nothing: a selection made with
+        // no key held is ignored, and the user is left watching the green dot
+        // wondering why. There is nothing to name when they chose no key —
+        // and nothing to promise when the session will not report one, which
+        // the Behaviour section explains rather than this line.
+        let hold = (cfg.trigger_key != TriggerKey::Always
+            && crate::monitor::trigger_key_blocked().is_none())
+        .then(|| cfg.trigger_key.label());
         ui.label(
-            egui::RichText::new(
-                "Select text in any app — double-click a word, drag a phrase, \
-                 or triple-click a line.",
-            )
+            egui::RichText::new(match hold {
+                Some(key) => format!(
+                    "Hold {key} and select text in any app — double-click a word, \
+                     drag a phrase, or triple-click a line."
+                ),
+                None => "Select text in any app — double-click a word, drag a phrase, \
+                         or triple-click a line."
+                    .to_string(),
+            })
             .size(12.0)
             .color(TEXT_MUTED),
         );
