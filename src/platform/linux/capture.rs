@@ -85,3 +85,10 @@ pub fn set_clipboard(ctx: &eframe::egui::Context, text: &str) {
     }
     ctx.copy_text(text.to_string());
 }
+
+/// Nothing to re-ask on Linux: what blocks a session here is a protocol it
+/// does not speak, settled when the backend was probed at startup and not
+/// something the user can turn on while the app is running.
+pub fn recheck(_was_ok: bool) -> Option<Readiness> {
+    None
+}

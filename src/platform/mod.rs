@@ -181,6 +181,20 @@ pub struct Readiness {
     pub detail: String,
     /// The same problem in one line, for the bubble's settings panel.
     pub summary: String,
+    /// The page that grants what is missing, where the system has one to
+    /// open.
+    ///
+    /// A sentence naming a path four levels into System Settings is not
+    /// instructions, it is a scavenger hunt — and the person reading it has
+    /// just installed a translator, not agreed to go looking. Where the fix
+    /// is a switch the user has to tick, the window offers the page itself.
+    pub fix: Option<Fix>,
+}
+
+/// A button the status panel can offer, and where it goes.
+pub struct Fix {
+    pub label: &'static str,
+    pub url: &'static str,
 }
 
 impl Readiness {
@@ -189,6 +203,7 @@ impl Readiness {
             ok: true,
             detail: String::new(),
             summary: String::new(),
+            fix: None,
         }
     }
 
@@ -201,6 +216,16 @@ impl Readiness {
             ok: false,
             detail: detail.into(),
             summary: summary.into(),
+            fix: None,
         }
+    }
+
+    /// Names the page that grants what is missing. Unused on Linux, where
+    /// what is missing is a protocol the session does not speak — there is no
+    /// switch to send anyone to.
+    #[allow(dead_code)]
+    pub fn fixable(mut self, label: &'static str, url: &'static str) -> Self {
+        self.fix = Some(Fix { label, url });
+        self
     }
 }

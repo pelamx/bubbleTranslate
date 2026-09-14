@@ -339,6 +339,16 @@ fn header(ui: &mut egui::Ui, state: &MainState, cfg: &Config) {
                 .size(12.0)
                 .color(WARN_AMBER),
         );
+        // Where the system has a page for this, offer the page. The status
+        // above says what is wrong; a sentence cannot tick the switch, and
+        // the path to it is long enough that describing it is how people get
+        // lost.
+        if let Some(fix) = &state.readiness.fix {
+            ui.add_space(4.0);
+            if ui.button(fix.label).clicked() {
+                crate::shell::open_url(fix.url);
+            }
+        }
     }
 }
 

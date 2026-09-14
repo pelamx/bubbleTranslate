@@ -137,6 +137,17 @@ fn main() -> eframe::Result<()> {
     let readiness = capture::readiness();
     if !readiness.ok {
         eprintln!("bubbleTranslate: {}", readiness.detail);
+        // Open the page rather than leave the sentence to be followed. The
+        // system's own dialog offers the same trip, but only once and only if
+        // it is answered rather than dismissed — and a translator that cannot
+        // read a selection has nothing else to offer anyone who lands in the
+        // window instead. Not while starting in the background, which is what
+        // a login item does: nobody asked for System Settings at login.
+        if !background {
+            if let Some(fix) = &readiness.fix {
+                shell::open_url(fix.url);
+            }
+        }
     }
     let warning = (!readiness.ok).then(|| readiness.summary.clone());
 

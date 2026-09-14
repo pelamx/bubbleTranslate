@@ -34,6 +34,12 @@ const CURSOR_OFFSET: (f32, f32) = (14.0, 20.0);
 /// How often a visible bubble re-checks whether the pointer is over it.
 const HOVER_POLL: Duration = Duration::from_millis(150);
 
+/// How often to re-ask whether the permission the app is missing has been
+/// granted. Only asked while it is missing, and only while something is
+/// drawing — which is the case that matters, since that is when someone is
+/// looking at the status this keeps honest.
+const READINESS_POLL: Duration = Duration::from_millis(750);
+
 /// The close button's glyph.
 ///
 /// A multiplication sign rather than one of the several nicer-looking crosses
@@ -514,6 +520,9 @@ pub struct BubbleApp {
     /// bubble's settings panel; the same problem is spelled out at length in
     /// the main window.
     readiness_warning: Option<String>,
+    /// When the permission behind [`Self::readiness_warning`] was last
+    /// re-asked.
+    readiness_checked: Instant,
     /// Shared with the main window's deferred viewport callback, which must be
     /// `Send + Sync + 'static` and so cannot borrow from here.
     main: Arc<Mutex<MainState>>,
@@ -571,6 +580,7 @@ impl BubbleApp {
             lang_popup_open: false,
             copied_at: None,
             readiness_warning,
+            readiness_checked: Instant::now(),
             reopen_hooked: false,
             dock_visible: false,
             started_hidden,
@@ -790,6 +800,25 @@ impl BubbleApp {
         }
     }
 
+    /// Picks up a permission granted while the app was already running.
+    ///
+    /// The selection monitor waits for the same grant on its own thread, so
+    /// the app starts working without being told; this is what stops the
+    /// window insisting it is blind while the bubble is plainly translating.
+    /// Nothing polls while the app is idle and unwatched — `logic` sleeps
+    /// then, and there is no one for a stale status to mislead.
+    fn refresh_readiness(&mut self) {
+        if self.readiness_checked.elapsed() < READINESS_POLL {
+            return;
+        }
+        self.readiness_checked = Instant::now();
+        let was_ok = self.main.lock().unwrap().readiness.ok;
+        if let Some(readiness) = capture::recheck(was_ok) {
+            self.readiness_warning = (!readiness.ok).then(|| readiness.summary.clone());
+            self.main.lock().unwrap().readiness = readiness;
+        }
+    }
+
     /// Keeps egui's zoom in step with the display and the user's preference.
     ///
     /// Two independent factors. The display's own scaling is measured and
@@ -978,6 +1007,7 @@ impl eframe::App for BubbleApp {
         }
 
         self.apply_zoom(ctx);
+        self.refresh_readiness();
 
         self.drain_events(ctx);
         self.drive_main_window(ctx);

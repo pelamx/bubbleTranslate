@@ -81,11 +81,11 @@ bubbleTranslate — by pelamx
 
    (Control-click > Open does not work for this on macOS 15 and later.)
 
-3. macOS will ask for Accessibility permission; grant it in
-   System Settings > Privacy & Security > Accessibility.
+3. macOS will ask for Accessibility permission, and the app opens the page
+   for you: System Settings > Privacy & Security > Accessibility. Turn
+   bubbleTranslate on there.
 
-4. QUIT AND RELAUNCH. The permission only takes effect on a fresh start,
-   because the event tap is installed when the app launches.
+   It starts watching the moment you do. Nothing to quit, nothing to relaunch.
 
 Then select text anywhere — double-click a word, drag a phrase, triple-click
 a line — and the translation appears at your cursor.

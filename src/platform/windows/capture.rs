@@ -464,3 +464,9 @@ fn write_clipboard_string(value: &str) {
 pub fn set_clipboard(_ctx: &eframe::egui::Context, text: &str) {
     write_clipboard_string(text);
 }
+
+/// Nothing to re-ask on Windows, where reading another application's
+/// selection needs no permission in the first place.
+pub fn recheck(_was_ok: bool) -> Option<Readiness> {
+    None
+}

@@ -45,6 +45,11 @@ const NAVIGATION_KEYS: [i64; 8] = [
 ];
 const KEYCODE_A: i64 = 0;
 
+/// How often to re-ask whether Accessibility has been granted, while it has
+/// not. Idle in every sense — one TCC lookup on a thread that has nothing
+/// else to do until the answer changes.
+const TRUST_POLL: std::time::Duration = std::time::Duration::from_millis(500);
+
 // The tap's own port, so its callback can switch it back on. Only ever
 // touched from the monitor thread, which is where both the tap and the
 // callback live.
@@ -247,6 +252,20 @@ fn run(on_trigger: impl Fn(Trigger) + Send + 'static) {
             CallbackResult::Keep
         };
 
+    // The tap cannot be created until this binary is ticked in Accessibility,
+    // and that tick can arrive at any time — from the system's own dialog, or
+    // minutes later from the button in the window. Waiting for it here is what
+    // makes the permission take effect where it is granted instead of on the
+    // next launch, which is the step people miss: they turn it on, nothing
+    // happens, and they conclude the app is broken.
+    if !capture::trusted() {
+        crate::trace!("waiting for Accessibility permission before installing the tap");
+        while !capture::trusted() {
+            std::thread::sleep(TRUST_POLL);
+        }
+        crate::trace!("Accessibility granted");
+    }
+
     crate::trace!("installing event tap...");
     // Built by hand rather than with `with_enabled`, which keeps the tap to
     // itself: the callback needs the port to re-enable the tap above.
@@ -272,10 +291,7 @@ fn run(on_trigger: impl Fn(Trigger) + Send + 'static) {
     };
 
     let Ok(tap) = tap else {
-        eprintln!(
-            "bubbleTranslate: could not install the event tap — grant Accessibility \
-             permission in System Settings and restart."
-        );
+        eprintln!("bubbleTranslate: could not install the event tap.");
         return;
     };
 

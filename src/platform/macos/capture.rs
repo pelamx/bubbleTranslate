@@ -43,6 +43,8 @@ unsafe extern "C" {
     ) -> i32;
     fn AXUIElementSetMessagingTimeout(element: AXUIElementRef, timeout: f32) -> i32;
     fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
+    /// The same question without the dialog, for asking repeatedly.
+    fn AXIsProcessTrusted() -> bool;
     static kAXTrustedCheckOptionPrompt: CFStringRef;
 }
 
@@ -78,13 +80,36 @@ pub fn readiness() -> Readiness {
         return Readiness::ready();
     }
     Readiness::blocked(
-        "Accessibility permission is off — selections cannot be read. Enable \
-         bubbleTranslate in System Settings › Privacy & Security › Accessibility, \
-         then restart.",
-        "Selections cannot be read. Enable bubbleTranslate in System Settings › \
-         Privacy & Security › Accessibility, then restart the app — the event tap \
-         is installed at startup.",
+        "Accessibility permission is off — selections cannot be read. Turn \
+         bubbleTranslate on in System Settings › Privacy & Security › Accessibility.",
+        "Selections cannot be read until macOS is told this app may watch them. \
+         Open the page below and turn bubbleTranslate on; it starts watching the \
+         moment you do, with nothing to restart.",
     )
+    .fixable("Open Accessibility settings", ACCESSIBILITY_SETTINGS)
+}
+
+/// The Accessibility page of System Settings, addressed directly.
+///
+/// Four levels deep and under a name that has moved twice between macOS
+/// releases, so the app opens it rather than describing the way there.
+pub const ACCESSIBILITY_SETTINGS: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+
+/// Whether the permission is granted, asked without popping anything.
+///
+/// The prompting form in [`readiness`] is for the one question at startup.
+/// This is the one that can be asked on a timer, which is what lets a grant
+/// made minutes later take effect where it is noticed rather than on the next
+/// launch.
+pub fn trusted() -> bool {
+    unsafe { AXIsProcessTrusted() }
+}
+
+/// A readiness that has changed since it was last reported, or `None` while
+/// it stands. Asked on a timer, so it must never prompt.
+pub fn recheck(was_ok: bool) -> Option<Readiness> {
+    (!was_ok && trusted()).then(Readiness::ready)
 }
 
 /// Grabs the current selection, or `None` when there isn't one.
