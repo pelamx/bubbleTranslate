@@ -279,6 +279,57 @@ fn set_palette(theme: BubbleTheme) {
 /// anyway — with the window's own corners rounded by the desktop manager.
 pub const TRANSPARENT_BUBBLE: bool = !cfg!(target_os = "windows");
 
+/// The card's drop shadow.
+///
+/// Where the window behind the card is opaque the shadow would land on the
+/// card's own colour and read as a smear along the bottom edge, so there the
+/// desktop draws the window's shadow instead and this one is left off.
+const BUBBLE_SHADOW: egui::Shadow = if TRANSPARENT_BUBBLE {
+    egui::Shadow {
+        offset: [0, 4],
+        blur: 18,
+        spread: 0,
+        color: egui::Color32::from_black_alpha(120),
+    }
+} else {
+    egui::Shadow::NONE
+};
+
+/// The card's own outline, and the gap between it and its text.
+const CARD_STROKE: f32 = 1.0;
+const CARD_PAD_X: i8 = 16;
+const CARD_PAD_Y: i8 = 14;
+
+/// How far outside the card its shadow reaches, on each side.
+///
+/// A shadow is painted outside the shape that casts it, and egui clips
+/// painting at the window's edge — so a card laid out flush with the window
+/// gets its shadow cut off on every side that has no room. Leaving room only
+/// below is worse than leaving none at all: the surviving band spans the full
+/// width with both ends cut square, which reads as a bar under the bubble
+/// rather than as a shadow.
+///
+/// Derived from the shadow rather than written down beside it, so tuning the
+/// blur or the offset moves the room it needs with it. Mirrors
+/// `epaint::Shadow::margin`, in the integer units a [`egui::Margin`] takes.
+const fn shadow_margin() -> egui::Margin {
+    let reach = (BUBBLE_SHADOW.spread + BUBBLE_SHADOW.blur.div_ceil(2)) as i8;
+    let [dx, dy] = BUBBLE_SHADOW.offset;
+    egui::Margin {
+        left: reach - dx,
+        right: reach + dx,
+        top: reach - dy,
+        bottom: reach + dy,
+    }
+}
+
+/// The width left for the bubble's contents once the card, its padding and the
+/// room for its shadow are taken out of the window.
+fn card_content_width() -> f32 {
+    let m = shadow_margin();
+    BUBBLE_WIDTH - (m.left + m.right) as f32 - (2 * CARD_PAD_X) as f32 - 2.0 * CARD_STROKE
+}
+
 /// The bubble's theme, pinned to the chosen palette.
 ///
 /// Pinned rather than following the system, because every panel, every frame
@@ -725,7 +776,18 @@ impl BubbleApp {
             return true;
         }
         #[cfg(target_os = "macos")]
-        true
+        {
+            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+            let Ok(handle) = frame.window_handle() else {
+                return false;
+            };
+            let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+                return false;
+            };
+            shell::drop_window_shadow(appkit.ns_view.as_ptr());
+            return true;
+        }
     }
 
     /// Keeps egui's zoom in step with the display and the user's preference.
@@ -1000,27 +1062,18 @@ impl eframe::App for BubbleApp {
 
         let bubble = egui::Frame::new()
             .fill(pal().bubble_bg)
-            .stroke(egui::Stroke::new(1.0, pal().bubble_border))
+            .stroke(egui::Stroke::new(CARD_STROKE, pal().bubble_border))
             .corner_radius(10.0)
-            .inner_margin(egui::Margin::symmetric(16, 14))
-            // A shadow needs somewhere to fall. Where the window behind the
-            // card is opaque it would land on the card's own colour and read
-            // as a smear along the bottom edge, so there the desktop draws the
-            // window's shadow instead and this one is left off.
-            .shadow(if TRANSPARENT_BUBBLE {
-                egui::Shadow {
-                    offset: [0, 4],
-                    blur: 18,
-                    spread: 0,
-                    color: egui::Color32::from_black_alpha(120),
-                }
-            } else {
-                egui::Shadow::NONE
-            });
+            .inner_margin(egui::Margin::symmetric(CARD_PAD_X, CARD_PAD_Y))
+            // A shadow needs somewhere to fall; see [`shadow_margin`]. The
+            // card is inset by exactly that much, which is also what keeps its
+            // outline inside the window rather than half a pixel past it.
+            .outer_margin(shadow_margin())
+            .shadow(BUBBLE_SHADOW);
 
         let mut dismiss = false;
         let response = bubble.show(ui, |ui| {
-            ui.set_width(BUBBLE_WIDTH - 32.0);
+            ui.set_width(card_content_width());
             dismiss = self.draw_body(ui);
         });
 
@@ -1034,10 +1087,11 @@ impl eframe::App for BubbleApp {
         } else {
             0.0
         };
-        // The window is the card plus room for the shadow to fall in. With no
-        // shadow there is nothing to leave room for, and leaving it anyway
-        // would put a strip of dead colour under the card.
-        let below = if TRANSPARENT_BUBBLE { 20.0 } else { 2.0 };
+        // The frame's rect already covers the card plus the room its shadow
+        // falls in, so nothing is added here for it. Windows, whose card casts
+        // no shadow and so has no margin, still wants a hair of slack for the
+        // rounding the desktop manager puts on the window's own corners.
+        let below = if TRANSPARENT_BUBBLE { 0.0 } else { 2.0 };
         let wanted = (response.response.rect.height() + below + room).clamp(MIN_HEIGHT, MAX_HEIGHT);
         if (wanted - self.last_height).abs() > 1.0 {
             self.last_height = wanted;
@@ -1210,7 +1264,11 @@ impl BubbleApp {
                 ),
                 _ => format!("→ {}", language_name(&target)),
             };
-            ui.label(egui::RichText::new(caption).size(11.5).color(pal().text_muted));
+            ui.label(
+                egui::RichText::new(caption)
+                    .size(11.5)
+                    .color(pal().text_muted),
+            );
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui

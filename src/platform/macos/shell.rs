@@ -267,3 +267,35 @@ fn install_status_item(ctx: eframe::egui::Context) -> Option<Retained<NSStatusIt
 
     Some(item)
 }
+
+/// Turns off the window server's own shadow for the bubble.
+///
+/// AppKit gives every window a shadow by default, and that is one shadow too
+/// many: the bubble paints its own, themed with the rest of the card, and the
+/// two do not agree. The native one is traced from the window's alpha mask and
+/// then cached until `invalidateShadow`, while the bubble's window is resized
+/// on every translation that is a different length — so what it actually draws
+/// is the outline of some earlier size, a square-cornered frame standing off
+/// the rounded card inside it.
+///
+/// Dropping the native one rather than the painted one keeps the bubble
+/// looking the same on every platform, and keeps the shadow a property of the
+/// theme rather than of the desktop.
+///
+/// Only the bubble's window is touched. The main window is an ordinary
+/// decorated window and keeps the shadow the system gives it.
+pub fn drop_window_shadow(ns_view: *mut std::ffi::c_void) {
+    if ns_view.is_null() {
+        return;
+    }
+    // SAFETY: the pointer is the `NSView` eframe just handed us for this
+    // window, and this runs on the main thread, where AppKit requires it.
+    unsafe {
+        let view = ns_view as *mut AnyObject;
+        let window: *mut AnyObject = msg_send![view, window];
+        if window.is_null() {
+            return;
+        }
+        let _: () = msg_send![window, setHasShadow: false];
+    }
+}
