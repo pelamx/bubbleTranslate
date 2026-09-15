@@ -23,6 +23,15 @@ const REPEAT_WINDOW: Duration = Duration::from_secs(2);
 /// stuck re-asserting its selection still produces a bubble.
 const MAX_SETTLE: Duration = Duration::from_secs(5);
 
+/// How often the engine wakes while idle to look at the licence.
+///
+/// A refresh is wanted once the token is inside its renewal window, and the
+/// only trigger used to be a request at startup — an app left running for
+/// weeks would sit through the expiry of its token and quietly drop to the
+/// free tier mid-session. An hourly wake costs nothing while idle and keeps
+/// the check at most an hour behind the moment the window opens.
+const LICENCE_TICK: Duration = Duration::from_secs(3600);
+
 pub enum Request {
     /// The monitor saw a selection gesture finish.
     Selection(Trigger),
@@ -152,9 +161,19 @@ fn run(
     loop {
         let mut request = match pending.take() {
             Some(request) => request,
-            None => match rx.recv() {
+            None => match rx.recv_timeout(LICENCE_TICK) {
                 Ok(request) => request,
-                Err(_) => return,
+                // An hour with nothing to do: the one piece of background
+                // work worth waking for is a licence token nearing its
+                // expiry. Everything else can wait for a request.
+                Err(RecvTimeoutError::Timeout) => {
+                    if licensing.license.lock().unwrap().wants_refresh() {
+                        refresh_license(&licensing, &licence_agent);
+                        wake_ui();
+                    }
+                    continue;
+                }
+                Err(RecvTimeoutError::Disconnected) => return,
             },
         };
 
@@ -211,23 +230,7 @@ fn run(
                 continue;
             }
             Request::RefreshLicense => {
-                let token = licensing
-                    .license
-                    .lock()
-                    .unwrap()
-                    .token()
-                    .map(str::to_string);
-                if let Some(token) = token {
-                    match license::refresh(&licence_agent, &token) {
-                        Ok(grant) => {
-                            let _ = licensing.license.lock().unwrap().accept(grant);
-                            crate::trace!("licence   refreshed");
-                        }
-                        // Silent on purpose. A refresh that could not reach the
-                        // service is our problem, not the subscriber's, and the
-                        // token they already hold is good for weeks yet.
-                        Err(err) => crate::trace!("licence   refresh failed: {err}"),
-                    }
+                if refresh_license(&licensing, &licence_agent) {
                     wake_ui();
                 }
                 continue;
@@ -402,6 +405,51 @@ fn run(
 
 fn truncate_for_log(text: &str) -> String {
     text.chars().take(48).collect()
+}
+
+/// One licence refresh, shared by the startup request and the hourly tick.
+/// Returns whether a round trip happened — and so whether the panel, which
+/// may now show a renewed date or a new refusal, is owed a redraw.
+///
+/// The reply is applied only after the round trip — the lock is never held
+/// across the network, because the settings window redraws throughout.
+///
+/// A failure is silent while the token still has weeks to run: a service
+/// outage is our problem, not the subscriber's. When the user is actually
+/// looking at "Your licence has expired" — a lapsed token that could not
+/// refresh — the same silence would read as the app being broken, so there
+/// the refusal is surfaced in its place.
+fn refresh_license(licensing: &Licensing, agent: &ureq::Agent) -> bool {
+    let (token, lapsed) = {
+        let licence = licensing.license.lock().unwrap();
+        (
+            licence.token().map(str::to_string),
+            matches!(licence.status, license::Status::Lapsed),
+        )
+    };
+    let Some(token) = token else {
+        return false;
+    };
+    match license::refresh(agent, &token) {
+        Ok(grant) => {
+            let _ = licensing.license.lock().unwrap().accept(grant);
+            crate::trace!("licence   refreshed");
+            true
+        }
+        Err(err) => {
+            if lapsed {
+                let mut licence = licensing.license.lock().unwrap();
+                // Only while the panel still says "expired": a status set by
+                // an activation attempt since then is the newer story.
+                if matches!(licence.status, license::Status::Lapsed) {
+                    licence.status = license::Status::Problem(err);
+                }
+            } else {
+                crate::trace!("licence   refresh failed: {err}");
+            }
+            true
+        }
+    }
 }
 
 enum Settled {

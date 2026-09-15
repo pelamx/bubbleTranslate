@@ -20,7 +20,7 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
+use core_foundation::base::{CFRelease, CFTypeRef, CFTypeID, TCFType};
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::string::{CFString, CFStringRef};
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, EventField};
@@ -45,6 +45,7 @@ unsafe extern "C" {
     fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
     /// The same question without the dialog, for asking repeatedly.
     fn AXIsProcessTrusted() -> bool;
+    fn CFGetTypeID(cf: CFTypeRef) -> CFTypeID;
     static kAXTrustedCheckOptionPrompt: CFStringRef;
 }
 
@@ -211,9 +212,13 @@ unsafe fn cf_string_to_owned(s: CFStringRef) -> Option<String> {
         return None;
     }
     // AXSelectedText is documented as a string, but a misbehaving app can hand
-    // back another type; CFString::wrap_under_get_rule would then reinterpret
-    // it. Going through to_string on a borrowed wrapper is safe enough here
-    // because we only ever pass it values fetched from AXSelectedText.
+    // back any CFType — a CFArray from a hostile or simply buggy element.
+    // Checking the type id first turns that from undefined behaviour into an
+    // ordinary `None`, which is exactly how an empty selection reads.
+    if unsafe { CFGetTypeID(s) } != unsafe { CFString::type_id() } {
+        crate::trace!("capture   AXSelectedText arrived as something other than a string");
+        return None;
+    }
     let cf = unsafe { CFString::wrap_under_get_rule(s) };
     Some(cf.to_string())
 }
@@ -247,9 +252,12 @@ fn clipboard_selection() -> Option<String> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
-    // Put the user's clipboard back regardless of the outcome. This only
-    // restores text; a copied image or file reference is not preserved.
-    if copied.is_some() {
+    // Put the user's clipboard back whenever the synthetic copy moved the
+    // pasteboard — not only when it came back as text. A target that put an
+    // image or a file reference there replaced what the user had just the
+    // same, and `copied` says nothing about that. This only restores text; a
+    // clobbered image or file reference is not preserved either way.
+    if pasteboard.changeCount() != before_count {
         if let Some(previous) = previous {
             write_pasteboard_string(&pasteboard, &previous);
         }

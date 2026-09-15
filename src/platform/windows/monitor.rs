@@ -240,8 +240,17 @@ fn run() {
 
     // The hooks are only ever called while this thread is pumping messages,
     // and this loop never ends: the process exits and Windows removes them.
+    //
+    // GetMessageW returns -1 on error, not a message; reading that as a
+    // message would spin the loop hot forever. Zero is WM_QUIT, negative is
+    // an error — both end the pump, which is also the documented shape of the
+    // canonical loop.
     let mut message = MSG::default();
-    while unsafe { GetMessageW(&mut message, Some(HWND::default()), 0, 0) }.as_bool() {}
+    loop {
+        if unsafe { GetMessageW(&mut message, Some(HWND::default()), 0, 0) }.0 <= 0 {
+            break;
+        }
+    }
 }
 
 unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {

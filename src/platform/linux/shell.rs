@@ -116,6 +116,15 @@ fn raise_browser() {
     }
 }
 
+/// `hyprctl <args>`, run under [`super::IPC_BUDGET`] and read as a refusal
+/// when it does not answer. This runs while a browser is being raised on the
+/// engine thread; a wedged compositor must end the attempt, not park it.
+fn hyprctl(args: &[&str]) -> Option<std::process::Output> {
+    let mut command = std::process::Command::new("hyprctl");
+    command.args(args);
+    super::timed_output(command, super::IPC_BUDGET).ok()
+}
+
 fn focus_by_class(class: &str) -> Focus {
     // A class is interpolated into a Lua string below, so refuse the
     // characters that would end it early rather than build a broken script.
@@ -123,11 +132,9 @@ fn focus_by_class(class: &str) -> Focus {
         return Focus::Unsupported;
     }
 
-    let Ok(out) = std::process::Command::new("hyprctl")
-        .args(["clients", "-j"])
-        .output()
-    else {
-        return Focus::Unsupported;
+    let out = match hyprctl(&["clients", "-j"]) {
+        Some(out) => out,
+        None => return Focus::Unsupported,
     };
     if !out.status.success() {
         return Focus::Unsupported;
@@ -147,10 +154,8 @@ fn focus_by_class(class: &str) -> Focus {
     // window handle, with the older spelling rejected as a syntax error rather
     // than quietly ignored -- so a failure here is safe to fall through on.
     let target = format!("class:{class}");
-    let old = std::process::Command::new("hyprctl")
-        .args(["dispatch", "focuswindow", &target])
-        .output();
-    if matches!(&old, Ok(out) if out.status.success()) {
+    let old = hyprctl(&["dispatch", "focuswindow", &target]);
+    if matches!(&old, Some(out) if out.status.success()) {
         return Focus::Done;
     }
 
@@ -163,10 +168,7 @@ fn focus_by_class(class: &str) -> Focus {
          if not done and w.class == '{class}' then \
          hl.dispatch(hl.dsp.focus({{ window = w }})) done = true end end"
     );
-    let _ = std::process::Command::new("hyprctl")
-        .arg("eval")
-        .arg(&script)
-        .output();
+    let _ = hyprctl(&["eval", &script]);
     Focus::Done
 }
 

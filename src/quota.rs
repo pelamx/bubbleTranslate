@@ -227,6 +227,12 @@ impl Quota {
     /// a fresh ten. The count is kept in that case, and it is kept again when
     /// the clock catches back up, because the high-water mark is what the
     /// comparison is against rather than the current day.
+    ///
+    /// The forward direction is not guarded the same way, on purpose: a clock
+    /// genuinely set ahead deserves the fresh day it asks for, and telling a
+    /// corrected clock from an advancing one needs an outside opinion this
+    /// offline counter does not have. The file itself is the easier edit
+    /// anyway — the meter is a nudge toward Pro, not a wall.
     fn roll(&mut self) {
         let today = local_day();
         if today == self.counter.day {

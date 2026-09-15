@@ -279,8 +279,11 @@ fn run_tray() {
     SETTLED.store(true, Ordering::SeqCst);
     crate::trace!("tray icon added={added}");
 
+    // GetMessageW returns -1 on error, not a message; reading that as a
+    // message would spin this loop hot and take the tray with it. Zero is
+    // WM_QUIT, negative is an error — both end the pump.
     let mut message = MSG::default();
-    while unsafe { GetMessageW(&mut message, Some(HWND::default()), 0, 0) }.as_bool() {
+    while unsafe { GetMessageW(&mut message, Some(HWND::default()), 0, 0) }.0 > 0 {
         unsafe {
             let _ = windows::Win32::UI::WindowsAndMessaging::TranslateMessage(&message);
             windows::Win32::UI::WindowsAndMessaging::DispatchMessageW(&message);

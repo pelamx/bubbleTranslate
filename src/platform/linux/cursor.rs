@@ -6,7 +6,6 @@
 //! Compositors that expose their own IPC will still answer, so this asks the
 //! ones that do and reports honestly when there is no one to ask.
 
-use std::process::Command;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -88,6 +87,15 @@ struct MonitorInfo {
     scale: f64,
 }
 
+/// `hyprctl <args>`, run under [`super::IPC_BUDGET`] and read as `None` when
+/// it does not answer. The pointer is asked from the repaint path; a wedged
+/// compositor must cost a corner-anchored bubble, not a frozen one.
+fn hyprctl(args: &[&str]) -> Option<std::process::Output> {
+    let mut command = std::process::Command::new("hyprctl");
+    command.args(args);
+    super::timed_output(command, super::IPC_BUDGET).ok()
+}
+
 /// The monitor the pointer is on, as the compositor describes it.
 ///
 /// `hyprctl monitors` reports each output in physical pixels alongside its
@@ -97,10 +105,7 @@ fn hyprland_monitor() -> Option<MonitorInfo> {
     if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
         return None;
     }
-    let out = Command::new("hyprctl")
-        .args(["monitors", "-j"])
-        .output()
-        .ok()?;
+    let out = hyprctl(&["monitors", "-j"])?;
     if !out.status.success() {
         return None;
     }
@@ -157,7 +162,7 @@ fn compositor_pointer() -> Option<(f64, f64)> {
 /// `hyprctl cursorpos` prints `x, y` in layout coordinates, which is the same
 /// space the bubble is positioned in.
 fn hyprland_pointer() -> Option<(f64, f64)> {
-    let out = Command::new("hyprctl").arg("cursorpos").output().ok()?;
+    let out = hyprctl(&["cursorpos"])?;
     if !out.status.success() {
         return None;
     }

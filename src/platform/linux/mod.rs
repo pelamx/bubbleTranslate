@@ -36,6 +36,77 @@ mod x11;
 
 use std::sync::OnceLock;
 
+/// How long a compositor's IPC command may take to answer.
+///
+/// Every one of these is a local socket that answers in microseconds when the
+/// compositor is healthy; the budget exists for the one that has stopped
+/// answering. Every caller sits on the UI thread or on the repaint path, so
+/// an unbounded wait here is a frozen interface, not a slow query.
+pub(crate) const IPC_BUDGET: std::time::Duration = std::time::Duration::from_millis(750);
+
+/// Runs a command to completion under a deadline, capturing its output.
+///
+/// `Command::output` has no timeout of its own, which is fine for commands
+/// that always terminate and wrong for IPC with a process that can hang. The
+/// pipes are drained on helper threads so a chatty child cannot block on a
+/// full buffer while we wait; a child that overruns the budget is killed and
+/// the call reports a timeout like any other failure.
+pub(crate) fn timed_output(
+    mut command: std::process::Command,
+    budget: std::time::Duration,
+) -> std::io::Result<std::process::Output> {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command.spawn()?;
+    let stdout = child
+        .stdout
+        .take()
+        .map(|pipe| Box::new(pipe) as Box<dyn Read + Send>);
+    let stderr = child
+        .stderr
+        .take()
+        .map(|pipe| Box::new(pipe) as Box<dyn Read + Send>);
+
+    let read_all = |pipe: Option<Box<dyn Read + Send>>| {
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        buf
+    };
+    let stdout_task = std::thread::spawn(move || read_all(stdout));
+    let stderr_task = std::thread::spawn(move || read_all(stderr));
+
+    let deadline = Instant::now() + budget;
+    let status = loop {
+        match child.try_wait()? {
+            Some(status) => break status,
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "the command did not finish in time",
+                ));
+            }
+            None => std::thread::sleep(Duration::from_millis(5)),
+        }
+    };
+
+    Ok(std::process::Output {
+        status,
+        stdout: stdout_task.join().unwrap_or_default(),
+        stderr: stderr_task.join().unwrap_or_default(),
+    })
+}
+
 /// How this session gets its selections. Decided once, at first use.
 #[derive(Debug, Clone)]
 pub enum Backend {
@@ -140,12 +211,23 @@ pub fn pointer_over(
 
     static CACHE: Mutex<Option<(Instant, Option<(f64, f64)>)>> = Mutex::new(None);
 
-    let mut cache = CACHE.lock().ok()?;
-    let fresh = match *cache {
-        Some((at, position)) if at.elapsed() < REFRESH => position,
-        _ => {
+    // The lock is never held across the query: `cursor::position()` may
+    // shell out to the compositor, and holding the mutex while it does would
+    // turn one wedged query into a mutex every later caller waits on.
+    let cached = CACHE
+        .lock()
+        .ok()
+        .and_then(|cache| match *cache {
+            Some((at, position)) if at.elapsed() < REFRESH => Some(position),
+            _ => None,
+        });
+    let fresh = match cached {
+        Some(position) => position,
+        None => {
             let position = cursor::position();
-            *cache = Some((Instant::now(), position));
+            if let Ok(mut cache) = CACHE.lock() {
+                *cache = Some((Instant::now(), position));
+            }
             position
         }
     };

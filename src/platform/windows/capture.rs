@@ -258,11 +258,12 @@ fn clipboard_selection() -> Option<String> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
-    // Put the user's clipboard back regardless of the outcome. This only
-    // restores text; a copied image or file list is not preserved.
-    if copied.is_some()
-        && let Some(previous) = previous
-    {
+    // Put the user's clipboard back whenever the synthetic copy moved it —
+    // not only when the copy came back as text. A target that put an image
+    // or a file list there replaced what the user had just the same, and
+    // `copied` says nothing about that. This only restores text; a clobbered
+    // image or file list is not preserved either way.
+    if clipboard_sequence() != before && let Some(previous) = previous {
         write_clipboard_string(&previous);
     }
 
@@ -289,10 +290,18 @@ fn post_ctrl_c() -> bool {
     // Release whatever the user is leaning on, press the chord, then press
     // back only what is still physically down — so the application underneath
     // ends the gesture believing exactly what the keyboard says.
+    //
+    // Every early exit below still falls through to the restore: a SendInput
+    // refusal — the realistic failure, against an elevated target — must not
+    // leave the user's Shift synthetically released and our Ctrl logically
+    // down with nothing to put either right.
     let interfering: Vec<VIRTUAL_KEY> = INTERFERING.into_iter().filter(|k| held(*k)).collect();
+
+    let mut released = true;
     for key in &interfering {
         if !send_key(*key, true) {
-            return false;
+            released = false;
+            break;
         }
     }
 
@@ -308,21 +317,25 @@ fn post_ctrl_c() -> bool {
         (VK_C, true),
         (VK_CONTROL, true),
     ];
-    for (key, up) in chord {
-        if !send_key(key, up) {
-            return false;
+    let mut chord_sent = released;
+    if released {
+        for (key, up) in chord {
+            if !send_key(key, up) {
+                chord_sent = false;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(12));
         }
-        std::thread::sleep(Duration::from_millis(12));
     }
 
     // Afterwards rather than with the chord: a press in the same breath would
     // arrive before the copy is processed and put the modifier back on it.
-    for key in interfering {
-        if held(key) {
-            send_key(key, false);
+    for key in &interfering {
+        if held(*key) {
+            send_key(*key, false);
         }
     }
-    true
+    released && chord_sent
 }
 
 /// Presses or releases one key, as the keyboard would.

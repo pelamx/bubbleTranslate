@@ -334,6 +334,14 @@ fn read_selection(
                     crate::trace!("x11: the selection is too large to read in one piece");
                     return None;
                 }
+                if reply.bytes_after != 0 {
+                    // One reply did not carry all of it — the value did not
+                    // fit and would arrive truncated, or as a broken UTF-8
+                    // sequence. Both are quietly wrong; half a sentence that
+                    // reads as a full one is worse than no bubble.
+                    crate::trace!("x11: the selection did not fit one reply");
+                    return None;
+                }
                 return String::from_utf8(reply.value).ok();
             }
             Some(_) => continue,

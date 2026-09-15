@@ -286,6 +286,91 @@ export async function markOrderFailed(env: Env, ref: string, reason: string) {
     .run();
 }
 
+export interface FulfilResult {
+  /** Whether this delivery is the one that paid the order. False when the
+   *  order was already paid, whether by an earlier delivery of this same
+   *  webhook or by one still in flight. */
+  issued: boolean;
+  id: string | null;
+  key: string | null;
+  expiresAt: number | null;
+}
+
+/** Turns an unpaid order into a licence, exactly once, atomically.
+ *
+ *  Webhook deliveries are at-least-once and can arrive close enough to
+ *  interleave, and the old shape — read the row, issue a licence, mark the
+ *  row paid — had a gap between the read and the mark wide enough for two
+ *  deliveries to both walk through, issuing two licences for one payment and
+ *  pushing the conversion twice.
+ *
+ *  One D1 batch is one transaction, so the claim and the creation now move
+ *  together. All three statements ride on the same question, "is this order
+ *  still unpaid?", and the second statement is the one that answers it for
+ *  everyone: it moves the order to paid, so the second delivery's insert
+ *  finds no unpaid order and creates nothing, and the delete removes nothing.
+ *  Only the winner's licence exists at the end, whichever delivery ran first.
+ *
+ *  A delivery that dies mid-batch rolls the whole thing back, which is also
+ *  what makes this self-healing: the next retry starts from the same unpaid
+ *  row, rather than from a half-fulfilled one. */
+export async function claimOrderAndIssue(
+  env: Env,
+  ref: string,
+  opts: IssueOptions,
+): Promise<FulfilResult> {
+  const key = newLicenceKey();
+  const id = `lc_${randomHex(8)}`;
+  const expiresAt = now() + (opts.termSeconds ?? TERM_SECONDS[opts.cycle]);
+  const email = opts.email ?? null;
+
+  const results = await env.DB.batch([
+    // The licence row, only while the order is still unpaid. The winner's
+    // third statement below leaves it in place; a loser's is removed by its
+    // own third statement.
+    env.DB.prepare(
+      `INSERT INTO licences
+         (id, key_hash, plan, cycle, translation_limit, status, seat_limit,
+          expires_at, renews_at, email, provider, provider_ref, created_at)
+       SELECT ?, ?, 'pro', ?, NULL, 'active', ?, ?, ?, ?, ?, ?, ?
+       WHERE EXISTS (SELECT 1 FROM orders WHERE ref = ? AND status != 'paid')`,
+    ).bind(
+      id,
+      await sha256Hex(key),
+      opts.cycle,
+      opts.seats ?? DEFAULT_SEATS,
+      expiresAt,
+      asDate(expiresAt),
+      email,
+      opts.provider,
+      opts.providerRef ?? null,
+      now(),
+      ref,
+    ),
+    // The claim. Exactly one delivery can move an unpaid order to paid, and
+    // the `meta.changes` on this statement is the verdict.
+    env.DB.prepare(
+      "UPDATE orders SET status = 'paid', licence_id = ?1, licence_key = ?2, reveal_until = ?3 WHERE ref = ?4 AND status != 'paid'",
+    ).bind(id, key, now() + REVEAL_SECONDS, ref),
+    // Removes the licence this batch created if it did not win the claim --
+    // an orphan nobody paid for would otherwise count as a live subscriber
+    // in every total the panel and the report produce. A no-op for the
+    // winner: its own `licence_id` is on the order by then.
+    env.DB.prepare(
+      `DELETE FROM licences WHERE id = ?1 AND NOT EXISTS (
+         SELECT 1 FROM orders WHERE ref = ?2 AND licence_id = ?1)`,
+    ).bind(id, ref),
+  ]);
+
+  const won = (results[1]?.meta?.changes ?? 0) === 1;
+  return {
+    issued: won,
+    id: won ? id : null,
+    key: won ? key : null,
+    expiresAt: won ? expiresAt : null,
+  };
+}
+
 /** Clears keys whose reveal window has passed.
  *
  *  Called opportunistically from the reveal route rather than from a schedule:
@@ -319,7 +404,13 @@ export async function deliverKey(
 ): Promise<void> {
   if (!to) return;
   if (!env.RESEND_API_KEY || !env.MAIL_FROM) {
-    console.log(`no mailer configured; licence ${key} for ${to} was shown on the success page only`);
+    // The key is truncated because Worker logs are not the success page: they
+    // are retained, exported and read with wider eyes than the buyer's own
+    // browser session, and a full key in a log line is a live licence sitting
+    // in an archive.
+    console.log(
+      `no mailer configured; licence ${key.slice(0, 7)}… for ${to} was shown on the success page only`,
+    );
     return;
   }
   try {

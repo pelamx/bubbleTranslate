@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 use std::io::Read;
-use std::os::fd::AsFd;
+use std::os::fd::{AsFd, AsRawFd};
 
 use wayland_client::backend::ObjectId;
 use wayland_client::protocol::{wl_registry, wl_seat};
@@ -368,6 +368,14 @@ impl Dispatch<ZwlrDataControlOfferV1, ()> for Watcher {
     }
 }
 
+/// How long the selection's owner has to answer the pipe. The compositor
+/// passes our write end to another client, and that client can be hung,
+/// frozen or simply never write; a blocking read here would park the watcher
+/// thread — and with it every future selection — for the life of the process.
+/// Generous against any real application, short enough that a wedged one
+/// costs a missed translation instead of a dead monitor.
+const RECEIVE_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Pulls the text out of an offer through a pipe.
 ///
 /// The compositor stores nothing: it passes our write end to whichever client
@@ -386,8 +394,37 @@ fn receive(conn: &Connection, offer: &ZwlrDataControlOfferV1, mimes: &[String]) 
     // end-of-file and hangs waiting on a pipe we are holding open ourselves.
     drop(writer);
 
+    // Read under a deadline rather than blocking to end-of-file: the process
+    // on the other end may never write. The std pipe type does not expose a
+    // non-blocking switch, so the flag goes on through fcntl.
+    let fd = reader.as_fd().as_raw_fd();
+    // SAFETY: one fcntl pair on a descriptor this function owns for its
+    // duration; the flags call reads and the set call writes only this
+    // file's status flags.
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        if flags >= 0 {
+            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        }
+    }
+    let deadline = std::time::Instant::now() + RECEIVE_BUDGET;
+
     let mut buf = Vec::new();
-    reader.read_to_end(&mut buf).ok()?;
+    let mut chunk = [0u8; 8192];
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                if std::time::Instant::now() >= deadline {
+                    crate::trace!("wayland: the selection owner never wrote the text");
+                    return None;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            Err(_) => return None,
+        }
+    }
     String::from_utf8(buf).ok()
 }
 

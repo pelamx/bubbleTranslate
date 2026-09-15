@@ -25,6 +25,7 @@ import {
 import {
   DEFAULT_SEATS,
   type Licence,
+  claimOrderAndIssue,
   createOrder,
   deliverKey,
   endLicence,
@@ -36,7 +37,6 @@ import {
   licenceById,
   licenceByProviderRef,
   markOrderFailed,
-  markOrderPaid,
   newOrderRef,
   orderByRef,
   refusalFor,
@@ -111,23 +111,33 @@ async function activate(env: Env, body: any) {
       .bind(seen, licence.id, device)
       .run();
   } else {
-    const { count } = (await env.DB.prepare(
-      "SELECT COUNT(*) AS count FROM seats WHERE licence_id = ?",
+    // One statement decides, rather than count-then-insert: two activations
+    // racing for the last free slot would both pass a separate count check
+    // and both insert, and the seat limit would be whatever the racing made
+    // of it. Here the count and the insert are the same write, so only one
+    // of them can win, and `meta.changes` says which.
+    const inserted = await env.DB.prepare(
+      `INSERT INTO seats (licence_id, device, os, app, first_seen, last_seen)
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6
+       WHERE (SELECT COUNT(*) FROM seats WHERE licence_id = ?1) < ?7`,
     )
-      .bind(licence.id)
-      .first<{ count: number }>())!;
-    if (count >= licence.seat_limit) {
+      .bind(
+        licence.id,
+        device,
+        String(body.os ?? ""),
+        String(body.app ?? ""),
+        seen,
+        seen,
+        licence.seat_limit,
+      )
+      .run();
+    if (!inserted.meta.changes) {
       return refuse(
         `This licence is already in use on ${licence.seat_limit} machines. ` +
           "Open the Account tab on one of them and choose Remove from this device, then try again.",
         409,
       );
     }
-    await env.DB.prepare(
-      "INSERT INTO seats (licence_id, device, os, app, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?)",
-    )
-      .bind(licence.id, device, String(body.os ?? ""), String(body.app ?? ""), seen, seen)
-      .run();
   }
 
   return json(await grantToken(env, licence, device));
@@ -167,8 +177,14 @@ async function deactivate(env: Env, body: any) {
   // The client ignores this reply, so a failure here must not be loud. The
   // worst case is a seat that stays held until support frees it.
   if (!claims) return json({ ok: false });
+  // A token is a bearer credential for exactly one machine, and releasing a
+  // seat is something only that machine's token may do. Honoring a
+  // `body.device` naming a different seat would let one device free another's
+  // slot on a licence it merely holds a token for.
+  const device = String(body.device ?? claims.dev);
+  if (device !== claims.dev) return json({ ok: false }, 403);
   await env.DB.prepare("DELETE FROM seats WHERE licence_id = ? AND device = ?")
-    .bind(claims.lic, String(body.device ?? claims.dev))
+    .bind(claims.lic, device)
     .run();
   return json({ ok: true });
 }
@@ -274,31 +290,40 @@ function readClickIds(customData: any): ClickIds {
 
 /** Turns a paid order into a licence, exactly once.
  *
- *  Paddle retries the webhook on any non-2xx, so the first thing this does is
- *  ask whether the order has already been paid, because the alternative is
- *  issuing a second licence — and a second charge's worth of seats — for one
- *  payment. */
+ *  Paddle retries the webhook on any non-2xx, so this must never issue a
+ *  second licence — and a second charge's worth of seats — for one payment.
+ *  The check-and-act used to be spread over separate statements, which two
+ *  near-simultaneous deliveries could interleave; [`claimOrderAndIssue`] does
+ *  the check and the creation in one transaction, so exactly one delivery
+ *  wins and the loser finds the order already paid. */
 async function fulfil(
   env: Env,
   ref: string,
   opts: { provider: string; cycle: Cycle; email: string | null; providerRef: string | null },
 ): Promise<boolean> {
+  // Read only for the address fallback: the webhook's own email wins, and
+  // the one typed at checkout is what delivers the key when the webhook has
+  // none. Whether the order is paid is decided inside the claim.
   const order = await orderByRef(env, ref);
   if (!order) {
     console.error(`fulfilment for an unknown order ${ref}`);
     return false;
   }
-  if (order.status === "paid") return false;
 
-  const { id, key, expiresAt } = await issueLicence(env, {
+  const outcome = await claimOrderAndIssue(env, ref, {
     provider: opts.provider,
     cycle: opts.cycle,
     email: opts.email ?? order.email,
     providerRef: opts.providerRef,
   });
-  await markOrderPaid(env, ref, id, key);
-  console.log(`issued licence ${id} for order ${ref} via ${opts.provider}`);
-  await deliverKey(env, opts.email ?? order.email, key, opts.cycle, expiresAt);
+  if (!outcome.issued || !outcome.id || !outcome.key) {
+    // Already paid: either an earlier delivery finished, or one is finishing
+    // right now. Either way this delivery must not answer with an error, or
+    // Paddle would retry a fulfilment that needs no retrying.
+    return false;
+  }
+  console.log(`issued licence ${outcome.id} for order ${ref} via ${opts.provider}`);
+  await deliverKey(env, opts.email ?? order.email, outcome.key, opts.cycle, outcome.expiresAt!);
   return true;
 }
 

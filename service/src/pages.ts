@@ -27,6 +27,22 @@ export const escapeHtml = (value: unknown): string =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+/** JSON for embedding inside an inline `<script>` block.
+ *
+ *  `JSON.stringify` alone is not safe there: the HTML parser ends a script
+ *  element at the first `</script>` it sees, *including inside a string
+ *  literal*, so a value containing that sequence closes the block early and
+ *  everything after it becomes markup. Escaping `<` (and, for good measure,
+ *  `>` and the Unicode line separators, which are valid JSON but line
+ *  terminators to a JavaScript parser) makes the embedded JSON incapable of
+ *  terminating the element while parsing to exactly the same value. */
+const jsonForScript = (value: unknown): string =>
+  JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+
 /** The marketing site, which is where the policies live. Paddle's domain
  *  review fetches the *checkout* domain -- this service -- so the terms,
  *  privacy notice and refund policy have to be reachable from here too, not
@@ -182,7 +198,12 @@ export function page(
   if (ctx) {
     // The cookie is what brings the buyer back in their language after the
     // processor's redirect, which lands on a URL written before they left.
-    headers["set-cookie"] = `lang=${lang}; Path=/; Max-Age=31536000; SameSite=Lax`;
+    // Secure: the service is HTTPS-only, and a cookie that rides only on
+    // HTTPS cannot be read out of a downgrade. HttpOnly costs nothing — no
+    // script on this service reads it, and the choice survives the trip in
+    // `?lang=` and the form field anyway.
+    headers["set-cookie"] =
+      `lang=${lang}; Path=/; Max-Age=31536000; SameSite=Lax; Secure; HttpOnly`;
   }
   return new Response(
     `<!doctype html><html lang="${lang}"><head><meta charset="utf-8">
@@ -286,8 +307,8 @@ export function buyPage(opts: BuyOptions): Response {
     <p class="muted" style="margin-top:14px">${s.paddleNote}</p>
     <script>
       ${PLAN_SCRIPT}
-      Paddle.Environment.set(${JSON.stringify(opts.paddleEnv)});
-      Paddle.Initialize({ token: ${JSON.stringify(opts.clientToken ?? "")} });
+      Paddle.Environment.set(${jsonForScript(opts.paddleEnv)});
+      Paddle.Initialize({ token: ${jsonForScript(opts.clientToken ?? "")} });
       // Ad click ids arrive on this page's own URL (the landing site stamps
       // them onto the buy link -- a different origin, so localStorage cannot
       // cross). They ride through Paddle in customData and come back on the
@@ -302,12 +323,12 @@ export function buyPage(opts: BuyOptions): Response {
         return out;
       })();
       const prices = {
-        monthly: ${JSON.stringify(opts.priceMonthly ?? "")},
-        yearly: ${JSON.stringify(opts.priceYearly ?? "")},
+        monthly: ${jsonForScript(opts.priceMonthly ?? "")},
+        yearly: ${jsonForScript(opts.priceYearly ?? "")},
       };
       // Undefined unless the edge actually placed the visitor. See the note on
       // BuyOptions.country: a sentinel must never reach Paddle as a country.
-      const country = ${JSON.stringify(opts.country ?? null)};
+      const country = ${jsonForScript(opts.country ?? null)};
 
       // The cards are rendered with the dollar price, then corrected to the
       // buyer's own currency by Paddle. The figures shown are Paddle's
@@ -360,7 +381,7 @@ export function buyPage(opts: BuyOptions): Response {
           settings: {
             displayMode: 'overlay',
             variant: 'one-page',
-            successUrl: ${JSON.stringify(withLang(opts.successUrl ?? "", ctx.lang))} + '&ref=' + created.ref,
+            successUrl: ${jsonForScript(withLang(opts.successUrl ?? "", ctx.lang))} + '&ref=' + created.ref,
           },
         });
       });
@@ -403,9 +424,9 @@ export function donePage(ctx: PageContext, ref: string, support: string): Respon
        <p id="status">${s.confirming}</p>
      </div>
      <script>
-       const ref = ${JSON.stringify(ref)};
-       const support = ${JSON.stringify(support)};
-       const w = ${JSON.stringify(words)};
+       const ref = ${jsonForScript(ref)};
+       const support = ${jsonForScript(support)};
+       const w = ${jsonForScript(words)};
        const body = document.getElementById('body');
        let tries = 0;
        async function poll() {
@@ -548,10 +569,10 @@ export function accountPage(
           head: `<script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>`,
           body: `
      <script>
-       Paddle.Environment.set(${JSON.stringify(paddle.env ?? "production")});
+       Paddle.Environment.set(${jsonForScript(paddle.env ?? "production")});
        Paddle.Initialize({
-         token: ${JSON.stringify(paddle.clientToken)},
-         pwCustomer: { id: ${JSON.stringify(retainId)} },
+         token: ${jsonForScript(paddle.clientToken)},
+         pwCustomer: { id: ${jsonForScript(retainId)} },
        });
      </script>`,
         }

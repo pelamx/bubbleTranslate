@@ -128,17 +128,28 @@ pub fn start() -> Result<(), String> {
         });
     }
 
-    RUNNING.store(true, Ordering::Relaxed);
     std::thread::Builder::new()
         .name("keyboard-modifiers".into())
-        .spawn(move || read_loop(devices))
+        .spawn(move || {
+            // Set inside the thread rather than before the spawn: a failed
+            // spawn must leave RUNNING false, so that `held()` answers
+            // "no idea" (fail-open) instead of "not held" (every gated
+            // selection silently dropped) for the life of the process.
+            RUNNING.store(true, Ordering::Relaxed);
+            read_loop(devices)
+        })
         .map_err(|err| format!("could not start the keyboard reader: {err}"))?;
     crate::trace!("evdev: watching the keyboard for the trigger key");
     Ok(())
 }
 
 /// The event nodes that are both readable by us and actually keyboards.
+///
+/// Opened non-blocking: the read loop drains each device until it would
+/// block, so no keyboard's events wait on another keyboard's silence.
 fn keyboards() -> Vec<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
     let Ok(entries) = std::fs::read_dir("/dev/input") else {
         return Vec::new();
     };
@@ -152,7 +163,11 @@ fn keyboards() -> Vec<std::fs::File> {
         {
             continue;
         }
-        let Ok(file) = std::fs::File::open(&path) else {
+        let Ok(file) = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&path)
+        else {
             continue;
         };
         if has_shift(file.as_raw_fd()) {
@@ -241,8 +256,19 @@ fn read_loop(devices: Vec<std::fs::File>) {
             return;
         }
 
-        for pollfd in &fds {
+        // Devices that reported an error, hangup or invalid fd — an unplug
+        // reports POLLHUP without POLLIN, so skipping them and re-polling
+        // would spin hot forever. They are collected and dropped after the
+        // pass, which is also what keeps poll from returning immediately
+        // ever after.
+        let mut gone: Vec<usize> = Vec::new();
+
+        for (index, pollfd) in fds.iter().enumerate() {
             if pollfd.revents & libc::POLLIN == 0 {
+                if pollfd.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+                    crate::trace!("evdev: keyboard device {} went away", pollfd.fd);
+                    gone.push(index);
+                }
                 continue;
             }
             loop {
@@ -250,6 +276,23 @@ fn read_loop(devices: Vec<std::fs::File>) {
                 // size, which is the record length this device writes.
                 let got =
                     unsafe { libc::read(pollfd.fd, (&raw mut event).cast::<libc::c_void>(), size) };
+                if got < 0 {
+                    let err = std::io::Error::last_os_error();
+                    match err.kind() {
+                        // Drained: this device has nothing more right now.
+                        // Back to poll, so the other keyboards get their
+                        // turn — these fds are non-blocking precisely so
+                        // this returns instead of parking on whichever
+                        // device spoke last.
+                        std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::Interrupted => break,
+                        _ => {
+                            crate::trace!("evdev: read failed ({err}); dropping the device");
+                            gone.push(index);
+                            break;
+                        }
+                    }
+                }
                 if got != size as isize {
                     break;
                 }
@@ -268,6 +311,18 @@ fn read_loop(devices: Vec<std::fs::File>) {
                 } else {
                     HELD.fetch_and(!bit, Ordering::Relaxed);
                 }
+            }
+        }
+
+        if !gone.is_empty() {
+            for index in gone.into_iter().rev() {
+                fds.remove(index);
+            }
+            if fds.is_empty() {
+                crate::trace!("evdev: no keyboards left; stopping the reader");
+                RUNNING.store(false, Ordering::Relaxed);
+                HELD.store(0, Ordering::Relaxed);
+                return;
             }
         }
     }

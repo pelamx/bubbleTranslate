@@ -35,6 +35,15 @@ const DAY = 86_400;
 
 // -- getting in --------------------------------------------------------------
 
+/** Failed attempts and when the next one may be tried, per isolate.
+ *
+ *  A shared counter across isolates would need Durable Objects, which is not
+ *  a price worth paying for a panel this size — so this is a brake rather
+ *  than a vault. The vault is the password itself; what the brake buys is
+ *  that a guesser hammering the route from one connection pays a growing
+ *  delay instead of an unthrottled oracle. */
+const authBackoff = { failures: 0, notBefore: 0 };
+
 /** HTTP Basic, checked against `ADMIN_PASSWORD`.
  *
  *  Both sides are hashed before they are compared, so the comparison is over
@@ -43,6 +52,12 @@ const DAY = 86_400;
 async function authorised(env: Env, request: Request): Promise<boolean> {
   const expected = env.ADMIN_PASSWORD;
   if (!expected) return false;
+
+  // The backoff is checked before the password is hashed: an attempt during
+  // a lockout must not cost a hash, and must not be answered faster than the
+  // lockout says. Every failure feeds it — an absent header included, since
+  // a guesser probes both ways.
+  if (Date.now() < authBackoff.notBefore) return false;
 
   const header = request.headers.get("authorization") ?? "";
   if (!header.startsWith("Basic ")) return false;
@@ -55,7 +70,21 @@ async function authorised(env: Env, request: Request): Promise<boolean> {
   }
   // Basic is `user:password`; the user half is ignored, so any name works.
   const supplied = decoded.slice(decoded.indexOf(":") + 1);
-  return constantTimeEqual(await sha256Hex(supplied), await sha256Hex(expected));
+  const ok = constantTimeEqual(await sha256Hex(supplied), await sha256Hex(expected));
+
+  if (ok) {
+    authBackoff.failures = 0;
+    authBackoff.notBefore = 0;
+    return true;
+  }
+  // Each failure buys the next attempt a longer wait: 1s, 3s, 7s … capped at
+  // an hour. Per isolate, so a patient attacker with several isolates in play
+  // still pays this table once each — but the credential space is large
+  // enough that the brake only has to make guessing slower than support.
+  authBackoff.failures += 1;
+  const delaySeconds = Math.min(2 ** authBackoff.failures - 1, 3600);
+  authBackoff.notBefore = Date.now() + delaySeconds * 1000;
+  return false;
 }
 
 const challenge = () =>

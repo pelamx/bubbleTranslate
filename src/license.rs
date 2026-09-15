@@ -219,19 +219,34 @@ impl License {
             }
             Err(err) => {
                 crate::trace!("licence   cached token rejected: {err}");
-                // An expired token is an ordinary lapse; anything else means
-                // the file was edited, the key rotated, or the token belongs
-                // to another machine. Both land on the free tier, but only one
-                // of them is worth alarming the user about.
-                Self::inactive(match err {
-                    VerifyError::Expired => Status::Lapsed,
-                    other => Status::Problem(other.to_string()),
-                })
+                // An expired token is an ordinary lapse — but the token itself
+                // is still the credential the refresh endpoint accepts, which
+                // checks the licence and the seat rather than the token's own
+                // expiry. Keeping it means a subscriber who was away a month
+                // comes back to a refreshed Pro, not to a demand to re-enter
+                // a key they may no longer have. Anything else means the file
+                // was edited, the key rotated, or the token belongs to
+                // another machine; those land on the free tier with nothing
+                // worth refreshing.
+                let lapsed = matches!(err, VerifyError::Expired);
+                Self {
+                    entitlement: Entitlement::free(),
+                    status: match &err {
+                        VerifyError::Expired => Status::Lapsed,
+                        other => Status::Problem(other.to_string()),
+                    },
+                    busy: false,
+                    token: lapsed.then_some(cached.token),
+                }
             }
         }
     }
 
     /// Whether a background refresh is worth making right now.
+    ///
+    /// An expired token saturates to zero here, so a lapsed licence keeps
+    /// asking for a refresh: the server, not the local clock, decides whether
+    /// the licence underneath it still lives.
     pub fn wants_refresh(&self) -> bool {
         self.token.is_some() && self.entitlement.exp.saturating_sub(now()) < REFRESH_WINDOW
     }
@@ -661,6 +676,14 @@ fn write_cache(cached: &Cached) {
                 // Not fatal: the entitlement is live in memory for this
                 // session, and the next launch simply asks again.
                 eprintln!("bubbleTranslate: could not save {}: {err}", path.display());
+            }
+            // The token is a month-long bearer credential for this machine,
+            // so the file is the user's alone to read. `fs::write` creates
+            // 0644, which lets any other local account read it.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
             }
         }
         Err(err) => eprintln!("bubbleTranslate: could not encode the licence ({err})"),

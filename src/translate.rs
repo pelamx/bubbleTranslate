@@ -132,14 +132,19 @@ impl Translator {
     ) -> Result<Translation, TranslateError> {
         let sl = if source.is_empty() { "auto" } else { source };
         let q = urlencoding::encode(text);
+        // The language codes come from the config file, which users edit by
+        // hand; a value containing `&` or `#` would otherwise rewrite the
+        // query itself rather than merely fail to translate.
+        let sl_param = urlencoding::encode(sl);
+        let tl_param = urlencoding::encode(target);
         let hosts = [
             format!(
                 "https://translate.googleapis.com/translate_a/single\
-                 ?client=gtx&sl={sl}&tl={target}&dt=t&q={q}"
+                 ?client=gtx&sl={sl_param}&tl={tl_param}&dt=t&q={q}"
             ),
             format!(
                 "https://clients5.google.com/translate_a/single\
-                 ?client=dict-chrome-ex&sl={sl}&tl={target}&dt=t&q={q}"
+                 ?client=dict-chrome-ex&sl={sl_param}&tl={tl_param}&dt=t&q={q}"
             ),
         ];
 

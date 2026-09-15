@@ -130,16 +130,34 @@ fn hyprland_pin() -> bool {
         Err(err) => {
             crate::trace!("window: could not pin the bubble: {err}");
             state.failures += 1;
+            // The same budget the "answered but refused" branch enforces:
+            // a hyprctl that cannot be run at all — missing from PATH, or a
+            // compositor whose IPC stopped existing — must give up just the
+            // same, or this keeps spawning processes from the repaint path
+            // for the rest of the session.
+            if state.failures >= MAX_FAILURES {
+                crate::trace!("window: gave up pinning the bubble after repeated errors");
+                state.gave_up = true;
+                return true;
+            }
             false
         }
     }
 }
 
+/// `hyprctl <args>`, run to completion under [`super::IPC_BUDGET`].
+///
+/// Every caller here runs on the UI thread or the repaint path, and each
+/// invocation is a wait on another process; a wedged compositor socket must
+/// cost one failed attempt rather than a frozen interface.
+fn hyprctl(args: &[&str]) -> Result<std::process::Output, String> {
+    let mut command = std::process::Command::new("hyprctl");
+    command.args(args);
+    super::timed_output(command, super::IPC_BUDGET).map_err(|e| e.to_string())
+}
+
 fn pin_via_hyprctl() -> Result<bool, String> {
-    let out = std::process::Command::new("hyprctl")
-        .args(["clients", "-j"])
-        .output()
-        .map_err(|e| e.to_string())?;
+    let out = hyprctl(&["clients", "-j"])?;
     if !out.status.success() {
         return Err("hyprctl clients failed".into());
     }
@@ -194,11 +212,9 @@ fn pin_via_hyprctl() -> Result<bool, String> {
 }
 
 fn dispatch(args: &[&str]) -> Result<(), String> {
-    let out = std::process::Command::new("hyprctl")
-        .arg("dispatch")
-        .args(args)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let mut argv: Vec<&str> = vec!["dispatch"];
+    argv.extend_from_slice(args);
+    let out = hyprctl(&argv)?;
     if !out.status.success() {
         return Err(format!("hyprctl dispatch {} failed", args.join(" ")));
     }
@@ -217,11 +233,7 @@ fn eval_pin(pid: i64) -> Result<(), String> {
          if w.pid == {pid} and w.title == '{BUBBLE_TITLE}' then \
          hl.dispatch(hl.dsp.window.pin(w)) end end"
     );
-    let out = std::process::Command::new("hyprctl")
-        .arg("eval")
-        .arg(&script)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let out = hyprctl(&["eval", &script])?;
     if !out.status.success() {
         return Err("hyprctl eval failed".into());
     }

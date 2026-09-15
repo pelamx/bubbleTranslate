@@ -183,14 +183,18 @@ export async function open(env: Env, token: string): Promise<Claims | null> {
   const [payload, sig] = token.split(".");
   if (!payload || !sig) return null;
   const { verify } = await keys(env);
-  const ok = await crypto.subtle.verify(
-    { name: await algo() },
-    verify,
-    b64url.decode(sig),
-    enc.encode(payload),
-  );
-  if (!ok) return null;
+  // Everything below decodes attacker-supplied text: a malformed base64
+  // signature throws from `atob`, and an unreadable payload throws from the
+  // JSON parse. Both are "not a token", not a crash -- a refresh request
+  // must be refused with a 401, not turned into a 500 by the outer handler.
   try {
+    const ok = await crypto.subtle.verify(
+      { name: await algo() },
+      verify,
+      b64url.decode(sig),
+      enc.encode(payload),
+    );
+    if (!ok) return null;
     return JSON.parse(new TextDecoder().decode(b64url.decode(payload))) as Claims;
   } catch {
     return null;
