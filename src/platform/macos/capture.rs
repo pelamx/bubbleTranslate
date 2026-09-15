@@ -215,7 +215,7 @@ unsafe fn cf_string_to_owned(s: CFStringRef) -> Option<String> {
     // back any CFType — a CFArray from a hostile or simply buggy element.
     // Checking the type id first turns that from undefined behaviour into an
     // ordinary `None`, which is exactly how an empty selection reads.
-    if unsafe { CFGetTypeID(s) } != unsafe { CFString::type_id() } {
+    if unsafe { CFGetTypeID(s as CFTypeRef) } != unsafe { CFString::type_id() } {
         crate::trace!("capture   AXSelectedText arrived as something other than a string");
         return None;
     }
