@@ -5,6 +5,7 @@
 -- Local development only. Never run against the production database: it
 -- deletes every licence, and licences cannot be reconstructed from the
 -- processors -- only the payments can.
+DROP TABLE IF EXISTS installs;
 DROP TABLE IF EXISTS orders;
 DROP TABLE IF EXISTS seats;
 DROP TABLE IF EXISTS licences;

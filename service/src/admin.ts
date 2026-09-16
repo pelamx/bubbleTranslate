@@ -119,6 +119,41 @@ interface Stats {
   total: number;
 }
 
+interface Usage {
+  daily: number;
+  weekly: number;
+  monthly: number;
+  free_weekly: number;
+  new_weekly: number;
+  total: number;
+}
+
+/** Installs by their last daily ping. Counts people running the app, free and
+ *  Pro alike; a download that was never opened is not in here. */
+async function usage(env: Env): Promise<Usage> {
+  const t = now();
+  const row = await env.DB.prepare(
+    `SELECT
+       SUM(CASE WHEN last_seen > ?1 THEN 1 ELSE 0 END) AS daily,
+       SUM(CASE WHEN last_seen > ?2 THEN 1 ELSE 0 END) AS weekly,
+       SUM(CASE WHEN last_seen > ?3 THEN 1 ELSE 0 END) AS monthly,
+       SUM(CASE WHEN last_seen > ?2 AND plan = 'free' THEN 1 ELSE 0 END) AS free_weekly,
+       SUM(CASE WHEN first_seen > ?2 THEN 1 ELSE 0 END) AS new_weekly,
+       COUNT(*) AS total
+     FROM installs`,
+  )
+    .bind(t - 2 * DAY, t - 8 * DAY, t - 31 * DAY)
+    .first<Usage>();
+  return {
+    daily: row?.daily ?? 0,
+    weekly: row?.weekly ?? 0,
+    monthly: row?.monthly ?? 0,
+    free_weekly: row?.free_weekly ?? 0,
+    new_weekly: row?.new_weekly ?? 0,
+    total: row?.total ?? 0,
+  };
+}
+
 async function stats(env: Env): Promise<Stats> {
   const t = now();
   // One pass with conditional sums rather than eight queries. "Live" here is
@@ -371,8 +406,9 @@ interface Notice {
 }
 
 async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, rows, failures] = await Promise.all([
+  const [s, u, rows, failures] = await Promise.all([
     stats(env),
+    usage(env),
     search(env, query),
     recentFailures(env),
   ]);
@@ -416,6 +452,16 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
        ${tile(s.fresh, "new in 30 days")}
        ${tile(s.expiring, "ending in 7 days")}
        ${tile(s.winding_down, "cancelled, still paid")}
+     </div>
+
+     <h2>Installs in use</h2>
+     <div class="tiles">
+       ${tile(u.daily, "active today")}
+       ${tile(u.weekly, "active this week")}
+       ${tile(u.free_weekly, "free, this week")}
+       ${tile(u.monthly, "active this month")}
+       ${tile(u.new_weekly, "new this week")}
+       ${tile(u.total, "ever seen")}
      </div>
 
      <form method="get" action="/admin" class="row">

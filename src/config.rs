@@ -211,6 +211,10 @@ pub struct Config {
     pub ui_scale: f32,
     /// The bubble's colour scheme. See [`BubbleTheme`].
     pub theme: BubbleTheme,
+    /// Send one anonymous "in use today" ping a day: an install id, the OS,
+    /// the version and free/pro. It is how the number of people using the
+    /// app is known at all. Never the text, never the languages.
+    pub usage_ping: bool,
 }
 
 impl Default for Config {
@@ -239,6 +243,7 @@ impl Default for Config {
             // the slider in the main window is the real answer.
             ui_scale: if cfg!(target_os = "linux") { 0.85 } else { 1.0 },
             theme: BubbleTheme::default(),
+            usage_ping: true,
         }
     }
 }

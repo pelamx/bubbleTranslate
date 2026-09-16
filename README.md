@@ -312,6 +312,12 @@ The count itself is a day number and a total. What you have translated is never
 written to disk, not even hashed — an app that reads whatever you highlight has no
 business leaving a record of it behind.
 
+Once a day while it runs, the app tells the licence service it is in use: a
+hashed install id, the OS, the version, and free or Pro. That is the whole
+message — never the text, never the languages, never the licence key. It is
+how the number of people using the app is known. Set `usage_ping = false` in
+the config to turn it off.
+
 To see where an install stands without opening a window:
 
 ```sh
@@ -535,6 +541,7 @@ watch_clipboard = false     # also translate on copy, for apps with no selection
 auto_hide_secs = 12         # 0 = stay until closed; pauses while hovered
 font_size = 15.0
 ui_scale = 1.0              # whole-interface scale, on top of the display's
+usage_ping = true           # one anonymous "in use today" ping a day
 ```
 
 Target language, auto-translate, the trigger key and the DeepL key are also

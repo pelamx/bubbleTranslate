@@ -68,6 +68,10 @@ const PUBLIC_KEY_HEX: &str = "f8b0c8b4609a516230d71f019fe4a0e9ad432a5d3ce5b5bce2
 /// being the machine id itself — see [`device_id`].
 const DEVICE_SALT: &str = "bubbleTranslate/device/v1";
 
+/// Salt for the install id sent with the daily usage ping. Different from
+/// [`DEVICE_SALT`] so the ping cannot be joined to a licence's seats.
+const INSTALL_SALT: &str = "bubbleTranslate/install/v1";
+
 /// How long a freshly issued token lasts, as the client understands it. The
 /// service is the authority; this is only used to describe the offline
 /// allowance in the settings window.
@@ -522,6 +526,31 @@ fn post(agent: &ureq::Agent, route: &str, body: serde_json::Value) -> Result<Gra
     })
 }
 
+/// Tells the service this install is in use today: an opaque install id, the
+/// OS, the app version and whether it is on Pro. Nothing else — no text, no
+/// language, no licence. Best effort and silent; the answer is ignored.
+pub fn ping(agent: &ureq::Agent, pro: bool) {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("BUBBLETRANSLATE_LICENSE_API").is_none() {
+        // A development build counts nowhere unless pointed at a service on
+        // purpose, so running the tests does not inflate the numbers.
+        return;
+    }
+    let _ = agent
+        .post(format!("{}/v1/ping", api_base()))
+        .header("Content-Type", "application/json")
+        .send(
+            serde_json::json!({
+                "install": install_id(),
+                "os": std::env::consts::OS,
+                "app": env!("CARGO_PKG_VERSION"),
+                "plan": if pro { "pro" } else { "free" },
+            })
+            .to_string()
+            .as_str(),
+        );
+}
+
 fn api_base() -> String {
     #[cfg(debug_assertions)]
     {
@@ -547,6 +576,19 @@ pub fn device_id() -> String {
     let mut hasher = Sha256::new();
     hasher.update(DEVICE_SALT.as_bytes());
     hasher.update(raw.as_bytes());
+    hasher
+        .finalize()
+        .iter()
+        .take(16)
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Like [`device_id`], but under its own salt: see [`INSTALL_SALT`].
+fn install_id() -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(INSTALL_SALT.as_bytes());
+    hasher.update(device_id().as_bytes());
     hasher
         .finalize()
         .iter()

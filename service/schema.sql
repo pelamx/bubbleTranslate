@@ -142,3 +142,17 @@ CREATE TABLE IF NOT EXISTS paddle_subscriptions (
 
 CREATE INDEX IF NOT EXISTS paddle_subscriptions_by_customer
   ON paddle_subscriptions (customer_id);
+
+-- One row per install that has sent the daily usage ping (see
+-- `license::ping` in the client). `install` is a salted hash that cannot be
+-- joined to `seats.device`. Holds no text, no languages and no licence.
+CREATE TABLE IF NOT EXISTS installs (
+  install     TEXT PRIMARY KEY,
+  os          TEXT,
+  app         TEXT,
+  plan        TEXT,
+  first_seen  INTEGER NOT NULL,
+  last_seen   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS installs_by_last_seen ON installs (last_seen);

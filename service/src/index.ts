@@ -91,6 +91,24 @@ function pageContext(request: Request, url: URL, formLang?: unknown): PageContex
 
 // -- the routes the app calls ------------------------------------------------
 
+/** The daily "in use" ping. Upserts one row per install; answers 204 whatever
+ *  it was sent, because the app ignores the reply and a junk ping is not worth
+ *  an error path. */
+async function ping(env: Env, body: any) {
+  const install = String(body.install ?? "");
+  if (!/^[0-9a-f]{32}$/.test(install)) return new Response(null, { status: 204 });
+  const plan = body.plan === "pro" ? "pro" : "free";
+  const t = now();
+  await env.DB.prepare(
+    `INSERT INTO installs (install, os, app, plan, first_seen, last_seen)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+     ON CONFLICT (install) DO UPDATE SET os = ?2, app = ?3, plan = ?4, last_seen = ?5`,
+  )
+    .bind(install, String(body.os ?? "").slice(0, 16), String(body.app ?? "").slice(0, 32), plan, t)
+    .run();
+  return new Response(null, { status: 204 });
+}
+
 async function activate(env: Env, body: any) {
   const key = String(body.key ?? "").trim().toUpperCase();
   const device = String(body.device ?? "").trim();
@@ -672,6 +690,8 @@ export default {
 
       const body = await request.json().catch(() => ({}));
       switch (pathname) {
+        case "/v1/ping":
+          return await ping(env, body);
         case "/v1/activate":
           return await activate(env, body);
         case "/v1/refresh":

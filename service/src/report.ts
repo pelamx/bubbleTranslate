@@ -36,6 +36,9 @@ interface Metrics {
   activeYearly: number;
   activeTotal: number;
   mrr: number; // USD estimate
+  activeInstalls: number; // pinged in the last week
+  freeInstalls: number;
+  newInstalls: number; // first ping this week
 }
 
 /** Paid orders in [from, to). Renewals do not create orders, so this is new
@@ -80,8 +83,23 @@ export async function gather(env: Env, now: number): Promise<Metrics> {
   // A yearly licence is $20/12 of recurring monthly revenue; a monthly is $2.
   const mrr = activeMonthly * USD_AMOUNT.monthly + activeYearly * (USD_AMOUNT.yearly / 12);
 
+  // "Last week" is eight days, not seven: a once-a-day ping from an app that
+  // was opened at a slightly later hour than last time must still count.
+  const installs = await env.DB.prepare(
+    `SELECT
+       SUM(CASE WHEN last_seen > ?1 THEN 1 ELSE 0 END) AS active,
+       SUM(CASE WHEN last_seen > ?1 AND plan = 'free' THEN 1 ELSE 0 END) AS free,
+       SUM(CASE WHEN first_seen > ?2 THEN 1 ELSE 0 END) AS fresh
+     FROM installs`,
+  )
+    .bind(now - WEEK - 86_400, now - WEEK)
+    .first<{ active: number | null; free: number | null; fresh: number | null }>();
+
   return {
     now,
+    activeInstalls: installs?.active ?? 0,
+    freeInstalls: installs?.free ?? 0,
+    newInstalls: installs?.fresh ?? 0,
     sales,
     prev,
     activeMonthly,
@@ -131,6 +149,7 @@ export function renderHtml(m: Metrics): string {
       <table style="border-collapse:collapse;width:100%;margin-bottom:18px">
         ${row("Aktif Pro lisans", `${m.activeTotal} <span style="color:#777;font-weight:400">(${m.activeMonthly} aylık, ${m.activeYearly} yıllık)</span>`)}
         ${row("Tahmini aylık gelir (MRR)", money(Math.round(m.mrr * 100) / 100))}
+        ${row("Bu hafta kullanan kurulum", `${m.activeInstalls} <span style="color:#777;font-weight:400">(${m.freeInstalls} ücretsiz, ${m.newInstalls} yeni)</span>`)}
       </table>
 
       <div style="background:#f0f6ff;border:1px solid #cfe0fb;border-radius:8px;padding:14px;font-size:14px">
@@ -159,6 +178,7 @@ export function renderText(m: Metrics): string {
     `Toplam:`,
     `  Aktif Pro lisans: ${m.activeTotal} (${m.activeMonthly} aylık, ${m.activeYearly} yıllık)`,
     `  Tahmini MRR: ${money(Math.round(m.mrr * 100) / 100)}`,
+    `  Bu hafta kullanan kurulum: ${m.activeInstalls} (${m.freeInstalls} ücretsiz, ${m.newInstalls} yeni)`,
     ``,
     `Reklamlara ${money(s.revenue)}'dan az harcadıysan bu hafta kârdasın.`,
     `(Harcama otomatik girmiyor; onu sen ekle.)`,

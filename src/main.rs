@@ -195,6 +195,30 @@ fn main() -> eframe::Result<()> {
                 engine.request(Request::RefreshLicense);
             }
 
+            // One anonymous ping a day while running; see `Config::usage_ping`.
+            // Re-read every turn, so switching it off in the config stops the
+            // next one without a restart.
+            {
+                let config = config.clone();
+                let license = licensing.license.clone();
+                std::thread::spawn(move || {
+                    let agent = ureq::Agent::new_with_config(
+                        ureq::Agent::config_builder()
+                            .timeout_global(Some(std::time::Duration::from_secs(15)))
+                            .http_status_as_error(false)
+                            .user_agent(concat!("bubbleTranslate/", env!("CARGO_PKG_VERSION")))
+                            .build(),
+                    );
+                    loop {
+                        if config.lock().unwrap().usage_ping {
+                            let pro = license.lock().unwrap().entitlement.is_pro();
+                            license::ping(&agent, pro);
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(24 * 3600));
+                    }
+                });
+            }
+
             let main = Arc::new(Mutex::new(MainState::new(
                 engine.sender(),
                 readiness,
