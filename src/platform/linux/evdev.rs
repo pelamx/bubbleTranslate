@@ -18,6 +18,10 @@
 //!     currently held. Every other keycode is dropped inside the read loop —
 //!     nothing else is stored, counted or forwarded anywhere.
 //!
+//! The one exception is the left mouse button, read from devices that have no
+//! keyboard, so the clipboard route in [`super::borrow`] can tell when a drag
+//! ended. It is the button's state and nothing else — not the pointer's path.
+//!
 //! It needs permission the desktop does not hand out by default: the device
 //! nodes belong to the `input` group. Without membership this module reports
 //! that it is unavailable and the gate falls back to translating every
@@ -46,6 +50,9 @@ mod keycode {
     pub const RIGHTALT: u16 = 100;
     pub const LEFTMETA: u16 = 125;
     pub const RIGHTMETA: u16 = 126;
+    /// Not a modifier: read only by [`super::start_pointer`], from devices
+    /// that have no keyboard at all.
+    pub const BTN_LEFT: u16 = 272;
 }
 
 /// The bit a keycode sets, or `None` for every key that is not a modifier —
@@ -136,18 +143,32 @@ pub fn start() -> Result<(), String> {
             // "no idea" (fail-open) instead of "not held" (every gated
             // selection silently dropped) for the life of the process.
             RUNNING.store(true, Ordering::Relaxed);
-            read_loop(devices)
+            read_loop(devices, "keyboard", |code, down| {
+                // Everything that is not a modifier leaves no trace: no
+                // branch below stores it.
+                let Some(bit) = bit(code) else {
+                    return;
+                };
+                if down {
+                    HELD.fetch_or(bit, Ordering::Relaxed);
+                } else {
+                    HELD.fetch_and(!bit, Ordering::Relaxed);
+                }
+            });
+            // The last device went away; "no idea" again, not "not held".
+            RUNNING.store(false, Ordering::Relaxed);
+            HELD.store(0, Ordering::Relaxed);
         })
         .map_err(|err| format!("could not start the keyboard reader: {err}"))?;
     crate::trace!("evdev: watching the keyboard for the trigger key");
     Ok(())
 }
 
-/// The event nodes that are both readable by us and actually keyboards.
+/// The event nodes that are both readable by us and pass `wanted`.
 ///
 /// Opened non-blocking: the read loop drains each device until it would
 /// block, so no keyboard's events wait on another keyboard's silence.
-fn keyboards() -> Vec<std::fs::File> {
+fn devices(wanted: impl Fn(RawFd) -> bool) -> Vec<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
 
     let Ok(entries) = std::fs::read_dir("/dev/input") else {
@@ -170,7 +191,7 @@ fn keyboards() -> Vec<std::fs::File> {
         else {
             continue;
         };
-        if has_shift(file.as_raw_fd()) {
+        if wanted(file.as_raw_fd()) {
             crate::trace!("evdev: reading {}", path.display());
             found.push(file);
         }
@@ -178,12 +199,24 @@ fn keyboards() -> Vec<std::fs::File> {
     found
 }
 
-/// Whether this device has a left Shift key, which is how a keyboard is told
-/// from the mice, switches and buttons that share the same directory.
-fn has_shift(fd: RawFd) -> bool {
+/// The event nodes that are keyboards.
+fn keyboards() -> Vec<std::fs::File> {
+    devices(|fd| has_key(fd, keycode::LEFTSHIFT))
+}
+
+/// The event nodes that are pointers: a left button and no Shift key, so a
+/// keyboard with a built-in trackpoint is read once, as a keyboard, and not
+/// again here.
+fn pointers() -> Vec<std::fs::File> {
+    devices(|fd| has_key(fd, keycode::BTN_LEFT) && !has_key(fd, keycode::LEFTSHIFT))
+}
+
+/// Whether this device can send `code`, which is how a keyboard is told from
+/// the mice, switches and buttons that share the same directory.
+fn has_key(fd: RawFd, code: u16) -> bool {
     const EV_KEY: u32 = 1;
-    // The key bitmap, long enough for the modifier range this asks about.
-    const BITS: usize = 256;
+    // The key bitmap, long enough for the mouse buttons at 0x110.
+    const BITS: usize = 768;
     let mut map = [0u8; BITS / 8];
 
     // EVIOCGBIT(EV_KEY, len): _IOC(_IOC_READ, 'E', 0x20 + EV_KEY, len).
@@ -197,7 +230,7 @@ fn has_shift(fd: RawFd) -> bool {
     if unsafe { libc::ioctl(fd, request, map.as_mut_ptr()) } < 0 {
         return false;
     }
-    let code = keycode::LEFTSHIFT as usize;
+    let code = code as usize;
     map[code / 8] & (1 << (code % 8)) != 0
 }
 
@@ -212,7 +245,34 @@ struct InputEvent {
     value: i32,
 }
 
-fn read_loop(devices: Vec<std::fs::File>) {
+/// Watches the mice for the left button, calling `on_left` with `true` when it
+/// goes down and `false` when it comes up.
+///
+/// The same restraint as the keyboard: one button, and nothing about where
+/// the pointer went. Tap-to-click on a touchpad is synthesized above the
+/// kernel and never appears here; a physical click does.
+pub fn start_pointer(on_left: impl Fn(bool) + Send + 'static) -> Result<(), String> {
+    let devices = pointers();
+    if devices.is_empty() {
+        return Err("no readable mouse in /dev/input".to_string());
+    }
+    std::thread::Builder::new()
+        .name("pointer-button".into())
+        .spawn(move || {
+            read_loop(devices, "pointer", |code, down| {
+                if code == keycode::BTN_LEFT {
+                    on_left(down);
+                }
+            })
+        })
+        .map_err(|err| format!("could not start the pointer reader: {err}"))?;
+    crate::trace!("evdev: watching the left mouse button");
+    Ok(())
+}
+
+/// Reads key events from `devices` until none are left, handing each one to
+/// `on_key` as a code and whether it is down. Autorepeat counts as down.
+fn read_loop(devices: Vec<std::fs::File>, what: &str, mut on_key: impl FnMut(u16, bool)) {
     const EV_KEY: u16 = 1;
     /// A key that is down, or one being auto-repeated; 0 is a release.
     const PRESSED: i32 = 1;
@@ -250,9 +310,7 @@ fn read_loop(devices: Vec<std::fs::File>) {
             // A poll that fails for any other reason will keep failing; going
             // quiet is better than spinning, and the gate then behaves as it
             // does on a session with no reader at all.
-            crate::trace!("evdev: poll failed ({err}); stopping the keyboard reader");
-            RUNNING.store(false, Ordering::Relaxed);
-            HELD.store(0, Ordering::Relaxed);
+            crate::trace!("evdev: poll failed ({err}); stopping the {what} reader");
             return;
         }
 
@@ -266,7 +324,7 @@ fn read_loop(devices: Vec<std::fs::File>) {
         for (index, pollfd) in fds.iter().enumerate() {
             if pollfd.revents & libc::POLLIN == 0 {
                 if pollfd.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
-                    crate::trace!("evdev: keyboard device {} went away", pollfd.fd);
+                    crate::trace!("evdev: {what} device {} went away", pollfd.fd);
                     gone.push(index);
                 }
                 continue;
@@ -299,18 +357,7 @@ fn read_loop(devices: Vec<std::fs::File>) {
                 if event.kind != EV_KEY {
                     continue;
                 }
-                // Everything that is not a modifier leaves no trace: no
-                // branch below stores it, and `event` is overwritten by the
-                // next record.
-                let Some(bit) = bit(event.code) else {
-                    continue;
-                };
-                let down = event.value == PRESSED || event.value == REPEATED;
-                if down {
-                    HELD.fetch_or(bit, Ordering::Relaxed);
-                } else {
-                    HELD.fetch_and(!bit, Ordering::Relaxed);
-                }
+                on_key(event.code, event.value == PRESSED || event.value == REPEATED);
             }
         }
 
@@ -319,9 +366,7 @@ fn read_loop(devices: Vec<std::fs::File>) {
                 fds.remove(index);
             }
             if fds.is_empty() {
-                crate::trace!("evdev: no keyboards left; stopping the reader");
-                RUNNING.store(false, Ordering::Relaxed);
-                HELD.store(0, Ordering::Relaxed);
+                crate::trace!("evdev: no {what} devices left; stopping the reader");
                 return;
             }
         }

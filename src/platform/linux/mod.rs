@@ -28,6 +28,7 @@ pub mod cursor;
 pub mod monitor;
 pub mod shell;
 
+mod borrow;
 mod compositor;
 mod evdev;
 mod wayland;

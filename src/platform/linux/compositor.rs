@@ -64,6 +64,36 @@ pub fn key_held(key: TriggerKey) -> Option<bool> {
     }
 }
 
+/// Sends Ctrl+C to whatever has keyboard focus, as the compositor itself.
+///
+/// Not a virtual keyboard: on one of those the modifiers the user is still
+/// physically holding merge into the chord at the seat, and Shift held from
+/// the selection would turn this into Ctrl+Shift+C — which opens the
+/// inspector in a browser. `send_key_state` carries its own modifier mask.
+/// The press and release are split for the reason Omarchy's own copy binding
+/// splits them: `send_shortcut` can leave the key stuck repeating.
+pub fn send_copy() -> bool {
+    let lua = "hl.dispatch(hl.dsp.send_key_state({ mods = 'CTRL', key = 'C', state = 'down' })) \
+               hl.timer(function() \
+                 hl.dispatch(hl.dsp.send_key_state({ mods = 'CTRL', key = 'C', state = 'up' })) \
+               end, { timeout = 30, type = 'oneshot' }) \
+               error('BT_SENT')";
+    hyprland_eval(lua).is_some_and(|reply| reply.contains("BT_SENT"))
+}
+
+/// The class of the window with keyboard focus, lowercased.
+///
+/// `None` when there is no focused window or the compositor will not say.
+pub fn focused_class() -> Option<String> {
+    let lua = "local w = hl.get_active_window() \
+               if not w then error('BT_NONE') end \
+               error('BT_CLASS=' .. tostring(w.class) .. '=BT_END')";
+    let reply = hyprland_eval(lua)?;
+    let (_, rest) = reply.split_once("BT_CLASS=")?;
+    let (class, _) = rest.split_once("=BT_END")?;
+    Some(class.to_lowercase())
+}
+
 /// Whether this session has a compositor that can be asked at all.
 pub fn can_answer() -> bool {
     socket_path().is_some_and(|path| path.exists())

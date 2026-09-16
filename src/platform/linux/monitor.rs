@@ -81,7 +81,7 @@ pub fn set_trigger_key(key: TriggerKey) {
     TRIGGER_KEY.store(encode(key), Ordering::Relaxed);
 }
 
-fn trigger_key() -> TriggerKey {
+pub(super) fn trigger_key() -> TriggerKey {
     decode(TRIGGER_KEY.load(Ordering::Relaxed))
 }
 
@@ -118,7 +118,7 @@ pub fn trigger_key_blocked() -> Option<String> {
 /// X11 first: it is a question to a server we are already talking to. Then the
 /// compositor, for the ones that will answer. `/dev/input` is the last resort,
 /// and the only one that asks the user for anything.
-fn key_held(key: TriggerKey) -> Option<bool> {
+pub(super) fn key_held(key: TriggerKey) -> Option<bool> {
     if matches!(backend(), Backend::X11Primary)
         && let Some(held) = x11::modifier_held(key)
     {
@@ -161,6 +161,11 @@ pub fn spawn(on_trigger: impl Fn(Trigger) + Send + 'static) -> std::io::Result<(
     // nothing.
     if !matches!(backend, Backend::X11Primary) && !compositor::can_answer() {
         evdev::ensure_started();
+    }
+    // Pages that draw their own selection publish nothing to watch; see
+    // `borrow` for when a copy is sent on the user's behalf instead.
+    if matches!(backend, Backend::WaylandDataControl) {
+        super::borrow::start();
     }
     std::thread::Builder::new()
         .name("selection-monitor".into())

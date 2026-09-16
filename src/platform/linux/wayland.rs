@@ -18,6 +18,7 @@
 use std::collections::HashMap;
 use std::io::Read;
 use std::os::fd::{AsFd, AsRawFd};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use wayland_client::backend::ObjectId;
 use wayland_client::protocol::{wl_registry, wl_seat};
@@ -42,6 +43,17 @@ const TEXT_MIMES: [&str; 5] = [
     "text/plain",
     "STRING",
 ];
+
+/// How many selections have been published since the watch began.
+///
+/// Only its movement matters: [`super::borrow`] samples it when a drag starts
+/// and again after it ends, and a page that published a selection of its own
+/// moved it.
+static PRIMARY_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+pub fn primary_generation() -> u64 {
+    PRIMARY_GENERATION.load(Ordering::Relaxed)
+}
 
 /// Checks that this compositor can serve selections without focus, without
 /// committing to a watcher.
@@ -134,6 +146,56 @@ pub fn set_clipboard(text: String) {
             }
         })
         .ok();
+}
+
+/// What the clipboard holds right now, read on a connection of its own.
+///
+/// `Ok(None)` is an empty clipboard. `Err` is one that holds something that
+/// is not text — an image, a file — or could not be read: either way it
+/// cannot be put back, so the caller must not replace it.
+pub fn read_clipboard() -> Result<Option<String>, ()> {
+    let conn = Connection::connect_to_env().map_err(|_| ())?;
+    let mut reader = ClipboardReader {
+        globals: Globals::default(),
+        offers: HashMap::new(),
+        current: None,
+    };
+    let mut queue = conn.new_event_queue();
+    let qh = queue.handle();
+    conn.display().get_registry(&qh, ());
+    queue.roundtrip(&mut reader).map_err(|_| ())?;
+
+    let (Some(manager), Some(seat)) = (reader.globals.manager.clone(), reader.globals.seat.clone())
+    else {
+        return Err(());
+    };
+    let device = manager.get_data_device(&seat, &qh, ());
+    // The compositor announces the current selection as soon as the device
+    // exists; two roundtrips cover the offer and its MIME types.
+    for _ in 0..3 {
+        if reader.current.is_some() {
+            break;
+        }
+        queue.roundtrip(&mut reader).map_err(|_| ())?;
+    }
+    let result = match reader.current.take() {
+        None | Some(None) => Ok(None),
+        Some(Some(offer)) => {
+            let mimes = reader.offers.remove(&offer.id()).unwrap_or_default();
+            let text = if TEXT_MIMES.iter().any(|m| mimes.iter().any(|x| x == m)) {
+                receive(&conn, &offer, &mimes).map(Some).ok_or(())
+            } else if mimes.is_empty() {
+                Ok(None)
+            } else {
+                Err(())
+            };
+            offer.destroy();
+            text
+        }
+    };
+    device.destroy();
+    let _ = conn.flush();
+    result
 }
 
 fn serve_clipboard(text: String) -> Result<(), String> {
@@ -261,6 +323,7 @@ macro_rules! registry_dispatch {
 registry_dispatch!(Globals);
 registry_dispatch!(Watcher);
 registry_dispatch!(ClipboardSource);
+registry_dispatch!(ClipboardReader);
 
 // -- watching --------------------------------------------------------------
 
@@ -314,7 +377,13 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for Watcher {
                     crate::trace!("wayland: primed with the existing selection");
                     return;
                 }
+                // A copy we synthesized, or the restore after it, echoed into
+                // the primary selection by a clipboard sync. Not the user's.
+                if super::borrow::suppressing() {
+                    return;
+                }
                 if let Some(text) = text {
+                    PRIMARY_GENERATION.fetch_add(1, Ordering::Relaxed);
                     (state.on_change)(text, false);
                 }
             }
@@ -327,7 +396,15 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for Watcher {
                     return;
                 };
                 let mimes = state.offers.remove(&offer.id()).unwrap_or_default();
-                let wanted = super::monitor::watching_clipboard();
+                // The copy we asked for, arriving. Its text is the selection
+                // the page would not publish, and the clipboard it replaced
+                // is put back once the text is in hand.
+                let borrowed = super::borrow::take_pending();
+                if borrowed.is_none() && super::borrow::suppressing() {
+                    offer.destroy();
+                    return;
+                }
+                let wanted = borrowed.is_some() || super::monitor::watching_clipboard();
                 // Reading it is what costs; the offer has to be destroyed
                 // either way or it leaks until the device dies.
                 let text = wanted.then(|| receive(conn, &offer, &mimes)).flatten();
@@ -335,6 +412,16 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for Watcher {
 
                 if !state.clipboard_primed {
                     state.clipboard_primed = true;
+                    return;
+                }
+                if let Some(saved) = borrowed {
+                    if let Some(text) = text {
+                        crate::trace!("borrow    copied {} chars", text.len());
+                        (state.on_change)(text, true);
+                    }
+                    if let Some(saved) = saved {
+                        set_clipboard(saved);
+                    }
                     return;
                 }
                 if let Some(text) = text {
@@ -492,6 +579,68 @@ impl Dispatch<ZwlrDataControlSourceV1, ()> for ClipboardSource {
                 state.cancelled = true;
             }
             _ => {}
+        }
+    }
+}
+
+// -- reading the clipboard once --------------------------------------------
+
+struct ClipboardReader {
+    globals: Globals,
+    offers: HashMap<ObjectId, Vec<String>>,
+    /// `Some` once the compositor has said what the clipboard is; the inner
+    /// `None` is an empty one.
+    current: Option<Option<ZwlrDataControlOfferV1>>,
+}
+
+impl HasGlobals for ClipboardReader {
+    fn globals(&mut self) -> &mut Globals {
+        &mut self.globals
+    }
+}
+
+impl Dispatch<ZwlrDataControlDeviceV1, ()> for ClipboardReader {
+    fn event(
+        state: &mut Self,
+        _: &ZwlrDataControlDeviceV1,
+        event: zwlr_data_control_device_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            zwlr_data_control_device_v1::Event::DataOffer { id } => {
+                state.offers.insert(id.id(), Vec::new());
+            }
+            zwlr_data_control_device_v1::Event::Selection { id } => {
+                if let Some(Some(old)) = state.current.replace(id) {
+                    old.destroy();
+                }
+            }
+            zwlr_data_control_device_v1::Event::PrimarySelection { id: Some(offer) } => {
+                state.offers.remove(&offer.id());
+                offer.destroy();
+            }
+            _ => {}
+        }
+    }
+
+    wayland_client::event_created_child!(ClipboardReader, ZwlrDataControlDeviceV1, [
+        zwlr_data_control_device_v1::EVT_DATA_OFFER_OPCODE => (ZwlrDataControlOfferV1, ()),
+    ]);
+}
+
+impl Dispatch<ZwlrDataControlOfferV1, ()> for ClipboardReader {
+    fn event(
+        state: &mut Self,
+        offer: &ZwlrDataControlOfferV1,
+        event: zwlr_data_control_offer_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let zwlr_data_control_offer_v1::Event::Offer { mime_type } = event {
+            state.offers.entry(offer.id()).or_default().push(mime_type);
         }
     }
 }
