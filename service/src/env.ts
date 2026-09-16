@@ -55,6 +55,12 @@ export interface Env {
   GOOGLE_ADS_CUSTOMER_ID?: string;
   GOOGLE_ADS_LOGIN_CUSTOMER_ID?: string;
   GOOGLE_ADS_CONVERSION_ACTION?: string;
+  /** The Google tag id, `AW-...`, loaded on the success page. Publishable:
+   *  it is in the page source of the marketing site too. */
+  GOOGLE_ADS_TAG_ID?: string;
+  /** The purchase conversion's label, the part after the `/` in the event
+   *  snippet's `send_to`. Without it the success page loads no Google tag. */
+  GOOGLE_ADS_PURCHASE_LABEL?: string;
 
   /** Meta (Facebook) Conversions API. The pixel id is not secret; the access
    *  token is. A test event code, when set, routes events to the Test Events

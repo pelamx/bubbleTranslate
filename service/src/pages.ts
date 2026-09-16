@@ -392,7 +392,40 @@ export function buyPage(opts: BuyOptions): Response {
 
 // -- /welcome ----------------------------------------------------------------
 
-export function donePage(ctx: PageContext, ref: string, support: string): Response {
+/** A Google Ads purchase conversion to report once the order shows as paid. */
+export interface Conversion {
+  tagId: string;
+  sendTo: string;
+  /** List price in USD, like the server-side upload in ads.ts. */
+  value: number;
+}
+
+/** The Google tag, with every consent type denied unless the visitor allowed
+ *  it on the marketing site. That choice is a cookie on the parent domain
+ *  precisely so it reaches this subdomain; there is no banner here, so no
+ *  choice means denied, and Google gets only a cookieless ping. */
+function googleTag(tagId: string): string {
+  return `<script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    const granted = /(?:^|; )bt_consent=granted(?:;|$)/.test(document.cookie) ? 'granted' : 'denied';
+    gtag('consent', 'default', {
+      ad_storage: granted, ad_user_data: granted,
+      ad_personalization: granted, analytics_storage: granted
+    });
+    gtag('set', 'ads_data_redaction', true);
+    gtag('js', new Date());
+    gtag('config', ${jsonForScript(tagId)});
+  </script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(tagId)}"></script>`;
+}
+
+export function donePage(
+  ctx: PageContext,
+  ref: string,
+  support: string,
+  conversion: Conversion | null = null,
+): Response {
   const s = t(ctx.lang);
   // The page is rendered before the outcome is known: the buyer may well
   // arrive back here before the processor's webhook does. So it polls, and
@@ -427,6 +460,7 @@ export function donePage(ctx: PageContext, ref: string, support: string): Respon
        const ref = ${jsonForScript(ref)};
        const support = ${jsonForScript(support)};
        const w = ${jsonForScript(words)};
+       const conversion = ${jsonForScript(conversion && { send_to: conversion.sendTo, value: conversion.value })};
        const body = document.getElementById('body');
        let tries = 0;
        async function poll() {
@@ -443,6 +477,14 @@ export function donePage(ctx: PageContext, ref: string, support: string): Respon
              '<li>' + w.step2 + '</li>' +
              '<li>' + w.step3 + '</li></ol>' +
              '<p class="muted">' + w.keepKey + '</p>';
+           // transaction_id is what lets Google drop a reload of this page
+           // as a duplicate of the same sale.
+           if (conversion && typeof gtag === 'function') {
+             gtag('event', 'conversion', {
+               send_to: conversion.send_to, value: conversion.value,
+               currency: 'USD', transaction_id: ref
+             });
+           }
            return;
          }
          if (order && order.status === 'failed') {
@@ -461,7 +503,7 @@ export function donePage(ctx: PageContext, ref: string, support: string): Respon
        }
        poll();
      </script>`,
-    "",
+    conversion ? googleTag(conversion.tagId) : "",
     false,
     ctx,
   );

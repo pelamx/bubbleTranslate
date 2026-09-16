@@ -14,6 +14,7 @@
 import {
   type Cycle,
   type Env,
+  USD_AMOUNT,
   USD_PRICE,
   baseUrl,
   isCycle,
@@ -631,7 +632,16 @@ export default {
           const ctx = pageContext(request, url);
           const ref = url.searchParams.get("ref") ?? "";
           if (!ref) return redirect(withLang("/buy", ctx.lang));
-          return donePage(ctx, ref, supportEmail(env));
+          const order = await orderByRef(env, ref);
+          const conversion =
+            env.GOOGLE_ADS_TAG_ID && env.GOOGLE_ADS_PURCHASE_LABEL && order && isCycle(order.cycle)
+              ? {
+                  tagId: env.GOOGLE_ADS_TAG_ID,
+                  sendTo: `${env.GOOGLE_ADS_TAG_ID}/${env.GOOGLE_ADS_PURCHASE_LABEL}`,
+                  value: USD_AMOUNT[order.cycle],
+                }
+              : null;
+          return donePage(ctx, ref, supportEmail(env), conversion);
         }
         if (pathname.startsWith("/v1/order/")) {
           return orderStatus(env, pathname.slice("/v1/order/".length));

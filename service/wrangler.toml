@@ -69,6 +69,14 @@ PADDLE_PRICE_YEARLY = "pri_01m20ka0z5q29jekndxfxw5z16"
 # it appears in the page source — and not a secret.
 PADDLE_CLIENT_TOKEN = "live_b16bde0d516696e5290039b41e4"
 
+# -- Google Ads ---------------------------------------------------------------
+#
+# The success page (/welcome) loads this tag and reports a purchase conversion
+# once the order is paid. The label is the part after the "/" in the event
+# snippet's send_to. Leave it empty and the page loads no Google tag at all.
+GOOGLE_ADS_TAG_ID = "AW-18451580938"
+GOOGLE_ADS_PURCHASE_LABEL = ""
+
 # Secrets, set with `wrangler secret put` and never written here:
 #
 #   SIGNING_KEY_PKCS8        base64url PKCS#8, the licence signing key
