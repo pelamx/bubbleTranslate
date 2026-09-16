@@ -106,6 +106,10 @@ async function ping(env: Env, body: any) {
   )
     .bind(install, String(body.os ?? "").slice(0, 16), String(body.app ?? "").slice(0, 32), plan, t)
     .run();
+  // The privacy policy promises that an install silent for 13 months is
+  // forgotten. Done here rather than in the cron, so the promise holds even
+  // when no cron runs; the index on last_seen keeps it cheap.
+  await env.DB.prepare("DELETE FROM installs WHERE last_seen < ?").bind(t - 396 * 86_400).run();
   return new Response(null, { status: 204 });
 }
 

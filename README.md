@@ -315,8 +315,9 @@ business leaving a record of it behind.
 Once a day while it runs, the app tells the licence service it is in use: a
 hashed install id, the OS, the version, and free or Pro. That is the whole
 message — never the text, never the languages, never the licence key. It is
-how the number of people using the app is known. Set `usage_ping = false` in
-the config to turn it off.
+how we count the installs that are alive — actually in use — on free and on
+Pro, which downloads cannot show. It is used only as totals, never to identify
+anyone. Set `usage_ping = false` in the config to turn it off.
 
 To see where an install stands without opening a window:
 
