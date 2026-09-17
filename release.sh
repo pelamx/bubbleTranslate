@@ -70,28 +70,61 @@ cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 
 cat > "$STAGE/Read me first.txt" <<'TXT'
-bubbleTranslate — by pelamx
+bubbleTranslate - by pelamx
 
-1. Drag bubbleTranslate.app onto the Applications folder.
 
-2. Launch it. macOS blocks the first launch and says it "could not verify"
-   the app — this app is not notarized by Apple. Dismiss that, then open
-   System Settings > Privacy & Security, scroll to Security, and click
-   "Open Anyway". This is only needed once.
+Three steps and about a minute.
 
-   (Control-click > Open does not work for this on macOS 15 and later.)
+Step 2 is a macOS warning that says the app cannot be verified. That is
+expected for an app not notarized by Apple, and step 2 clears it for good.
+It is not a sign that the download is broken.
 
-3. macOS will ask for Accessibility permission, and the app opens the page
-   for you: System Settings > Privacy & Security > Accessibility. Turn
-   bubbleTranslate on there.
 
-   It starts watching the moment you do. Nothing to quit, nothing to relaunch.
+--- 1. Install -------------------------------------------------------------
 
-Then select text anywhere — double-click a word, drag a phrase, triple-click
-a line — and the translation appears at your cursor.
+Drag bubbleTranslate.app onto the Applications folder, here in this window.
 
-The app has no Dock icon while it runs in the background. Look for the globe
-in the menu bar to reopen the window or quit.
+
+--- 2. Allow the first launch ----------------------------------------------
+
+Open bubbleTranslate from your Applications folder. macOS refuses to run it
+and says it "could not verify" the developer. To clear that, once:
+
+  1. Dismiss the warning.
+  2. Open System Settings > Privacy & Security.
+  3. Scroll down to Security. A line there names bubbleTranslate.
+  4. Click "Open Anyway", confirm with Touch ID or your password, then
+     click "Open Anyway" in the dialog that follows.
+
+Two confirmations in a row is normal - the second one is the last.
+
+Control-click > Open does not work for this on macOS 15 and later.
+
+If you are comfortable with Terminal, this one line replaces all four steps
+above, and the app opens normally from then on:
+
+  xattr -dr com.apple.quarantine /Applications/bubbleTranslate.app
+
+
+--- 3. Turn on Accessibility -----------------------------------------------
+
+bubbleTranslate works by reading the text you select, and macOS keeps that
+behind the Accessibility permission. The app asks on first launch and opens
+the right page for you:
+
+  System Settings > Privacy & Security > Accessibility
+
+Turn bubbleTranslate on there. It starts watching the moment you do -
+nothing to quit, nothing to relaunch.
+
+
+--- Done -------------------------------------------------------------------
+
+Select text in any app - double-click a word, drag a phrase, triple-click a
+line - and the translation appears at your cursor.
+
+There is no Dock icon while it runs in the background. The globe in the menu
+bar reopens the window, switches the languages, or quits.
 TXT
 
 # --- build the disk image ---------------------------------------------------
