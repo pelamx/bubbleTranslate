@@ -13,6 +13,9 @@ APP="bubbleTranslate.app"
 # The Accessibility grant is keyed to this identifier, so changing it makes
 # macOS treat the app as new and ask for permission again.
 BUNDLE_ID="com.pelamx.bubbleTranslate"
+# The one in Cargo.toml is the version the binary reports to the update check,
+# so the plist reads it from there rather than keeping a second copy to forget.
+VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 
 STAGE_BIN="$(mktemp -t bubbleTranslate-bin)"
 trap 'rm -f "$STAGE_BIN"' EXIT
@@ -63,8 +66,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIdentifier</key>      <string>$BUNDLE_ID</string>
     <key>CFBundleExecutable</key>      <string>bubbleTranslate</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
-    <key>CFBundleShortVersionString</key> <string>0.1.0</string>
-    <key>CFBundleVersion</key>         <string>0.1.0</string>
+    <key>CFBundleShortVersionString</key> <string>$VERSION</string>
+    <key>CFBundleVersion</key>         <string>$VERSION</string>
     <key>LSMinimumSystemVersion</key>  <string>11.0</string>
     <key>NSHumanReadableCopyright</key> <string>by pelamx</string>
     <!-- Menu-bar-less background app: no Dock icon, and showing the bubble

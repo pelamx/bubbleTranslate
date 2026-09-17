@@ -4,7 +4,7 @@
     "url": "https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate-linux-x86_64"
   },
   "macos": {
-    "version": "0.1.0",
+    "version": "0.2.0",
     "url": "https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate.dmg"
   },
   "windows": {
