@@ -84,14 +84,21 @@ if ($env:SIGN_THUMBPRINT) {
 $version = (Select-String -Path (Join-Path $PSScriptRoot 'Cargo.toml') -Pattern '^version = "(.*)"' |
     Select-Object -First 1).Matches[0].Groups[1].Value
 $manifestPath = Join-Path $PSScriptRoot 'latest.json'
-$manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
-if ($manifest.windows.version -eq $version) {
+
+# Edited in place rather than round-tripped through ConvertFrom-Json: the
+# ConvertTo-Json of PowerShell 5.1 re-indents the whole file and aligns the
+# colons, so every Windows release would arrive as a diff of all three
+# platforms. A substitution touches the one value, the way release.sh does.
+$raw = Get-Content $manifestPath -Raw
+$pattern = '("windows"\s*:\s*\{\s*"version"\s*:\s*")([^"]*)(")'
+$found = [regex]::Match($raw, $pattern)
+if (-not $found.Success) { throw "latest.json has no windows version to update" }
+if ($found.Groups[2].Value -eq $version) {
     Write-Host "warning: latest.json already says Windows $version - bump the version in"
     Write-Host "         Cargo.toml, or installed copies will not be told about this build"
 }
-$manifest.windows.version = $version
 # Written without a byte-order mark: the app reads it as plain UTF-8 JSON.
-[System.IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 4) + "`n")
+[System.IO.File]::WriteAllText($manifestPath, [regex]::Replace($raw, $pattern, "`${1}$version`${3}"))
 
 $size = [math]::Round((Get-Item $OUT).Length / 1MB, 1)
 Write-Host ""
