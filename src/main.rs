@@ -28,6 +28,7 @@ mod quota;
 mod trace;
 mod translate;
 mod ui;
+mod update;
 
 /// The platform boundary, re-exported so the rest of the crate can say
 /// `capture::` and `shell::` without caring which implementation it got.
@@ -217,6 +218,12 @@ fn main() -> eframe::Result<()> {
                         std::thread::sleep(std::time::Duration::from_secs(24 * 3600));
                     }
                 });
+            }
+
+            // Says when a newer build is on GitHub; the window shows it.
+            {
+                let ctx = cc.egui_ctx.clone();
+                update::spawn(move || ctx.request_repaint());
             }
 
             let main = Arc::new(Mutex::new(MainState::new(

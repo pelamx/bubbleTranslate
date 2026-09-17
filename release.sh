@@ -109,8 +109,23 @@ if [[ -n "$SIGN_IDENTITY" ]]; then
     spctl -a -vvv -t install "$DMG" || true
 fi
 
+# --- tell installed copies ---------------------------------------------------
+#
+# latest.json is what running copies read to say "a new version is available".
+# Only the macOS line is touched: the other platforms are released on their
+# own machines. Commit it together with the DMG, or nobody is told.
+
+VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+PUBLISHED="$(perl -0ne 'print $1 if /"macos"\s*:\s*\{\s*"version"\s*:\s*"([^"]*)"/' latest.json)"
+perl -0pi -e 's/("macos"\s*:\s*\{\s*"version"\s*:\s*")[^"]*(")/${1}'"$VERSION"'${2}/' latest.json
+if [[ "$VERSION" == "$PUBLISHED" ]]; then
+    echo "warning: latest.json already says macOS $VERSION — bump the version in"
+    echo "         Cargo.toml, or installed copies will not be told about this build"
+fi
+
 echo
-echo "built $DMG ($(du -h "$DMG" | cut -f1))"
+echo "built $DMG ($(du -h "$DMG" | cut -f1)), version $VERSION"
+echo "commit $DMG and latest.json together"
 if [[ -z "$NOTARY_PROFILE" ]]; then
     echo
     echo "Not notarized. On another Mac the first launch is blocked; clear it once"

@@ -159,6 +159,7 @@ pub fn draw(
             ui.add_space(4.0);
             header(ui, &state, &cfg);
             ui.add_space(10.0);
+            update_banner(ui);
 
             section(ui, "Translate", |ui| translate_box(ui, &mut state, &cfg));
             section(ui, "Languages", |ui| {
@@ -282,6 +283,40 @@ fn footer(ui: &mut egui::Ui) {
             .color(TEXT_MUTED),
         );
     }
+}
+
+/// A newer build is published: say which, and open its download. Nothing is
+/// installed from here; the user replaces the app the way they installed it.
+fn update_banner(ui: &mut egui::Ui) {
+    let Some(newer) = crate::update::available() else {
+        return;
+    };
+    egui::Frame::new()
+        .fill(egui::Color32::from_rgb(44, 58, 48))
+        .corner_radius(8.0)
+        .inner_margin(egui::Margin::same(12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(
+                egui::RichText::new(format!("A new version is available: {}", newer.version))
+                    .size(13.0)
+                    .color(OK_GREEN)
+                    .strong(),
+            );
+            ui.label(
+                egui::RichText::new(format!(
+                    "You have {}. Your licence and settings stay as they are.",
+                    env!("CARGO_PKG_VERSION")
+                ))
+                .size(12.0)
+                .color(TEXT_SECONDARY),
+            );
+            ui.add_space(4.0);
+            if ui.button("Download").clicked() {
+                crate::shell::open_url(&newer.url);
+            }
+        });
+    ui.add_space(14.0);
 }
 
 fn header(ui: &mut egui::Ui, state: &MainState, cfg: &Config) {

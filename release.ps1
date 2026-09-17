@@ -78,9 +78,25 @@ if ($env:SIGN_THUMBPRINT) {
     Write-Host "See this script's header for the signed path."
 }
 
+# latest.json is what running copies read to say "a new version is available".
+# Only the Windows line is touched: the other platforms are released on their
+# own machines. Commit it together with the .exe, or nobody is told.
+$version = (Select-String -Path (Join-Path $PSScriptRoot 'Cargo.toml') -Pattern '^version = "(.*)"' |
+    Select-Object -First 1).Matches[0].Groups[1].Value
+$manifestPath = Join-Path $PSScriptRoot 'latest.json'
+$manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+if ($manifest.windows.version -eq $version) {
+    Write-Host "warning: latest.json already says Windows $version - bump the version in"
+    Write-Host "         Cargo.toml, or installed copies will not be told about this build"
+}
+$manifest.windows.version = $version
+# Written without a byte-order mark: the app reads it as plain UTF-8 JSON.
+[System.IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 4) + "`n")
+
 $size = [math]::Round((Get-Item $OUT).Length / 1MB, 1)
 Write-Host ""
-Write-Host "built $OUT ($size MB)"
+Write-Host "built $OUT ($size MB), version $version"
+Write-Host "commit bubbleTranslate.exe and latest.json together"
 Write-Host ""
 Write-Host "First run:"
 Write-Host "  double-click bubbleTranslate.exe"
