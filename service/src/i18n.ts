@@ -74,6 +74,12 @@ const en = {
     "Card details go to Paddle, not to this server. Paddle is the merchant of record and handles VAT and invoicing.",
   planUnavailable: "That plan is not available yet.",
   checkoutFailed: "Could not start checkout.",
+  // The three things a buyer weighs in the second before typing a card
+  // number, said once, next to the button.
+  trustPlatforms: "macOS, Windows and Linux",
+  trustDevices: "Three devices, one licence",
+  trustCancel: "Cancel any time",
+  securePayment: "Secure checkout — payment handled by Paddle",
 
   // /welcome
   thankYou: "Thank you",
@@ -162,6 +168,10 @@ const tr: Strings = {
     "Kart bilgileriniz Paddle'a gider, bu sunucuya değil. Satıcı Paddle'dır; KDV ve faturayı o düzenler.",
   planUnavailable: "Bu plan henüz kullanılamıyor.",
   checkoutFailed: "Ödeme başlatılamadı.",
+  trustPlatforms: "macOS, Windows ve Linux",
+  trustDevices: "Tek lisans, üç cihaz",
+  trustCancel: "İstediğiniz zaman iptal",
+  securePayment: "Güvenli ödeme — tahsilat Paddle üzerinden yapılır",
 
   thankYou: "Teşekkürler",
   confirming: "Ödemeniz doğrulanıyor…",
@@ -245,6 +255,10 @@ const es: Strings = {
     "Los datos de la tarjeta van a Paddle, no a este servidor. Paddle es el vendedor registrado y se encarga del IVA y la facturación.",
   planUnavailable: "Ese plan aún no está disponible.",
   checkoutFailed: "No se pudo iniciar el pago.",
+  trustPlatforms: "macOS, Windows y Linux",
+  trustDevices: "Tres dispositivos, una licencia",
+  trustCancel: "Cancela cuando quieras",
+  securePayment: "Pago seguro — gestionado por Paddle",
 
   thankYou: "Gracias",
   confirming: "Confirmando tu pago…",

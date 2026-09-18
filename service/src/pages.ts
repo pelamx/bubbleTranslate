@@ -6,9 +6,9 @@
 // have to ask this service anyway, and then the routing would live in two
 // places instead of one.
 //
-// Everything is inline — no build step, no CDN, no fonts to fetch. Paddle.js
-// is the single external script, and only on the page that opens a Paddle
-// checkout.
+// Everything is inline bar two fetches, both only on the pages a buyer sees:
+// the site's typeface, so the checkout reads as the same product one click
+// after the site, and Paddle.js, on the one page that opens a checkout.
 
 import type { Cycle } from "./env";
 import { TIERS } from "./tiers";
@@ -49,110 +49,216 @@ const jsonForScript = (value: unknown): string =>
  *  only from the site they are written on. */
 export const SITE = "https://bubbletranslate.app";
 
+/** The design tokens of the marketing site, repeated here on purpose.
+ *
+ *  A buyer arrives on this domain mid-thought, one click after the site, and
+ *  hands over a card. Anything that reads as a different product at that
+ *  moment is a reason to stop. These values are therefore not a theme: they
+ *  are the same values `bubbletranslate.app/styles.css` declares, and they
+ *  have to be changed in both places together. */
 const STYLE = `
-  :root { color-scheme: dark; }
-  footer.legal { max-width: 620px; margin: 26px auto 40px; padding: 0 18px; text-align: center;
+  :root {
+    color-scheme: dark;
+    --bg: #0b1020; --bg-soft: #121a33; --card: #16203f; --border: #24325c;
+    --text: #eaf0ff; --muted: #9fb0d4;
+    --brand: #4f8cff; --brand-2: #7c5cff; --accent: #23d5ab;
+  }
+  footer.legal { max-width: 620px; margin: 30px auto 44px; padding: 0 18px; text-align: center;
     font-size: .82rem; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
-  footer.legal a { color: #9fb0d4; text-decoration: none; }
-  footer.legal a:hover { color: #eaf0ff; text-decoration: underline; }
+  footer.legal a { color: var(--muted); text-decoration: none; }
+  footer.legal a:hover { color: var(--text); text-decoration: underline; }
   * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 40px 20px; background: #1e1f22; color: #f0f0f0;
-    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          "Helvetica Neue", Arial, sans-serif;
-    display: flex; justify-content: center;
+    margin: 0; padding: 40px 20px; color: var(--text);
+    background: radial-gradient(1200px 600px at 80% -10%, rgba(124,92,255,.18), transparent 60%),
+                radial-gradient(900px 500px at 0% 10%, rgba(79,140,255,.16), transparent 55%),
+                var(--bg);
+    background-attachment: fixed;
+    font: 15px/1.6 "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          Roboto, "Helvetica Neue", Arial, sans-serif;
+    /* A column, not a row: the legal footer is a sibling of the sheet, and in
+       a row it lands beside the content instead of under it. */
+    display: flex; flex-direction: column; align-items: center;
+    position: relative;
   }
+  /* Room for the language switcher above the mark on a narrow screen, where
+     the two would otherwise share the same line. */
+  @media (max-width: 560px) { body { padding-top: 52px; } }
   .sheet { width: 100%; max-width: 620px; }
   .sheet.wide { max-width: 1040px; }
+  /* The mark, so the page that takes the money is visibly the same product
+     as the page that asked for it. */
+  .brandbar { display: flex; align-items: center; gap: 10px; margin: 0 0 26px; font-weight: 800; font-size: 1.1rem; }
+  .brandbar svg { width: 32px; height: 32px; flex: none; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 6px 0 4px; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #2e3034; vertical-align: top; }
-  th { color: #9a9a9a; font-weight: 600; font-size: 12px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .scroll { overflow-x: auto; }
   .tiles { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); margin: 18px 0; }
-  .tile { background: #242629; border: 1px solid #3a3c41; border-radius: 10px; padding: 12px 14px; }
-  .tile .n { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .tile .l { font-size: 12px; color: #9a9a9a; }
+  .tile { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+  .tile .n { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .tile .l { font-size: 12px; color: var(--muted); }
   .row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
   .row > * { margin-top: 0; }
   .row button, .row input { width: auto; }
   form.inline { display: inline; }
   form.inline button { width: auto; padding: 5px 10px; font-size: 12px; margin: 0 2px 0 0; }
-  code { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #cfcfcf; }
-  h1 { font-size: 22px; margin: 0 0 6px; font-weight: 600; }
-  h2 { font-size: 15px; margin: 28px 0 10px; font-weight: 600; color: #dcdcdc; }
-  p { margin: 0 0 14px; color: #b8b8b8; }
-  .muted { color: #9a9a9a; font-size: 13px; }
-  .plans { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; margin: 22px 0 18px; }
+  code { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #c7d4f0; }
+  h1 { font-size: 28px; line-height: 1.15; margin: 0 0 8px; font-weight: 800; letter-spacing: -.4px; }
+  h2 { font-size: 15px; margin: 28px 0 10px; font-weight: 700; color: var(--text); }
+  p { margin: 0 0 14px; color: var(--muted); }
+  .muted { color: var(--muted); font-size: 13px; }
+  /* The instrument that takes the money. Raised off the page background so it
+     reads as a till rather than as another paragraph with a button under it. */
+  .paycard {
+    background: linear-gradient(180deg, rgba(22,32,63,.92), rgba(18,26,51,.92));
+    border: 1px solid var(--border); border-radius: 18px;
+    padding: 6px 22px 22px; margin: 22px 0 0;
+    box-shadow: 0 24px 60px rgba(0,0,0,.4);
+  }
+  @media (max-width: 520px) { .paycard { padding: 4px 16px 18px; } }
+  .paycard-top {
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    padding: 14px 0 2px; font-size: 12.5px; color: var(--muted);
+    letter-spacing: .01em;
+  }
+  .paycard-top svg { color: var(--accent); flex: none; }
+  .fineprint { font-size: 12.5px; margin: 16px 2px 0; text-align: center; }
+  .plans { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; margin: 16px 0 18px; }
   @media (max-width: 520px) { .plans { grid-template-columns: 1fr; } }
   .plan {
-    border: 1px solid #3a3c41; border-radius: 10px; padding: 16px; cursor: pointer;
-    background: #242629; display: block; position: relative;
+    /* Darker than the panel it sits in, so the two cards read as things to
+       choose between rather than as more panel. */
+    border: 1px solid var(--border); border-radius: 14px; padding: 16px; cursor: pointer;
+    background: rgba(11,16,32,.55); display: block; position: relative;
+    transition: border-color .15s ease, box-shadow .15s ease, background .2s ease;
   }
-  .plan.on { border-color: #78d28c; background: #26302a; }
+  .plan:hover { border-color: #33488a; }
+  .plan.on {
+    border-color: var(--brand); background: var(--bg-soft);
+    box-shadow: 0 0 0 1px var(--brand), 0 10px 30px rgba(79,140,255,.22);
+  }
   .plan input { position: absolute; opacity: 0; pointer-events: none; }
-  .plan .name { font-size: 13px; color: #b8b8b8; }
-  .plan .price { font-size: 24px; font-weight: 600; margin: 4px 0 2px; }
-  .plan .note { font-size: 12px; color: #78d28c; }
+  .plan .name { font-size: 13px; color: var(--muted); }
+  .plan .price { font-size: 26px; font-weight: 700; margin: 4px 0 2px; letter-spacing: -.5px; }
+  .plan .note { font-size: 12px; color: var(--accent); }
   .tiers { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; margin: 18px 0 6px; }
   @media (max-width: 520px) { .tiers { grid-template-columns: 1fr; } }
-  .tier { border: 1px solid #3a3c41; border-radius: 10px; padding: 12px 14px; font-size: 13px; }
-  .tier .name { color: #b8b8b8; font-weight: 600; margin-bottom: 4px; }
-  .tier.pro { border-color: #78d28c; }
-  .tier.pro .name { color: #78d28c; }
-  label.field { display: block; font-size: 13px; color: #b8b8b8; margin: 0 0 6px; }
+  /* What each tier gives, stated before the panel. Deliberately quiet: this
+     is context for the decision, not the decision. */
+  .tier { border: 1px solid transparent; border-left: 2px solid var(--border);
+    border-radius: 0; padding: 2px 0 2px 14px; font-size: 13px; color: var(--muted); }
+  .tier .name { color: var(--text); font-weight: 600; margin-bottom: 3px; }
+  .tier.pro { border-left-color: var(--brand); }
+  .tier.pro .name { color: var(--brand); }
+  /* What the buyer needs to know before typing a card number, in one line. */
+  .trust { display: flex; gap: 8px 18px; flex-wrap: wrap; justify-content: center;
+    margin: 16px 0 0; font-size: 12.5px; color: var(--muted); }
+  .trust span { display: inline-flex; align-items: center; gap: 6px; }
+  .trust span::before { content: ""; width: 5px; height: 5px; border-radius: 50%;
+    background: var(--accent); flex: none; }
+  label.field { display: block; font-size: 13px; color: var(--muted); margin: 0 0 6px; }
   input[type=text], input[type=email], input[type=number], input[type=date], select, textarea {
-    width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid #3a3c41;
-    background: #17181a; color: #f0f0f0; font-size: 15px; font-family: inherit;
+    width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border);
+    background: rgba(11,16,32,.6); color: var(--text); font-size: 15px; font-family: inherit;
   }
-  input:focus, select:focus, textarea:focus { outline: 2px solid #78d28c; outline-offset: -1px; }
+  input::placeholder, textarea::placeholder { color: #6b7ba6; }
+  input:focus, select:focus, textarea:focus {
+    outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(79,140,255,.25);
+  }
   textarea.keys {
     font: 14px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     letter-spacing: .06em; resize: vertical; margin: 8px 0 14px;
   }
   /* The admin edit panel: folded away so the listing stays a listing. */
-  tr.editrow td { border-bottom: 1px solid #2e3034; padding-top: 0; }
+  tr.editrow td { border-bottom: 1px solid var(--border); padding-top: 0; }
   tr.editrow details > summary {
-    cursor: pointer; color: #9a9a9a; font-size: 12px; padding: 2px 0; list-style: none;
+    cursor: pointer; color: var(--muted); font-size: 12px; padding: 2px 0; list-style: none;
   }
   tr.editrow details > summary::-webkit-details-marker { display: none; }
   tr.editrow details > summary::before { content: "▸ "; }
   tr.editrow details[open] > summary::before { content: "▾ "; }
-  tr.editrow details[open] > summary { color: #dcdcdc; margin-bottom: 10px; }
+  tr.editrow details[open] > summary { color: var(--text); margin-bottom: 10px; }
   .row.edit { margin-bottom: 12px; }
-  button.danger { background: #4a2326; color: #ffb4b4; }
+  button.danger { background: #4a1f2b; color: #ffb4c4; box-shadow: none; }
   button {
-    width: 100%; padding: 12px 16px; border-radius: 8px; border: 0; cursor: pointer;
-    background: #78d28c; color: #14261a; font-size: 15px; font-weight: 600;
-    font-family: inherit; margin-top: 14px;
+    width: 100%; padding: 13px 18px; border-radius: 999px; border: 0; cursor: pointer;
+    background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: #fff;
+    font-size: 15px; font-weight: 600; font-family: inherit; margin-top: 14px;
+    box-shadow: 0 10px 30px rgba(79,140,255,.35);
+    transition: transform .15s ease, box-shadow .15s ease;
   }
-  button:disabled { opacity: .55; cursor: default; }
-  button.quiet { background: #33363b; color: #e8e8e8; }
+  button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 16px 40px rgba(79,140,255,.45); }
+  button:disabled { opacity: .55; cursor: default; box-shadow: none; }
+  button.quiet { background: transparent; border: 1px solid var(--border); color: var(--text); box-shadow: none; }
+  button.quiet:hover:not(:disabled) { background: var(--bg-soft); }
   .key {
     font: 20px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    letter-spacing: .06em; background: #17181a; border: 1px solid #3a3c41;
-    border-radius: 8px; padding: 16px; text-align: center; user-select: all;
+    letter-spacing: .06em; background: rgba(11,16,32,.6); border: 1px solid var(--brand);
+    border-radius: 12px; padding: 16px; text-align: center; user-select: all;
     margin: 8px 0 14px; word-break: break-all;
   }
   .warn { color: #f5c382; }
   .err { color: #ff9696; }
-  .ok { color: #78d28c; }
-  hr { border: 0; border-top: 1px solid #33363b; margin: 26px 0; }
-  a { color: #9fd8ad; }
-  ol { color: #b8b8b8; padding-left: 20px; }
+  .ok { color: var(--accent); }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 26px 0; }
+  a { color: var(--brand); }
+  ol { color: var(--muted); padding-left: 20px; }
   li { margin-bottom: 6px; }
   iframe { width: 100%; border: 0; min-height: 720px; }
+  /* Absolute, not fixed: pinned to the top of the page rather than to the
+     viewport, so it scrolls away instead of riding over the panel that takes
+     the card details. */
   .langs {
-    position: fixed; top: 14px; right: 18px; display: flex; gap: 4px;
+    position: absolute; top: 14px; right: 18px; display: flex; gap: 4px;
     font-size: 12px; letter-spacing: .04em;
   }
   .langs a {
-    color: #9a9a9a; text-decoration: none; padding: 4px 7px; border-radius: 6px;
+    color: var(--muted); text-decoration: none; padding: 4px 8px; border-radius: 999px;
     border: 1px solid transparent;
   }
-  .langs a:hover { color: #f0f0f0; }
-  .langs a.on { color: #78d28c; border-color: #3a3c41; background: #242629; }
+  .langs a:hover { color: var(--text); }
+  .langs a.on { color: var(--text); border-color: var(--brand); background: var(--card); }
+  @media (prefers-reduced-motion: reduce) {
+    button, .plan { transition: none; }
+    button:hover:not(:disabled) { transform: none; }
+  }
 `;
+
+/** A closed padlock, drawn rather than fetched. The one piece of iconography
+ *  on the page, above the controls that ask for money. */
+const LOCK = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" width="14" height="14"
+  fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+  <rect x="4" y="10.5" width="16" height="10" rx="2.5"/>
+  <path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/>
+</svg>`;
+
+/** The site's mark, inline so the checkout page never waits on another
+ *  origin to look like itself. Kept in step with `bubbletranslate.app`'s
+ *  favicon.svg. */
+const LOGO = `<svg viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+  <defs><linearGradient id="btg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#4f8cff"/><stop offset="1" stop-color="#7c5cff"/>
+  </linearGradient>
+  <clipPath id="btglobe"><ellipse cx="34" cy="29" rx="11" ry="8.4"/></clipPath></defs>
+  <g fill="url(#btg)">
+    <circle cx="22" cy="27" r="12"/><circle cx="37" cy="21" r="14.5"/>
+    <circle cx="47" cy="30" r="11"/><circle cx="30" cy="35" r="12.5"/>
+    <circle cx="43" cy="37" r="10.5"/><circle cx="18" cy="47" r="4.6"/>
+    <circle cx="12" cy="55" r="3"/>
+  </g>
+  <g clip-path="url(#btglobe)" fill="none" stroke="#fff" stroke-width="1.5">
+    <line x1="23" y1="29" x2="45" y2="29"/><line x1="24.5" y1="23.4" x2="43.5" y2="23.4"/>
+    <line x1="24.5" y1="34.6" x2="43.5" y2="34.6"/><line x1="34" y1="20.6" x2="34" y2="37.4"/>
+    <ellipse cx="34" cy="29" rx="4" ry="8.4"/>
+  </g>
+  <ellipse cx="34" cy="29" rx="11" ry="8.4" fill="none" stroke="#fff" stroke-width="1.8"/>
+</svg>`;
+
+/** The mark plus the wordmark, linking back to the site it came from. */
+const brandBar = (): string =>
+  `<a class="brandbar" href="${SITE}/" style="color:inherit;text-decoration:none">${LOGO}<span>BubbleTranslate</span></a>`;
 
 /** Where the page is being served, which the language switcher needs to
  *  link back to. Absent on the admin panel, which has no switcher. */
@@ -205,11 +311,21 @@ export function page(
     headers["set-cookie"] =
       `lang=${lang}; Path=/; Max-Age=31536000; SameSite=Lax; Secure; HttpOnly`;
   }
+  // Inter is the site's typeface, so a buyer arriving one click later reads
+  // the same letterforms. Only on the pages a buyer sees: the admin panel
+  // has no reason to wait on a font from another origin, and the stack falls
+  // back to system-ui everywhere if the request never lands.
+  const font = ctx
+    ? `<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">`
+    : "";
   return new Response(
     `<!doctype html><html lang="${lang}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)}</title><style>${STYLE}</style>${head}</head>
-<body>${switcher}<div class="sheet${wide ? " wide" : ""}">${body}</div>${legalFooter(lang)}</body></html>`,
+<link rel="icon" type="image/svg+xml" href="${SITE}/favicon.svg">
+<title>${escapeHtml(title)}</title>${font}<style>${STYLE}</style>${head}</head>
+<body>${switcher}<div class="sheet${wide ? " wide" : ""}">${ctx ? brandBar() : ""}${body}</div>${legalFooter(lang)}</body></html>`,
     { headers },
   );
 }
@@ -298,13 +414,23 @@ export function buyPage(opts: BuyOptions): Response {
   // which licence to reveal.
   const paddleScript = `
     <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>`;
+  // Everything that takes money sits inside one raised panel: the cycle, the
+  // address the key is sent to, and the button. A checkout that looks like a
+  // discrete instrument is read as one, where the same controls loose on the
+  // page read as a form someone bolted on.
   const body = `
     ${heading}
-    ${plans}
-    <label class="field" for="email">${s.emailLabel}</label>
-    <input id="email" type="email" required autocomplete="email" placeholder="${escapeHtml(s.emailPlaceholder)}">
-    <button id="pay" type="button">${s.continueToPayment}</button>
-    <p class="muted" style="margin-top:14px">${s.paddleNote}</p>
+    <section class="paycard" aria-label="${escapeHtml(s.proTitle)}">
+      <header class="paycard-top">${LOCK}<span>${s.securePayment}</span></header>
+      ${plans}
+      <label class="field" for="email">${s.emailLabel}</label>
+      <input id="email" type="email" required autocomplete="email" placeholder="${escapeHtml(s.emailPlaceholder)}">
+      <button id="pay" type="button">${s.continueToPayment}</button>
+      <div class="trust">
+        <span>${s.trustPlatforms}</span><span>${s.trustDevices}</span><span>${s.trustCancel}</span>
+      </div>
+    </section>
+    <p class="muted fineprint">${s.paddleNote}</p>
     <script>
       ${PLAN_SCRIPT}
       Paddle.Environment.set(${jsonForScript(opts.paddleEnv)});
