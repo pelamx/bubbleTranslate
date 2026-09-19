@@ -1,14 +1,14 @@
 {
   "linux": {
     "version": "0.2.0",
-    "url": "https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate-linux-x86_64"
+    "url": "https://github.com/pelamx/bubbleTranslate/releases/download/v0.2.0/bubbleTranslate-linux-x86_64"
   },
   "macos": {
     "version": "0.2.0",
-    "url": "https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate.dmg"
+    "url": "https://github.com/pelamx/bubbleTranslate/releases/download/v0.2.0/bubbleTranslate.dmg"
   },
   "windows": {
     "version": "0.2.0",
-    "url": "https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate.exe"
+    "url": "https://github.com/pelamx/bubbleTranslate/releases/download/v0.2.0/bubbleTranslate.exe"
   }
 }
