@@ -33,7 +33,7 @@ static INDICATOR: AtomicBool = AtomicBool::new(false);
 /// deciding whether it is safe to have no window at all.
 static SETTLED: AtomicBool = AtomicBool::new(false);
 
-/// Set when "Open Bubble Translate" is chosen, cleared once the UI has acted
+/// Set when "Open bubbleTranslate" is chosen, cleared once the UI has acted
 /// on it. A flag rather than a channel: the menu callback runs on ksni's own
 /// thread, and the UI collects it on its next frame.
 static OPEN_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -246,7 +246,7 @@ pub fn indicator_settled() -> bool {
     SETTLED.load(Ordering::SeqCst)
 }
 
-/// True exactly once per click on "Open Bubble Translate".
+/// True exactly once per click on "Open bubbleTranslate".
 pub fn take_open_request() -> bool {
     OPEN_REQUESTED.swap(false, Ordering::SeqCst)
 }
@@ -353,7 +353,7 @@ impl ksni::Tray for BubbleTray {
     fn menu(&self) -> Vec<MenuItem<Self>> {
         vec![
             StandardItem {
-                label: "Open Bubble Translate".into(),
+                label: "Open bubbleTranslate".into(),
                 activate: Box::new(|_| request(&OPEN_REQUESTED, "open")),
                 ..Default::default()
             }

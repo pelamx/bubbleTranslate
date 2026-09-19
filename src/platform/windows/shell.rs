@@ -416,7 +416,7 @@ fn show_menu(window: HWND) {
             menu,
             MF_STRING,
             ID_OPEN as usize,
-            w!("Open Bubble Translate"),
+            w!("Open bubbleTranslate"),
         );
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
         let _ = AppendMenuW(

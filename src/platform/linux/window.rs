@@ -61,7 +61,7 @@ pub fn keep_on_all_workspaces() -> bool {
 }
 
 /// The bubble's window title, which is the app name `run_native` is given.
-/// The main window sets its own (`Bubble Translate`), so the two are told
+/// The main window sets its own (`bubbleTranslate`), so the two are told
 /// apart by it — the compositor reports no X11 window id to match on instead.
 const BUBBLE_TITLE: &str = "bubbleTranslate";
 

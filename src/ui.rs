@@ -951,7 +951,7 @@ impl BubbleApp {
             self.main.lock().unwrap().focus_requested = false;
         }
         let builder = egui::ViewportBuilder::default()
-            .with_title("Bubble Translate")
+            .with_title("bubbleTranslate")
             .with_inner_size(main_window::WINDOW_SIZE)
             .with_min_inner_size([400.0, 420.0]);
 

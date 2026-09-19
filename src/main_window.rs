@@ -322,7 +322,7 @@ fn update_banner(ui: &mut egui::Ui) {
 fn header(ui: &mut egui::Ui, state: &MainState, cfg: &Config) {
     ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new("Bubble Translate")
+            egui::RichText::new("bubbleTranslate")
                 .size(21.0)
                 .color(TEXT_PRIMARY)
                 .strong(),

@@ -258,7 +258,7 @@ const LOGO = `<svg viewBox="0 0 64 64" aria-hidden="true" focusable="false">
 
 /** The mark plus the wordmark, linking back to the site it came from. */
 const brandBar = (): string =>
-  `<a class="brandbar" href="${SITE}/" style="color:inherit;text-decoration:none">${LOGO}<span>BubbleTranslate</span></a>`;
+  `<a class="brandbar" href="${SITE}/" style="color:inherit;text-decoration:none">${LOGO}<span>bubbleTranslate</span></a>`;
 
 /** Where the page is being served, which the language switcher needs to
  *  link back to. Absent on the admin panel, which has no switcher. */

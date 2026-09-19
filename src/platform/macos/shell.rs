@@ -56,7 +56,7 @@ pub fn open_url(url: &str) {
     }
 }
 
-/// True exactly once per click on "Open Bubble Translate".
+/// True exactly once per click on "Open bubbleTranslate".
 pub fn take_open_request() -> bool {
     OPEN_REQUESTED.swap(false, Ordering::SeqCst)
 }
@@ -239,7 +239,7 @@ fn install_status_item(ctx: eframe::egui::Context) -> Option<Retained<NSStatusIt
     let menu = NSMenu::new(mtm);
 
     let open = NSMenuItem::new(mtm);
-    open.setTitle(&NSString::from_str("Open Bubble Translate"));
+    open.setTitle(&NSString::from_str("Open bubbleTranslate"));
     unsafe {
         open.setAction(Some(sel!(openMainWindow:)));
         open.setTarget(Some(&target));

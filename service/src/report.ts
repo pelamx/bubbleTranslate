@@ -134,7 +134,7 @@ export function renderHtml(m: Metrics): string {
   return `<!doctype html><html><body style="margin:0;background:#f6f7f9;font:15px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1a1a1a">
   <div style="max-width:560px;margin:0 auto;padding:24px">
     <div style="background:#fff;border:1px solid #e6e8eb;border-radius:12px;padding:24px">
-      <h1 style="margin:0 0 4px;font-size:20px">BubbleTranslate — haftalık özet</h1>
+      <h1 style="margin:0 0 4px;font-size:20px">bubbleTranslate — haftalık özet</h1>
       <p style="margin:0 0 18px;color:#777;font-size:13px">${from} → ${to}</p>
 
       <h2 style="font-size:15px;margin:0 0 8px">Bu hafta</h2>
@@ -169,7 +169,7 @@ export function renderHtml(m: Metrics): string {
 export function renderText(m: Metrics): string {
   const s = m.sales;
   return [
-    `BubbleTranslate — haftalık özet`,
+    `bubbleTranslate — haftalık özet`,
     ``,
     `Bu hafta:`,
     `  Yeni satış: ${s.count} (${s.monthly} aylık, ${s.yearly} yıllık) — ${delta(s.count, m.prev.count)}`,
@@ -207,7 +207,7 @@ export async function sendWeeklyReport(env: Env): Promise<void> {
       body: JSON.stringify({
         from: env.MAIL_FROM,
         to: reportTo(env),
-        subject: `BubbleTranslate haftalık: ${m.sales.count} satış, ${money(m.sales.revenue)}`,
+        subject: `bubbleTranslate haftalık: ${m.sales.count} satış, ${money(m.sales.revenue)}`,
         html: renderHtml(m),
         text: renderText(m),
       }),

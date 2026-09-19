@@ -33,5 +33,5 @@ PADDLE_WEBHOOK_SECRET = "pdl_ntfset_..."
 
 # -- Optional -----------------------------------------------------------------
 # RESEND_API_KEY = ""
-# MAIL_FROM = "BubbleTranslate <no-reply@bubbletranslate.app>"
+# MAIL_FROM = "bubbleTranslate <no-reply@bubbletranslate.app>"
 # ADMIN_PASSWORD = ""
