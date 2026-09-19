@@ -78,6 +78,17 @@ if ($env:SIGN_THUMBPRINT) {
     Write-Host "See this script's header for the signed path."
 }
 
+# The zip is the download the README offers first, and it exists because of the
+# signature this build does not have: a browser handed a bare unsigned .exe
+# says it "isn't commonly downloaded" and discards it unless the user digs the
+# file back out of the warning. The same bytes inside a zip arrive without the
+# warning, and at 7 MB rather than 17. It is zipped after signing so that a
+# signed .exe is what goes in, and uploaded beside the .exe -- latest.json
+# still points installed copies at the .exe, which is what the updater fetches.
+$ZIP = Join-Path $PSScriptRoot 'bubbleTranslate-windows-x64.zip'
+Remove-Item $ZIP -Force -ErrorAction SilentlyContinue
+Compress-Archive -Path $OUT -DestinationPath $ZIP -CompressionLevel Optimal
+
 # latest.json is what running copies read to say "a new version is available".
 # Only the Windows line is touched: the other platforms are released on their
 # own machines. Commit it together with the .exe, or nobody is told.
@@ -101,10 +112,12 @@ if ($found.Groups[2].Value -eq $version) {
 [System.IO.File]::WriteAllText($manifestPath, [regex]::Replace($raw, $pattern, "`${1}$version`${3}"))
 
 $size = [math]::Round((Get-Item $OUT).Length / 1MB, 1)
+$zipSize = [math]::Round((Get-Item $ZIP).Length / 1MB, 1)
 Write-Host ""
 Write-Host "built $OUT ($size MB), version $version"
-Write-Host "upload bubbleTranslate.exe to the v$version GitHub release, then commit latest.json"
-Write-Host "(the binary is not tracked -- latest.json is the only thing to commit)"
+Write-Host "      $ZIP ($zipSize MB)"
+Write-Host "upload both to the v$version GitHub release, then commit latest.json"
+Write-Host "(neither is tracked -- latest.json is the only thing to commit)"
 Write-Host ""
 Write-Host "First run:"
 Write-Host "  double-click bubbleTranslate.exe"

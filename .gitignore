@@ -8,6 +8,11 @@ bubbleTranslate.dmg
 bubbleTranslate.exe
 bubbleTranslate-linux-x86_64
 
+# The zipped Windows download. Browsers show "isn't commonly downloaded" on a
+# bare unsigned .exe and discard it unless the warning is clicked through; the
+# same bytes inside a zip arrive without it. Built and uploaded like the rest.
+bubbleTranslate-windows-x64.zip
+
 # Source artwork and exported marks, kept on this machine rather than in the
 # repository. The icons that actually ship (linux/*.svg, windows/*.ico) are
 # tracked by name where they live.

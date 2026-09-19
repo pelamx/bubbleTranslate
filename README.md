@@ -14,7 +14,7 @@ selected, which is a surprisingly large difference: see
 | | Download | What you get |
 |---|---|---|
 | **macOS** | [`bubbleTranslate.dmg`](https://github.com/pelamx/bubbleTranslate/releases/download/v0.2.2/bubbleTranslate.dmg) (14 MB, Intel + Apple Silicon) | An app bundle to drag into Applications |
-| **Windows** | [`bubbleTranslate.exe`](https://github.com/pelamx/bubbleTranslate/releases/download/v0.2.2/bubbleTranslate.exe) (17 MB, Windows 10 and 11) | One executable to double-click |
+| **Windows** | [`bubbleTranslate-windows-x64.zip`](https://github.com/pelamx/bubbleTranslate/releases/download/v0.2.2/bubbleTranslate-windows-x64.zip) (7 MB, Windows 10 and 11) — or the [bare `.exe`](https://github.com/pelamx/bubbleTranslate/releases/download/v0.2.2/bubbleTranslate.exe) (17 MB) | One executable to double-click |
 | **Linux** | [`bubbleTranslate-linux-x86_64`](https://github.com/pelamx/bubbleTranslate/releases/download/v0.2.2/bubbleTranslate-linux-x86_64) (20 MB) | One executable to `chmod +x` and run |
 
 The download is the metered build: ten free translations a day, and Pro to
@@ -65,7 +65,24 @@ Accessibility grant from going stale, explained below.
 
 ### Windows — from the .exe
 
-Put `bubbleTranslate.exe` wherever you keep programs and double-click it.
+**Take the zip.** A browser asked to download a bare unsigned `.exe` says
+*"bubbleTranslate.exe isn't commonly downloaded. Make sure you trust it before
+you open it"* and throws the file away unless the warning is clicked through —
+which is why the table above offers `bubbleTranslate-windows-x64.zip` first.
+It holds the same executable, downloads without the warning, and is 7 MB
+rather than 17. Right-click it and choose **Extract All**.
+
+To take the `.exe` directly anyway, click through the warning rather than
+around it: in Edge, open the downloads flyout, click the `···` beside the
+file, choose **Keep**, then **Keep anyway**; in Chrome, click the `⌄` on the
+download and choose **Keep**. Either way the bytes are the ones listed in
+`SHA256SUMS.txt` on the release, which you can check before running anything:
+
+```powershell
+Get-FileHash .\bubbleTranslate.exe -Algorithm SHA256
+```
+
+Then put `bubbleTranslate.exe` wherever you keep programs and double-click it.
 There is nothing to install: the C runtime is linked in, so no Visual C++
 redistributable is needed, and the settings are written to
 `%APPDATA%\bubbleTranslate` the first time it runs.
@@ -74,6 +91,11 @@ The file is not code-signed, so SmartScreen stops the first launch with
 *"Windows protected your PC"*. Click **More info** and then **Run anyway**.
 That is once per machine, not once per launch, and it is a statement about a
 certificate we have not bought rather than about the file.
+
+Both warnings are the same missing certificate, not a virus scanner: nothing
+is detected in the binary. Without a signature, Windows rates a download by
+how many machines have seen that exact file, and every release is a new file
+that starts at zero.
 
 No permission is needed after that — Windows lets any application read another
 one's selection within your own session — so it starts watching immediately.
