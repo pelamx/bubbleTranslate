@@ -89,6 +89,10 @@ fn main() -> eframe::Result<()> {
         );
         std::process::exit(1);
     }
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!(concat!("bubbleTranslate ", env!("CARGO_PKG_VERSION")));
+        std::process::exit(0);
+    }
     if args.iter().any(|a| a == "--check") {
         std::process::exit(check_providers());
     }
@@ -432,6 +436,10 @@ fn check_providers() -> i32 {
     let translator = translate::Translator::new();
     let mut healthy = 0;
 
+    // Named before the probes: --check is what a user is asked to run when
+    // something is wrong, and the answer is no use without knowing which
+    // build produced it.
+    println!(concat!("bubbleTranslate ", env!("CARGO_PKG_VERSION")));
     println!("probe: \"{PROBE}\" → {}\n", cfg.target_lang);
     for provider in [
         config::Provider::Google,

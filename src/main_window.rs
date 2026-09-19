@@ -327,6 +327,15 @@ fn header(ui: &mut egui::Ui, state: &MainState, cfg: &Config) {
                 .color(TEXT_PRIMARY)
                 .strong(),
         );
+        // The running version, always on show. It is the first thing a bug
+        // report needs and the thing the update banner below is talking
+        // about, so it is worth a permanent corner of the window rather than
+        // only appearing once a newer build exists.
+        ui.label(
+            egui::RichText::new(concat!("v", env!("CARGO_PKG_VERSION")))
+                .size(11.5)
+                .color(TEXT_MUTED),
+        );
         ui.label(
             egui::RichText::new("by pelamx")
                 .size(11.5)
