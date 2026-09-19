@@ -1,7 +1,7 @@
 {
   "linux": {
-    "version": "0.2.1",
-    "url": "https://github.com/pelamx/bubbleTranslate/releases/download/v0.2.1/bubbleTranslate-linux-x86_64"
+    "version": "0.2.2",
+    "url": "https://github.com/pelamx/bubbleTranslate/releases/download/v0.2.2/bubbleTranslate-linux-x86_64"
   },
   "macos": {
     "version": "0.2.2",
