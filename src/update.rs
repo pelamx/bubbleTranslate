@@ -1,11 +1,15 @@
 //! Says when a newer build has been published. Never downloads or installs it.
 //!
-//! The downloads are the binaries in the repository, and `latest.json` beside
-//! them names the version each one is. A release rewrites its own platform's
-//! line in the same commit as the binary, so "the binary on GitHub changed"
-//! and "a newer version is available" cannot drift apart. The platforms are
-//! released separately, which is why each has its own line: a rebuilt DMG
-//! tells macOS and nobody else.
+//! The downloads are assets on a versioned GitHub release, and `latest.json`
+//! in the repository names both the version and the URL for each platform. A
+//! release uploads the binary and rewrites its own platform's line, so "the
+//! download on GitHub changed" and "a newer version is available" cannot
+//! drift apart. The platforms are released separately, which is why each has
+//! its own line: a rebuilt DMG tells macOS and nobody else.
+//!
+//! Windows points at the zip rather than the bare `.exe`, because this URL is
+//! opened in the user's browser and a browser discards an unsigned `.exe` it
+//! considers uncommon. The same bytes inside a zip arrive.
 //!
 //! The check reads a public file and sends nothing about this install.
 
