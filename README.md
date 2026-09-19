@@ -13,9 +13,9 @@ selected, which is a surprisingly large difference: see
 
 | | Download | What you get |
 |---|---|---|
-| **macOS** | [`bubbleTranslate.dmg`](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate.dmg) (14 MB, Intel + Apple Silicon) | An app bundle to drag into Applications |
-| **Windows** | [`bubbleTranslate.exe`](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate.exe) (17 MB, Windows 10 and 11) | One executable to double-click |
-| **Linux** | [`bubbleTranslate-linux-x86_64`](https://github.com/pelamx/bubbleTranslate/raw/main/bubbleTranslate-linux-x86_64) (20 MB) | One executable to `chmod +x` and run |
+| **macOS** | [`bubbleTranslate.dmg`](https://github.com/pelamx/bubbleTranslate/releases/download/v0.2.0/bubbleTranslate.dmg) (14 MB, Intel + Apple Silicon) | An app bundle to drag into Applications |
+| **Windows** | [`bubbleTranslate.exe`](https://github.com/pelamx/bubbleTranslate/releases/download/v0.2.0/bubbleTranslate.exe) (17 MB, Windows 10 and 11) | One executable to double-click |
+| **Linux** | [`bubbleTranslate-linux-x86_64`](https://github.com/pelamx/bubbleTranslate/releases/download/v0.2.1/bubbleTranslate-linux-x86_64) (20 MB) | One executable to `chmod +x` and run |
 
 The download is the metered build: ten free translations a day, and Pro to
 lift the limit — see [The free allowance and Pro](#the-free-allowance-and-pro).
