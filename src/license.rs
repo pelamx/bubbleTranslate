@@ -714,22 +714,41 @@ fn write_cache(cached: &Cached) {
     }
     match serde_json::to_string_pretty(cached) {
         Ok(json) => {
-            if let Err(err) = std::fs::write(&path, json) {
-                // Not fatal: the entitlement is live in memory for this
-                // session, and the next launch simply asks again.
+            // Not fatal: the entitlement is live in memory for this session,
+            // and the next launch simply asks again.
+            if let Err(err) = write_private(&path, json.as_bytes()) {
                 eprintln!("bubbleTranslate: could not save {}: {err}", path.display());
-            }
-            // The token is a month-long bearer credential for this machine,
-            // so the file is the user's alone to read. `fs::write` creates
-            // 0644, which lets any other local account read it.
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
             }
         }
         Err(err) => eprintln!("bubbleTranslate: could not encode the licence ({err})"),
     }
+}
+
+/// Writes a file that only its owner can read.
+///
+/// The token is a month-long bearer credential for this machine, so the file
+/// is the user's alone. On Unix the file is *created* 0600 rather than created
+/// 0644 and narrowed afterwards: `fs::write` would leave a window in which any
+/// other local account could read a fresh token. `set_permissions` still runs
+/// too, to narrow a file an older build already left at 0644.
+#[cfg(unix)]
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    file.write_all(bytes)
+}
+
+#[cfg(not(unix))]
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    std::fs::write(path, bytes)
 }
 
 // -- odds and ends ---------------------------------------------------------

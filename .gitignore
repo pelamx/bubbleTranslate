@@ -1,5 +1,18 @@
 /target
 
+# The shipped downloads. They are distributed as GitHub release assets --
+# latest.json points installed copies at those URLs -- so they are built here
+# and uploaded to the release, never committed: a 20 MB binary per release
+# turned the history into half a gigabyte of the same file over again.
+bubbleTranslate.dmg
+bubbleTranslate.exe
+bubbleTranslate-linux-x86_64
+
+# Source artwork and exported marks, kept on this machine rather than in the
+# repository. The icons that actually ship (linux/*.svg, windows/*.ico) are
+# tracked by name where they live.
+logos/
+
 # The last unlimited builds, kept on this machine only. Never published:
 # the download on GitHub is the metered build, under the plain name.
 bubbleTranslate-free*
@@ -24,3 +37,21 @@ bubbleTranslate.exe.locked-old
 
 .DS_Store
 Thumbs.db
+
+# Secrets, never committed. Real credentials live outside the repo entirely --
+# the service reads them from `wrangler secret`, the signing key from a
+# keychain -- but this is the net that catches a stray one before it ships.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+# The service's local dev secrets (also covered by service/.gitignore).
+.dev.vars
+.dev.vars.*
+
+# Checksums of the shipped downloads. Generated per release and uploaded to the
+# GitHub release beside the binaries they describe, not tracked -- the binaries
+# themselves are release assets too.
+SHA256SUMS.txt

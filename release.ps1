@@ -96,7 +96,8 @@ $manifest.windows.version = $version
 $size = [math]::Round((Get-Item $OUT).Length / 1MB, 1)
 Write-Host ""
 Write-Host "built $OUT ($size MB), version $version"
-Write-Host "commit bubbleTranslate.exe and latest.json together"
+Write-Host "upload bubbleTranslate.exe to the v$version GitHub release, then commit latest.json"
+Write-Host "(the binary is not tracked -- latest.json is the only thing to commit)"
 Write-Host ""
 Write-Host "First run:"
 Write-Host "  double-click bubbleTranslate.exe"

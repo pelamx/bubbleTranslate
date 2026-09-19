@@ -93,9 +93,13 @@ The timestamp is inside the MAC, so it cannot be edited to make an old webhook
 look fresh. A valid signature over a stale timestamp is a replay, and both
 halves have to hold.
 
-Events handled today: `transaction.completed`, `subscription.canceled`,
-`adjustment.created`. Webhooks are retried, so every handler must be
-idempotent — look the licence up by `provider_ref` before creating one.
+Events that move a licence today: `transaction.completed` (buys or renews),
+`subscription.canceled` (ends the term's recurrence) and `adjustment.created`
+(a refund cuts the term short). Alongside them `subscription.created`,
+`subscription.updated`, `customer.created` and `customer.updated` are handled
+too, but only to keep the D1 mirror current — they entitle nobody on their own.
+Webhooks are retried, so every handler must be idempotent — look the licence up
+by `provider_ref` before creating one.
 
 ### Ask before doing anything destructive
 

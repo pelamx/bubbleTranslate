@@ -124,7 +124,8 @@ export async function verifyWebhook(
   }
   if (!ts || !h1) return null;
 
-  if (Math.abs(now() - Number(ts)) > MAX_SKEW) {
+  const tsNum = Number(ts);
+  if (!Number.isFinite(tsNum) || Math.abs(now() - tsNum) > MAX_SKEW) {
     console.error("Paddle webhook rejected: timestamp outside the allowed window");
     return null;
   }

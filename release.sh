@@ -125,7 +125,8 @@ fi
 
 echo
 echo "built $DMG ($(du -h "$DMG" | cut -f1)), version $VERSION"
-echo "commit $DMG and latest.json together"
+echo "upload $DMG to the v$VERSION GitHub release, then commit latest.json"
+echo "(the binary is not tracked — latest.json is the only thing to commit)"
 if [[ -z "$NOTARY_PROFILE" ]]; then
     echo
     echo "Not notarized. On another Mac the first launch is blocked; clear it once"

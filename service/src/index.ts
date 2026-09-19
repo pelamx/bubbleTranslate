@@ -276,7 +276,7 @@ async function checkoutPaddle(env: Env, request: Request): Promise<Response> {
     email: email || null,
     // Paddle prices the transaction itself, in the buyer's own currency. The
     // dollar price is recorded for reconciliation, not to charge against.
-    amount: cycle === "yearly" ? 2000 : 200,
+    amount: USD_AMOUNT[cycle] * 100,
     currency: "USD",
   });
   return json({ ref });
