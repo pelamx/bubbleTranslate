@@ -22,6 +22,21 @@
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
+# --- the record -------------------------------------------------------------
+#
+# Refused rather than warned: a release whose entry is written afterwards is
+# written from memory, and the people it is for are the two running the app.
+
+$version = (Select-String -Path (Join-Path $PSScriptRoot 'Cargo.toml') -Pattern '^version = "(.*)"' |
+    Select-Object -First 1).Matches[0].Groups[1].Value
+$changelog = Get-Content (Join-Path $PSScriptRoot 'CHANGELOG.md') -Raw
+if ($changelog -notmatch "(?m)^## $([regex]::Escape($version))(\s|$)") {
+    Write-Host "error: CHANGELOG.md has no section for $version." -ForegroundColor Red
+    Write-Host "       Add one - rename '## Unreleased' to '## $version - $(Get-Date -Format yyyy-MM-dd)'"
+    Write-Host "       and say, for the people using the app, what changed and why."
+    exit 1
+}
+
 $TARGET = 'x86_64-pc-windows-msvc'
 $OUT = Join-Path $PSScriptRoot 'bubbleTranslate.exe'
 
@@ -92,8 +107,6 @@ Compress-Archive -Path $OUT -DestinationPath $ZIP -CompressionLevel Optimal
 # latest.json is what running copies read to say "a new version is available".
 # Only the Windows line is touched: the other platforms are released on their
 # own machines. Commit it together with the .exe, or nobody is told.
-$version = (Select-String -Path (Join-Path $PSScriptRoot 'Cargo.toml') -Pattern '^version = "(.*)"' |
-    Select-Object -First 1).Matches[0].Groups[1].Value
 $manifestPath = Join-Path $PSScriptRoot 'latest.json'
 
 # Edited in place rather than round-tripped through ConvertFrom-Json: the

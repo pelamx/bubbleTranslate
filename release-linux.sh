@@ -17,6 +17,19 @@ cd "$(dirname "$0")"
 OUT="bubbleTranslate-linux-x86_64"
 SUMS="SHA256SUMS.txt"
 
+# --- the record -------------------------------------------------------------
+#
+# Refused rather than warned: a release whose entry is written afterwards is
+# written from memory, and the people it is for are the two running the app.
+
+VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+if ! grep -q "^## $VERSION " CHANGELOG.md && ! grep -q "^## $VERSION$" CHANGELOG.md; then
+    echo "error: CHANGELOG.md has no section for $VERSION." >&2
+    echo "       Add one -- rename '## Unreleased' to '## $VERSION -- $(date +%Y-%m-%d)'" >&2
+    echo "       and say, for the people using the app, what changed and why." >&2
+    exit 1
+fi
+
 # --- build ------------------------------------------------------------------
 
 echo "==> building"
@@ -42,7 +55,6 @@ rm -f "$SUMS.new"
 # Only the Linux line is touched: the other platforms are released on their own
 # machines. Commit it together with the upload, or nobody is told.
 
-VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 PUBLISHED="$(perl -0ne 'print $1 if /"linux"\s*:\s*\{\s*"version"\s*:\s*"([^"]*)"/' latest.json)"
 if [[ -z "$PUBLISHED" ]]; then
     echo "error: latest.json has no linux version to update" >&2
@@ -68,6 +80,9 @@ echo "checksummed into $SUMS"
 echo
 echo "  gh release create v$VERSION --title \"bubbleTranslate $VERSION\" \\"
 echo "      $OUT $SUMS"
+echo
+echo "use this version's section of CHANGELOG.md as the release notes -- it is"
+echo "what the download page shows to whoever just saw the update banner"
 echo
 echo "then commit latest.json (the binary is not tracked — latest.json and the"
 echo "version in Cargo.toml are the only things that are)"

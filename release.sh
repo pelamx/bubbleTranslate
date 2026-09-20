@@ -28,6 +28,19 @@ trap 'rm -rf "$(dirname "$STAGE")"' EXIT
 SIGN_IDENTITY="${SIGN_IDENTITY:-}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 
+# --- the record -------------------------------------------------------------
+#
+# Refused rather than warned: a release whose entry is written afterwards is
+# written from memory, and the people it is for are the two running the app.
+
+VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+if ! grep -q "^## $VERSION " CHANGELOG.md && ! grep -q "^## $VERSION$" CHANGELOG.md; then
+    echo "error: CHANGELOG.md has no section for $VERSION." >&2
+    echo "       Add one -- rename '## Unreleased' to '## $VERSION -- $(date +%Y-%m-%d)'" >&2
+    echo "       and say, for the people using the app, what changed and why." >&2
+    exit 1
+fi
+
 # --- build the .app ---------------------------------------------------------
 
 ./bundle.sh > /dev/null
@@ -148,7 +161,6 @@ fi
 # Only the macOS line is touched: the other platforms are released on their
 # own machines. Commit it together with the DMG, or nobody is told.
 
-VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 PUBLISHED="$(perl -0ne 'print $1 if /"macos"\s*:\s*\{\s*"version"\s*:\s*"([^"]*)"/' latest.json)"
 perl -0pi -e 's/("macos"\s*:\s*\{\s*"version"\s*:\s*")[^"]*(")/${1}'"$VERSION"'${2}/' latest.json
 if [[ "$VERSION" == "$PUBLISHED" ]]; then

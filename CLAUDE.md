@@ -12,6 +12,37 @@ application and a small bubble appears at the cursor with the translation.
   of a translation.
 - The website lives in a separate repository, `pelamx/bubbletranslate.app`.
 
+## Every change is written down for the people using it
+
+`CHANGELOG.md` at the root is the record, and keeping it current is part of
+making a change rather than a step to raise afterwards. **Do not ask whether to
+add an entry — add it.** The same rule holds on every machine: this repository
+is the same on the Mac, on Windows and on Linux, and a release from any of them
+is expected to arrive with its entry already written.
+
+What earns an entry: anything someone running the app could notice. A fix, a
+new behaviour, a changed default, a different download, a rename. What does
+not: refactoring, tests, comments, the website's own styling, and anything
+that leaves the app behaving exactly as before.
+
+How to write one, which is the part that matters:
+
+- Write for the person using the app, not for the person who wrote the code.
+  Name the thing they saw going wrong, not the function that was wrong.
+- Say why it was worth changing. An entry that only says *what* changed makes
+  a reader work out whether it affects them; one sentence of *why* answers it.
+- Mark a change that only affects one system — `(Windows)`, `(macOS)`,
+  `(Linux)` — because the three are released separately.
+- No commit hashes, no file paths, no internal names. If a sentence cannot be
+  written without one, it is probably not an entry.
+
+New entries go under `## Unreleased`. Releasing turns that heading into the
+version and the date; the release scripts refuse to build a version that has no
+section of its own, the same way they warn about a version that was never
+bumped. That section is also the body of the GitHub release, pasted as it is —
+the release page is where someone who just saw "a new version is available"
+ends up, so it is where the explanation has to be.
+
 ## Writing the name
 
 The product is **bubbleTranslate** — lowercase `b`, capital `T`, one word.
