@@ -12,6 +12,23 @@ application and a small bubble appears at the cursor with the translation.
   of a translation.
 - The website lives in a separate repository, `pelamx/bubbletranslate.app`.
 
+## Writing the name
+
+The product is **bubbleTranslate** — lowercase `b`, capital `T`, one word.
+Never `BubbleTranslate`, never `Bubble Translate`, never `bubbletranslate` as a
+word. It is written that way everywhere a person can read it: the interface,
+the website in all three languages, page titles, meta tags, alt text, release
+notes, commit messages and prose in this repository.
+
+Two things are not the name and stay as they are: the domain and URLs
+(`bubbletranslate.app`, all-lowercase because hostnames are), and identifiers a
+language or platform has its own convention for — `BubbleTranslateStatusTarget`
+in `src/platform/macos/shell.rs` is an Objective-C class name, which nobody
+reads and which is capitalised the way Objective-C classes are.
+
+A sentence that begins with the name still begins with a lowercase `b`. That
+looks wrong for a moment and is correct: it is a name, not a word.
+
 Run `cargo test` before proposing a client change. The suite includes an
 integration test that drives the real binary, so a change to startup ordering
 is caught rather than assumed safe.
