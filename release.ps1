@@ -122,7 +122,16 @@ if ($found.Groups[2].Value -eq $version) {
     Write-Host "         Cargo.toml, or installed copies will not be told about this build"
 }
 # Written without a byte-order mark: the app reads it as plain UTF-8 JSON.
-[System.IO.File]::WriteAllText($manifestPath, [regex]::Replace($raw, $pattern, "`${1}$version`${3}"))
+$raw = [regex]::Replace($raw, $pattern, "`${1}$version`${3}")
+
+# And the URL beside it, which names the release the download is an asset of.
+# Bumping the version alone is how a build gets announced as new and then hands
+# over the previous one: the app compares versions and opens whatever URL it is
+# given, so the two have to move together.
+$urlPattern = '("windows"\s*:\s*\{[\s\S]*?"url"\s*:\s*"[^"]*?/download/)v[^/]+(/)'
+$raw = [regex]::Replace($raw, $urlPattern, "`${1}v$version`${2}")
+
+[System.IO.File]::WriteAllText($manifestPath, $raw)
 
 $size = [math]::Round((Get-Item $OUT).Length / 1MB, 1)
 $zipSize = [math]::Round((Get-Item $ZIP).Length / 1MB, 1)

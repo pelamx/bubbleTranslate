@@ -61,6 +61,11 @@ if [[ -z "$PUBLISHED" ]]; then
     exit 1
 fi
 perl -0pi -e 's/("linux"\s*:\s*\{\s*"version"\s*:\s*")[^"]*(")/${1}'"$VERSION"'${2}/' latest.json
+# And the URL beside it, which names the release the download is an asset of.
+# Bumping the version alone is how a build gets announced as new and then hands
+# over the previous one: the app compares versions and opens whatever URL it is
+# given, so the two have to move together.
+VERSION="$VERSION" perl -0pi -e 's{("linux"\s*:\s*\{.*?"url"\s*:\s*"[^"]*?/download/)v[^/]+(/)}{$1 . "v" . $ENV{VERSION} . $2}se' latest.json
 if [[ "$VERSION" == "$PUBLISHED" ]]; then
     echo
     echo "warning: latest.json already says Linux $VERSION — bump the version in"
