@@ -13,7 +13,8 @@
 //!
 //!   * only for the trigger key, and only when something positively says it
 //!     was held — "no idea" is not enough to send a keystroke;
-//!   * only after a drag, not a click;
+//!   * only after a drag, or a double click — the two ways a word gets
+//!     selected, and both of them deliberate. A single click is neither;
 //!   * only in a browser: Ctrl+C in a terminal interrupts what is running;
 //!   * only when the page published nothing, so every ordinary selection
 //!     still goes the ordinary way and nothing is copied at all;
@@ -45,6 +46,13 @@ const ECHO_WINDOW: Duration = Duration::from_millis(700);
 
 /// Pointer movement below this, in logical pixels, is a click.
 const MIN_DRAG: f64 = 6.0;
+
+/// How soon after a release the next press is the same gesture continuing —
+/// a double click selecting a word, or a triple click selecting a line. The
+/// pointer does not move at all for those, so the drag test below can never
+/// see them, and a word is exactly what someone reaching for a translator
+/// selects most often.
+const MULTI_CLICK: Duration = Duration::from_millis(400);
 
 /// The window classes a copy may be sent to, as lowercase substrings.
 const BROWSERS: [&str; 9] = [
@@ -78,27 +86,40 @@ pub fn start() {
     let _ = std::thread::Builder::new()
         .name("clipboard-borrow".into())
         .spawn(move || {
-            let mut press: Option<(u64, Option<(f64, f64)>)> = None;
+            let mut press: Option<(u64, Option<(f64, f64)>, bool)> = None;
+            let mut released: Option<Instant> = None;
             for down in rx {
                 if down {
-                    press = Some((wayland::primary_generation(), cursor::position()));
-                } else if let Some((generation, from)) = press.take() {
-                    consider(generation, from);
+                    let multi = continues_a_click(released);
+                    press = Some((wayland::primary_generation(), cursor::position(), multi));
+                } else if let Some((generation, from, multi)) = press.take() {
+                    released = Some(Instant::now());
+                    consider(generation, from, multi);
                 }
             }
         });
 }
 
-fn consider(generation: u64, from: Option<(f64, f64)>) {
+/// Whether a press this soon after the last release is the same gesture
+/// continuing rather than a new one starting.
+fn continues_a_click(released: Option<Instant>) -> bool {
+    released.is_some_and(|at| at.elapsed() < MULTI_CLICK)
+}
+
+fn consider(generation: u64, from: Option<(f64, f64)>, multi_click: bool) {
     let key = monitor::trigger_key();
     if key == TriggerKey::Always || monitor::key_held(key) != Some(true) {
         return;
     }
-    let (Some(from), Some(to)) = (from, cursor::position()) else {
-        return;
-    };
-    if (to.0 - from.0).hypot(to.1 - from.1) < MIN_DRAG {
-        return;
+    // A double click has no distance to measure; it is the gesture itself
+    // that says the user picked a word out.
+    if !multi_click {
+        let (Some(from), Some(to)) = (from, cursor::position()) else {
+            return;
+        };
+        if (to.0 - from.0).hypot(to.1 - from.1) < MIN_DRAG {
+            return;
+        }
     }
     let Some(class) = compositor::focused_class() else {
         return;
@@ -167,6 +188,14 @@ mod tests {
         for class in ["alacritty", "com.mitchellh.ghostty", "code", "kitty", "foot"] {
             assert!(!is_browser(class), "{class}");
         }
+    }
+
+    #[test]
+    fn a_quick_second_press_is_the_same_gesture() {
+        assert!(continues_a_click(Some(Instant::now())));
+        assert!(!continues_a_click(Some(Instant::now() - MULTI_CLICK)));
+        // The very first click of a session has nothing to continue.
+        assert!(!continues_a_click(None));
     }
 
     #[test]
