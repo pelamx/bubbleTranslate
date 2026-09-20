@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.2.3 — 2026-09-20
 
 **There is a way to write in from inside the app.** A "Send feedback" box at
 the bottom of the window takes a complaint or a suggestion and opens it, already
