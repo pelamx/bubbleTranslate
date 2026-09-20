@@ -101,6 +101,15 @@ pub fn request_open() {
     request(&OPEN_REQUESTED, "open");
 }
 
+/// Asks the UI to close everything down, as the indicator's Quit does.
+///
+/// Public for the same reason as [`request_open`], and for the opposite
+/// outcome: when the copy launched is a newer build than this one, this is the
+/// copy that gets out of the way. See [`crate::ipc`].
+pub fn request_quit() {
+    request(&QUIT_REQUESTED, "quit");
+}
+
 fn request(flag: &AtomicBool, what: &str) {
     crate::trace!("{what} requested");
     flag.store(true, Ordering::SeqCst);

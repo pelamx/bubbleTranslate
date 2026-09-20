@@ -114,6 +114,11 @@ fn main() -> eframe::Result<()> {
     // second launch is read as what it almost always means — "show me the
     // window" — and this process stands down.
     //
+    // Almost always, but not when the copy just launched is a newer build:
+    // that is what installing an update looks like on Windows, and the old
+    // copy is the one that quits. `request_open` says which of the two this
+    // is, and only the copy that is told to stand down does.
+    //
     // macOS routes the same gesture back into the running process itself, as a
     // reopen event, which is why this is not shared code.
     #[cfg(target_os = "windows")]

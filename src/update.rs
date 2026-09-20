@@ -102,6 +102,20 @@ fn newer_in(json: &str, os: &str, running: &str) -> Option<Available> {
     })
 }
 
+/// Whether `candidate` is a later release than `running`.
+///
+/// Shared with [`crate::ipc`], where a second copy of the binary and the one
+/// already running have to work out which of them is the newer build. A
+/// version either side cannot parse is not newer, so an unreadable answer
+/// leaves whoever is running in place.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn is_newer(candidate: &str, running: &str) -> bool {
+    match (parse(candidate), parse(running)) {
+        (Some(candidate), Some(running)) => candidate > running,
+        _ => false,
+    }
+}
+
 fn parse(version: &str) -> Option<(u64, u64, u64)> {
     let mut parts = version.trim().split('.').map(|p| p.parse::<u64>().ok());
     let v = (parts.next()??, parts.next()??, parts.next()??);
@@ -134,6 +148,18 @@ mod tests {
     fn versions_compare_as_numbers_not_text() {
         assert!(newer_in(MANIFEST, "windows", "0.9.0").is_some());
         assert_eq!(newer_in(MANIFEST, "linux", "0.10.0"), None);
+    }
+
+    #[test]
+    fn one_version_is_later_than_another_or_it_is_not() {
+        assert!(is_newer("0.2.3", "0.2.2"));
+        assert!(is_newer("0.10.0", "0.9.9"));
+        assert!(!is_newer("0.2.2", "0.2.2"));
+        assert!(!is_newer("0.2.1", "0.2.2"));
+        // Nothing to compare is nothing to act on.
+        assert!(!is_newer("", "0.2.2"));
+        assert!(!is_newer("soon", "0.2.2"));
+        assert!(!is_newer("0.2.3", "nightly"));
     }
 
     #[test]

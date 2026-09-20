@@ -13,6 +13,14 @@
 //! selection, so the new process asks the old one to show its window and then
 //! gets out of the way.
 //!
+//! That is the right answer only while the two copies are the same build. An
+//! update on Windows is a downloaded `.exe` the user double-clicks, and a new
+//! build standing down for an old one is how "I installed it and nothing
+//! changed" happens: the window comes forward, it is the old version's window,
+//! and the banner still says an update is available. So the request carries
+//! the caller's version and the pipe answers, which is why it is a duplex pipe
+//! rather than an inbound one. The older of the two quits; the newer runs.
+//!
 //! The transport is whatever the system addresses one instance with: a Unix
 //! socket in the runtime directory, or a named pipe. Both are per-user, both
 //! disappear with the process, and neither needs polling on either side.
@@ -24,6 +32,24 @@
 const TRANSLATE: &str = "translate-selection";
 #[cfg(target_os = "windows")]
 const OPEN: &str = "open-window";
+
+/// What the listener answers an [`OPEN`] with: whether it is staying, and so
+/// whether the caller is the copy that gets out of the way.
+#[cfg(target_os = "windows")]
+const STAY: &str = "staying";
+#[cfg(target_os = "windows")]
+const STAND_DOWN: &str = "standing-down";
+
+/// Splits a request into the word that names it and whatever followed, which
+/// today is a version and otherwise nothing. Kept out of the platform modules
+/// so it can be tested on any of them.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn split_request(message: &str) -> (&str, &str) {
+    match message.trim().split_once(char::is_whitespace) {
+        Some((word, rest)) => (word, rest.trim()),
+        None => (message.trim(), ""),
+    }
+}
 
 /// How much of a caller's message is ever read. The sender is not necessarily
 /// ours: a process that opens the socket and then writes forever must not be
@@ -115,12 +141,12 @@ mod unix {
 
 #[cfg(target_os = "windows")]
 mod windows {
-    use std::io::Write;
+    use std::io::{Read, Write};
     use std::time::{Duration, Instant};
 
     use ::windows::Win32::Foundation::{CloseHandle, ERROR_PIPE_BUSY, HANDLE};
     use ::windows::Win32::Storage::FileSystem::{
-        FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_INBOUND, ReadFile,
+        FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX, ReadFile, WriteFile,
     };
     use ::windows::Win32::System::Pipes::{
         ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE,
@@ -129,7 +155,7 @@ mod windows {
     use ::windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
     use ::windows::core::PCWSTR;
 
-    use super::{MAX_MESSAGE, OPEN, TRANSLATE};
+    use super::{MAX_MESSAGE, OPEN, STAND_DOWN, STAY, TRANSLATE, split_request};
 
     /// Where the running instance listens.
     ///
@@ -183,19 +209,36 @@ mod windows {
                     // second copy of the app, finding nobody to defer to,
                     // starts as a rival with its own tray icon and its own
                     // input hooks.
+                    // Decided before the answer is sent, because the answer is
+                    // what the caller acts on: it is waiting to be told whether
+                    // this copy is staying.
+                    let request = split_request(&message);
+                    let outranked = request.0 == OPEN
+                        && crate::update::is_newer(request.1, env!("CARGO_PKG_VERSION"));
+                    if request.0 == OPEN {
+                        reply(pipe.0, if outranked { STAND_DOWN } else { STAY });
+                    }
                     let _ = unsafe { DisconnectNamedPipe(pipe.0) };
 
-                    match message.trim() {
-                        TRANSLATE => {
+                    match request {
+                        (TRANSLATE, _) => {
                             crate::trace!("ipc: asked to translate the selection");
                             on_translate();
                         }
-                        OPEN => {
+                        (OPEN, caller) if outranked => {
+                            // The newer build is the one that should be
+                            // running. Quitting the ordinary way saves what the
+                            // tray's Quit saves; the caller is waiting for this
+                            // pipe to go before it starts.
+                            crate::trace!("ipc: {caller} is newer than this copy; standing down");
+                            crate::shell::request_quit();
+                        }
+                        (OPEN, _) => {
                             crate::trace!("ipc: asked to show the window");
                             crate::shell::request_open();
                         }
-                        "" => {}
-                        other => crate::trace!("ipc: ignoring {other:?}"),
+                        ("", _) => {}
+                        (other, _) => crate::trace!("ipc: ignoring {other:?}"),
                     }
                 }
             })?;
@@ -207,12 +250,15 @@ mod windows {
         let handle = unsafe {
             CreateNamedPipeW(
                 PCWSTR(wide(name).as_ptr()),
-                PIPE_ACCESS_INBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                // Duplex rather than inbound: an OPEN is answered, so that a
+                // second copy learns whether the one already running is older
+                // than it is. See this module's header.
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
                 // One instance, because there is one running copy to talk to,
                 // and requests are a keystroke apart at worst.
                 1,
-                0,
+                MAX_MESSAGE as u32,
                 MAX_MESSAGE as u32,
                 0,
                 None,
@@ -269,6 +315,18 @@ mod windows {
         String::new()
     }
 
+    /// Answers the caller still on the other end of the pipe.
+    ///
+    /// Best effort: a caller that asked and left is the ordinary case for
+    /// every message that is not an OPEN, and there is nothing to do about it
+    /// but carry on serving the next one.
+    fn reply(pipe: HANDLE, answer: &str) {
+        let mut written = 0u32;
+        if unsafe { WriteFile(pipe, Some(answer.as_bytes()), Some(&mut written), None) }.is_err() {
+            crate::trace!("ipc: could not answer the caller");
+        }
+    }
+
     /// Owns the pipe handle for as long as the listener thread runs, which is
     /// for as long as the process does.
     struct Pipe(HANDLE);
@@ -288,25 +346,71 @@ mod windows {
     /// Returns whether anyone was there to ask. This is the whole of the
     /// `--translate-selection` command, which a keybinding runs.
     pub fn request_translate() -> bool {
-        send(TRANSLATE)
+        send(TRANSLATE).is_some()
     }
 
-    /// Asks the running instance to show its window, and says whether there
-    /// was one to ask. This is how launching the app a second time brings the
-    /// first copy forward instead of starting a rival translator.
+    /// Asks the running instance to show its window, and says whether this
+    /// copy should now stand down.
+    ///
+    /// Launching the app a second time brings the first copy forward instead
+    /// of starting a rival translator — unless this copy is the newer build,
+    /// which is what a Windows update looks like. Then the old copy is the one
+    /// that quits, and this one waits for its pipe to go so that it is the
+    /// process that owns it afterwards.
     pub fn request_open() -> bool {
-        send(OPEN)
+        let Some(answer) = send(&format!("{OPEN} {}", env!("CARGO_PKG_VERSION"))) else {
+            // Nobody was listening: nothing to defer to, nothing to wait for.
+            return false;
+        };
+        if answer.trim() != STAND_DOWN {
+            return true;
+        }
+        crate::trace!("ipc: the running copy is older and is quitting; taking over");
+        // It has to finish quitting before this copy can claim the pipe, and a
+        // copy that says it is going and then does not must not leave the user
+        // with nothing running at all: after the wait this starts either way,
+        // and a pipe still held by the old copy only costs this one its
+        // hotkey, not its bubble.
+        let deadline = Instant::now() + HANDOVER;
+        while Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+            if send(&format!("{OPEN} {}", env!("CARGO_PKG_VERSION"))).is_none() {
+                break;
+            }
+        }
+        false
     }
 
-    fn send(message: &str) -> bool {
+    /// How long the older copy has to finish quitting before the newer one
+    /// starts anyway. Long enough for a window to close and a tray icon to go,
+    /// short enough not to look like a launch that did nothing.
+    const HANDOVER: Duration = Duration::from_secs(5);
+
+    /// Sends one request and returns the answer, or `None` when nobody was
+    /// there to take it. An answer of `""` is a listener that had nothing to
+    /// say, which every message but an OPEN gets.
+    fn send(message: &str) -> Option<String> {
         let name = pipe_name();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
             // The ordinary file API speaks to a pipe perfectly well, and
             // opening one that nobody is serving fails immediately — which is
             // exactly the question being asked.
-            match std::fs::OpenOptions::new().write(true).open(&name) {
-                Ok(mut pipe) => return pipe.write_all(message.as_bytes()).is_ok(),
+            match std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&name)
+            {
+                Ok(mut pipe) => {
+                    pipe.write_all(message.as_bytes()).ok()?;
+                    // The listener answers an OPEN and then disconnects, so
+                    // this reads to the end of what it said. A listener that
+                    // says nothing closes the connection, which reads as the
+                    // empty answer rather than as an error.
+                    let mut answer = String::new();
+                    let _ = pipe.take(MAX_MESSAGE).read_to_string(&mut answer);
+                    return Some(answer);
+                }
                 // "Busy" is not "absent". The listener serves one caller at a
                 // time, so a pipe that exists and is mid-conversation answers
                 // this way, and reading it as "nothing is running" is how a
@@ -315,15 +419,35 @@ mod windows {
                 Err(err) if err.raw_os_error() == Some(ERROR_PIPE_BUSY.0 as i32) => {
                     if Instant::now() >= deadline {
                         crate::trace!("ipc: the listener stayed busy");
-                        return false;
+                        return None;
                     }
                     let wide = wide(&name);
                     // The documented way to queue for a busy pipe; it returns
                     // as soon as an instance frees up.
                     let _ = unsafe { WaitNamedPipeW(PCWSTR(wide.as_ptr()), 500) };
                 }
-                Err(_) => return false,
+                Err(_) => return None,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_request_is_its_word_and_what_followed() {
+        assert_eq!(split_request("open-window 0.2.3"), ("open-window", "0.2.3"));
+        assert_eq!(
+            split_request("translate-selection"),
+            ("translate-selection", "")
+        );
+        // Whatever the transport left around the message is not part of it.
+        assert_eq!(
+            split_request("  open-window   0.2.3  "),
+            ("open-window", "0.2.3")
+        );
+        assert_eq!(split_request(""), ("", ""));
     }
 }
