@@ -25,6 +25,35 @@ impl Provider {
     }
 }
 
+/// Where "Send feedback" opens the message.
+///
+/// A `mailto:` link is the right answer only for someone who has a mail
+/// program. A browser that is not registered as the system's mail handler
+/// answers one with a blank tab and no explanation, which is what happens to
+/// anyone reading their mail on the web \u{2014} so where to write is a choice
+/// rather than an assumption, and it is remembered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FeedbackVia {
+    /// Whatever the system opens a `mailto:` link with.
+    MailApp,
+    Gmail,
+    Outlook,
+}
+
+impl FeedbackVia {
+    pub const ALL: &'static [FeedbackVia] =
+        &[FeedbackVia::MailApp, FeedbackVia::Gmail, FeedbackVia::Outlook];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            FeedbackVia::MailApp => "my mail app",
+            FeedbackVia::Gmail => "Gmail",
+            FeedbackVia::Outlook => "Outlook.com",
+        }
+    }
+}
+
 /// The key that has to be held for a selection to be translated.
 ///
 /// A selection is a gesture people make all day for reasons that have nothing
@@ -165,6 +194,8 @@ pub struct Config {
     /// stays one gesture. Set to [`TriggerKey::Always`] to go back to
     /// translating every selection.
     pub trigger_key: TriggerKey,
+    /// Where the feedback box opens the message. See [`FeedbackVia`].
+    pub feedback_via: FeedbackVia,
     /// Selections shorter/longer than these bounds are ignored. The upper bound
     /// keeps a stray Cmd+A out of the translation queue.
     pub min_chars: usize,
@@ -228,6 +259,7 @@ impl Default for Config {
             license_key: String::new(),
             auto_translate: true,
             trigger_key: TriggerKey::Shift,
+            feedback_via: FeedbackVia::MailApp,
             min_chars: 2,
             max_chars: 4000,
             debounce_ms: 180,

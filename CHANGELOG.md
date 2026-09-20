@@ -16,13 +16,18 @@ days before the others.
 ## Unreleased
 
 **There is a way to write in from inside the app.** A "Send feedback" box at
-the bottom of the window takes a complaint or a suggestion and opens it in your
-own mail program, addressed to pelamx@bubbletranslate.app. It goes through your
-mail app rather than through us — nothing is sent from the app itself, you see
-the message before it leaves, and you keep a copy in your sent mail. The
-version and system are added at the end so a reply can make sense, and you can
-delete them. If you would rather write from somewhere else, one button puts the
-address on the clipboard.
+the bottom of the window takes a complaint or a suggestion and opens it, already
+addressed to pelamx@bubbletranslate.app, in **your mail app, Gmail or
+Outlook.com** — whichever you pick, and it remembers. If you read your mail on
+the web, pick Gmail or Outlook: a browser that is not the system's mail handler
+answers the mail app option with an empty tab, which looks like a broken button
+and is not.
+
+Either way the message goes out through your own mail, not through us —
+nothing is sent from the app itself, you see it before it leaves, and you keep
+a copy in your sent mail. The version and system are added at the end so a
+reply can make sense, and you can delete them. One button copies the address if
+you would rather write from somewhere else entirely.
 
 **Single words now translate in Google Drive's document preview.** (Linux)
 Drive draws its own text instead of handing it to the desktop, so

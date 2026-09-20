@@ -9,7 +9,9 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 
-use crate::config::{BubbleTheme, Config, LANGUAGES, Provider, TriggerKey, language_name};
+use crate::config::{
+    BubbleTheme, Config, FeedbackVia, LANGUAGES, Provider, TriggerKey, language_name,
+};
 use crate::engine::Request;
 use crate::license::{self, Licensing, Status};
 use crate::platform::Readiness;
@@ -184,7 +186,9 @@ pub fn draw(
             section(ui, "Behaviour", |ui| {
                 dirty |= behaviour(ui, &mut cfg);
             });
-            section(ui, "Send feedback", |ui| feedback(ui, &mut state));
+            section(ui, "Send feedback", |ui| {
+                dirty |= feedback(ui, &mut state, &mut cfg);
+            });
             if !state.recent.is_empty() {
                 section(ui, "Recent", |ui| recent(ui, &state));
             }
@@ -1142,7 +1146,8 @@ const MAILTO_BUDGET: usize = 1200;
 /// and a complaint box that quietly shipped text to a server of ours would be
 /// the one place that stopped being true. It also means the sender keeps a
 /// copy in their sent mail and a reply lands where they expect it.
-fn feedback(ui: &mut egui::Ui, state: &mut MainState) {
+fn feedback(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Config) -> bool {
+    let mut dirty = false;
     ui.label(
         egui::RichText::new(
             "Something broken, something missing, or something that annoyed you \u{2014} \
@@ -1165,11 +1170,28 @@ fn feedback(ui: &mut egui::Ui, state: &mut MainState) {
         let ready = !state.feedback.trim().is_empty();
         if ui
             .add_enabled(ready, egui::Button::new("Write the mail"))
-            .on_hover_text(format!("Opens your mail app, addressed to {SUPPORT_EMAIL}"))
+            .on_hover_text(format!("Addressed to {SUPPORT_EMAIL}"))
             .clicked()
         {
-            state.feedback_note = Some(send_feedback(ui.ctx(), state.feedback.trim()));
+            state.feedback_note =
+                Some(send_feedback(ui.ctx(), state.feedback.trim(), cfg.feedback_via));
         }
+        ui.label(egui::RichText::new("in").size(11.5).color(TEXT_MUTED));
+        // Remembered, because someone who reads their mail on the web will
+        // answer this question the same way every time.
+        egui::ComboBox::from_id_salt("feedback-via")
+            .selected_text(cfg.feedback_via.label())
+            .show_ui(ui, |ui| {
+                for via in FeedbackVia::ALL {
+                    if ui
+                        .selectable_label(cfg.feedback_via == *via, via.label())
+                        .clicked()
+                    {
+                        cfg.feedback_via = *via;
+                        dirty = true;
+                    }
+                }
+            });
         if ui
             .button("Copy the address")
             .on_hover_text("If you would rather write from somewhere else")
@@ -1199,6 +1221,21 @@ fn feedback(ui: &mut egui::Ui, state: &mut MainState) {
         .size(10.5)
         .color(TEXT_MUTED),
     );
+    // The failure this is here for: a browser that is not the system's mail
+    // handler answers a mailto: link with an empty tab and no explanation, and
+    // the person is left thinking the button is broken.
+    if cfg.feedback_via == FeedbackVia::MailApp {
+        ui.label(
+            egui::RichText::new(
+                "Opened an empty tab instead? You read your mail on the web \u{2014} pick \
+                 Gmail or Outlook.com above and it will open there.",
+            )
+            .size(10.5)
+            .color(TEXT_MUTED),
+        );
+    }
+
+    dirty
 }
 
 /// What a message turns into: the link to open, whatever has to go on the
@@ -1210,40 +1247,55 @@ struct Mail {
 }
 
 /// Works out the above, and nothing else \u{2014} no windows opened, no clipboard
-/// touched \u{2014} so the rule about long messages can be tested rather than
-/// trusted.
-fn compose(message: &str, version: &str, os: &str) -> Mail {
+/// touched \u{2014} so the rules below can be tested rather than trusted.
+fn compose(message: &str, version: &str, os: &str, via: FeedbackVia) -> Mail {
     let subject = format!("bubbleTranslate feedback \u{2014} {version} ({os})");
     let body = format!("{message}\n\n\u{2014}\nbubbleTranslate {version} on {os}");
+    let to = SUPPORT_EMAIL;
+    let (su, bo) = (urlencoding::encode(&subject), urlencoding::encode(&body));
 
-    // A long message is not squeezed into the link: past the budget the system
-    // either truncates it or refuses to open anything at all, and losing what
-    // someone just wrote is worse than asking them to paste it.
-    if urlencoding::encode(&body).len() > MAILTO_BUDGET {
-        return Mail {
+    // The webmail compose pages are ordinary web pages: the browser is already
+    // signed in, the address bar takes thousands of characters, and there is
+    // nothing to install. Only `mailto:` has the length problem below.
+    match via {
+        FeedbackVia::Gmail => Mail {
+            url: format!("https://mail.google.com/mail/?view=cm&fs=1&to={to}&su={su}&body={bo}"),
+            clipboard: None,
+            note: "Gmail should be open with it. Nothing has been sent until you send it.",
+        },
+        FeedbackVia::Outlook => Mail {
             url: format!(
-                "mailto:{SUPPORT_EMAIL}?subject={}",
-                urlencoding::encode(&subject)
+                "https://outlook.live.com/mail/0/deeplink/compose?to={to}&subject={su}&body={bo}"
             ),
-            clipboard: Some(body),
-            note: "That is a long one, so it is on the clipboard \u{2014} paste it into the \
-                   mail that just opened.",
-        };
-    }
-    Mail {
-        url: format!(
-            "mailto:{SUPPORT_EMAIL}?subject={}&body={}",
-            urlencoding::encode(&subject),
-            urlencoding::encode(&body),
-        ),
-        clipboard: None,
-        note: "Your mail app should be open with it. Nothing has been sent until you send it.",
+            clipboard: None,
+            note: "Outlook should be open with it. Nothing has been sent until you send it.",
+        },
+        FeedbackVia::MailApp => {
+            // A long message is not squeezed into the link: past the budget the
+            // system either truncates it or refuses to open anything at all,
+            // and losing what someone just wrote is worse than asking them to
+            // paste it.
+            if bo.len() > MAILTO_BUDGET {
+                return Mail {
+                    url: format!("mailto:{to}?subject={su}"),
+                    clipboard: Some(body),
+                    note: "That is a long one, so it is on the clipboard \u{2014} paste it into \
+                           the mail that just opened.",
+                };
+            }
+            Mail {
+                url: format!("mailto:{to}?subject={su}&body={bo}"),
+                clipboard: None,
+                note: "Your mail app should be open with it. Nothing has been sent until \
+                       you send it.",
+            }
+        }
     }
 }
 
 /// Hands the message to the mail program, and says what became of it.
-fn send_feedback(ctx: &egui::Context, message: &str) -> String {
-    let mail = compose(message, env!("CARGO_PKG_VERSION"), std::env::consts::OS);
+fn send_feedback(ctx: &egui::Context, message: &str, via: FeedbackVia) -> String {
+    let mail = compose(message, env!("CARGO_PKG_VERSION"), std::env::consts::OS, via);
     if let Some(text) = mail.clipboard {
         ctx.copy_text(text);
     }
@@ -1293,7 +1345,7 @@ mod tests {
 
     #[test]
     fn a_short_message_travels_in_the_link() {
-        let mail = compose("The bubble is too small", "0.2.2", "linux");
+        let mail = compose("The bubble is too small", "0.2.2", "linux", FeedbackVia::MailApp);
         assert!(mail.clipboard.is_none());
         assert!(
             mail.url
@@ -1307,15 +1359,38 @@ mod tests {
 
     #[test]
     fn the_version_and_system_are_in_the_subject_and_the_body() {
-        let mail = compose("hi", "9.9.9", "windows");
+        let mail = compose("hi", "9.9.9", "windows", FeedbackVia::MailApp);
         assert!(mail.url.contains("9.9.9"));
         assert!(mail.url.contains("windows"));
     }
 
     #[test]
+    fn webmail_opens_a_compose_page_rather_than_a_mailto_link() {
+        for (via, host) in [
+            (FeedbackVia::Gmail, "mail.google.com"),
+            (FeedbackVia::Outlook, "outlook.live.com"),
+        ] {
+            let mail = compose("the bubble is too small", "0.2.2", "linux", via);
+            assert!(mail.url.starts_with("https://"), "{}", mail.url);
+            assert!(mail.url.contains(host), "{}", mail.url);
+            assert!(mail.url.contains("pelamx@bubbletranslate.app"));
+            assert!(mail.url.contains("the%20bubble%20is%20too%20small"));
+        }
+    }
+
+    #[test]
+    fn webmail_carries_a_long_message_in_the_link() {
+        // The budget is a mailto: limit, not a URL one: a browser takes this.
+        let long = "a".repeat(MAILTO_BUDGET + 1);
+        let mail = compose(&long, "0.2.2", "linux", FeedbackVia::Gmail);
+        assert!(mail.clipboard.is_none());
+        assert!(mail.url.contains(&long));
+    }
+
+    #[test]
     fn a_long_message_goes_to_the_clipboard_rather_than_being_cut() {
         let long = "a".repeat(MAILTO_BUDGET + 1);
-        let mail = compose(&long, "0.2.2", "linux");
+        let mail = compose(&long, "0.2.2", "linux", FeedbackVia::MailApp);
         // The whole of it, kept.
         let kept = mail.clipboard.expect("a long message is not thrown away");
         assert!(kept.starts_with(&long));
@@ -1329,6 +1404,6 @@ mod tests {
         // under the budget in characters is over it in a link.
         let cyrillic = "\u{434}".repeat(MAILTO_BUDGET / 4);
         assert!(cyrillic.chars().count() < MAILTO_BUDGET);
-        assert!(compose(&cyrillic, "0.2.2", "linux").clipboard.is_some());
+        assert!(compose(&cyrillic, "0.2.2", "linux", FeedbackVia::MailApp).clipboard.is_some());
     }
 }
