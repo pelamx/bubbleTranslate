@@ -16,6 +16,25 @@ Run `cargo test` before proposing a client change. The suite includes an
 integration test that drives the real binary, so a change to startup ordering
 is caught rather than assumed safe.
 
+## Releases
+
+**The Windows download is published as a zip, not as a bare `.exe`.** This is
+settled; it does not need asking again. A browser handed an unsigned `.exe`
+says it "isn't commonly downloaded" and throws it away unless the user digs it
+back out of the warning, and the same bytes inside a zip arrive without it — at
+7 MB rather than 17. `release.ps1` zips after signing, so what goes in the
+archive is the signed executable. `latest.json` and every download link point
+at `bubbleTranslate-windows-x64.zip`; the bare `.exe` is uploaded beside it for
+anyone who wants it, and nothing links to it as the primary download.
+
+One script per platform, each rewriting only its own line of `latest.json`:
+`release.sh` (macOS), `release.ps1` (Windows), `release-linux.sh` (Linux).
+Each warns when `Cargo.toml` was not bumped, because a release that reuses the
+published version tells nobody. The version lives in `Cargo.toml` and
+`latest.json` and nowhere else: the links in README.md and on the website are
+`/releases/latest/download/…`, which GitHub resolves to the current release, so
+publishing one is what moves them.
+
 ## Paddle
 
 Paddle is how everyone pays — it is the only processor. Paddle is the
