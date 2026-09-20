@@ -79,6 +79,14 @@ pub struct MainState {
     /// the user's key, and it should be waiting for them to try again rather
     /// than sending them back to the email it came in.
     pub key_input: String,
+
+    // Feedback.
+    /// What the user is writing to send in. Kept here rather than in the
+    /// config: a half-written complaint is not a setting, and it should not
+    /// survive on disk.
+    pub feedback: String,
+    /// What happened to the last attempt to send, shown under the box.
+    pub feedback_note: Option<String>,
 }
 
 pub struct RecentEntry {
@@ -108,6 +116,8 @@ impl MainState {
             recent: Vec::new(),
             capped: None,
             key_input: license_key,
+            feedback: String::new(),
+            feedback_note: None,
         }
     }
 
@@ -174,6 +184,7 @@ pub fn draw(
             section(ui, "Behaviour", |ui| {
                 dirty |= behaviour(ui, &mut cfg);
             });
+            section(ui, "Send feedback", |ui| feedback(ui, &mut state));
             if !state.recent.is_empty() {
                 section(ui, "Recent", |ui| recent(ui, &state));
             }
@@ -1113,6 +1124,133 @@ fn slider(
     changed
 }
 
+/// Where to write. The same address the website gives, so a reply from it is
+/// recognisable rather than a stranger's.
+const SUPPORT_EMAIL: &str = "pelamx@bubbletranslate.app";
+
+/// How much of a message a `mailto:` link can carry before the system that
+/// opens it starts truncating or refusing. Windows is the strict one, at
+/// roughly two thousand characters for the whole command; this leaves room for
+/// the address, the subject and the encoding, which triples the length of
+/// anything that is not plain ASCII.
+const MAILTO_BUDGET: usize = 1200;
+
+/// Somewhere to say what is wrong, without leaving the app to find out where.
+///
+/// The message travels through the user's own mail program rather than a form
+/// this app posts somewhere: bubbleTranslate keeps no account and no database,
+/// and a complaint box that quietly shipped text to a server of ours would be
+/// the one place that stopped being true. It also means the sender keeps a
+/// copy in their sent mail and a reply lands where they expect it.
+fn feedback(ui: &mut egui::Ui, state: &mut MainState) {
+    ui.label(
+        egui::RichText::new(
+            "Something broken, something missing, or something that annoyed you \u{2014} \
+             it is read by the person who wrote the app.",
+        )
+        .size(11.5)
+        .color(TEXT_SECONDARY),
+    );
+    ui.add_space(6.0);
+
+    ui.add(
+        egui::TextEdit::multiline(&mut state.feedback)
+            .desired_rows(4)
+            .desired_width(f32::INFINITY)
+            .hint_text("What happened, or what you wish it did\u{2026}"),
+    );
+    ui.add_space(6.0);
+
+    ui.horizontal(|ui| {
+        let ready = !state.feedback.trim().is_empty();
+        if ui
+            .add_enabled(ready, egui::Button::new("Write the mail"))
+            .on_hover_text(format!("Opens your mail app, addressed to {SUPPORT_EMAIL}"))
+            .clicked()
+        {
+            state.feedback_note = Some(send_feedback(ui.ctx(), state.feedback.trim()));
+        }
+        if ui
+            .button("Copy the address")
+            .on_hover_text("If you would rather write from somewhere else")
+            .clicked()
+        {
+            ui.ctx().copy_text(SUPPORT_EMAIL.to_string());
+            state.feedback_note = Some(format!("{SUPPORT_EMAIL} is on the clipboard."));
+        }
+    });
+
+    if let Some(note) = &state.feedback_note {
+        ui.add_space(6.0);
+        ui.label(egui::RichText::new(note).size(11.0).color(OK_GREEN));
+    }
+
+    ui.add_space(6.0);
+    // Said plainly, because a message that silently carried system details
+    // would be exactly the kind of thing someone writes in to complain about.
+    ui.label(
+        egui::RichText::new(format!(
+            "Goes through your own mail app \u{2014} nothing is sent from here. The version \
+             ({}) and system ({}) are added to the end so a reply can make sense; \
+             you can delete them before sending.",
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS,
+        ))
+        .size(10.5)
+        .color(TEXT_MUTED),
+    );
+}
+
+/// What a message turns into: the link to open, whatever has to go on the
+/// clipboard first, and what to tell the user.
+struct Mail {
+    url: String,
+    clipboard: Option<String>,
+    note: &'static str,
+}
+
+/// Works out the above, and nothing else \u{2014} no windows opened, no clipboard
+/// touched \u{2014} so the rule about long messages can be tested rather than
+/// trusted.
+fn compose(message: &str, version: &str, os: &str) -> Mail {
+    let subject = format!("bubbleTranslate feedback \u{2014} {version} ({os})");
+    let body = format!("{message}\n\n\u{2014}\nbubbleTranslate {version} on {os}");
+
+    // A long message is not squeezed into the link: past the budget the system
+    // either truncates it or refuses to open anything at all, and losing what
+    // someone just wrote is worse than asking them to paste it.
+    if urlencoding::encode(&body).len() > MAILTO_BUDGET {
+        return Mail {
+            url: format!(
+                "mailto:{SUPPORT_EMAIL}?subject={}",
+                urlencoding::encode(&subject)
+            ),
+            clipboard: Some(body),
+            note: "That is a long one, so it is on the clipboard \u{2014} paste it into the \
+                   mail that just opened.",
+        };
+    }
+    Mail {
+        url: format!(
+            "mailto:{SUPPORT_EMAIL}?subject={}&body={}",
+            urlencoding::encode(&subject),
+            urlencoding::encode(&body),
+        ),
+        clipboard: None,
+        note: "Your mail app should be open with it. Nothing has been sent until you send it.",
+    }
+}
+
+/// Hands the message to the mail program, and says what became of it.
+fn send_feedback(ctx: &egui::Context, message: &str) -> String {
+    let mail = compose(message, env!("CARGO_PKG_VERSION"), std::env::consts::OS);
+    if let Some(text) = mail.clipboard {
+        ctx.copy_text(text);
+    }
+    crate::shell::open_url(&mail.url);
+    mail.note.to_string()
+}
+
 fn recent(ui: &mut egui::Ui, state: &MainState) {
     for entry in state.recent.iter().take(10) {
         ui.label(
@@ -1147,4 +1285,50 @@ fn truncate(text: &str, max_chars: usize) -> String {
         out.push('…');
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_short_message_travels_in_the_link() {
+        let mail = compose("The bubble is too small", "0.2.2", "linux");
+        assert!(mail.clipboard.is_none());
+        assert!(
+            mail.url
+                .starts_with("mailto:pelamx@bubbletranslate.app?subject=")
+        );
+        assert!(mail.url.contains("&body="));
+        // Spaces and the em dash have to survive as encoding, not as breaks.
+        assert!(!mail.url.contains(' '));
+        assert!(mail.url.contains("The%20bubble%20is%20too%20small"));
+    }
+
+    #[test]
+    fn the_version_and_system_are_in_the_subject_and_the_body() {
+        let mail = compose("hi", "9.9.9", "windows");
+        assert!(mail.url.contains("9.9.9"));
+        assert!(mail.url.contains("windows"));
+    }
+
+    #[test]
+    fn a_long_message_goes_to_the_clipboard_rather_than_being_cut() {
+        let long = "a".repeat(MAILTO_BUDGET + 1);
+        let mail = compose(&long, "0.2.2", "linux");
+        // The whole of it, kept.
+        let kept = mail.clipboard.expect("a long message is not thrown away");
+        assert!(kept.starts_with(&long));
+        // And the link carries no body to be truncated.
+        assert!(!mail.url.contains("&body="));
+    }
+
+    #[test]
+    fn encoding_is_measured_rather_than_the_raw_length() {
+        // Every character here is three bytes once encoded, so a message well
+        // under the budget in characters is over it in a link.
+        let cyrillic = "\u{434}".repeat(MAILTO_BUDGET / 4);
+        assert!(cyrillic.chars().count() < MAILTO_BUDGET);
+        assert!(compose(&cyrillic, "0.2.2", "linux").clipboard.is_some());
+    }
 }
