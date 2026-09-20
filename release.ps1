@@ -84,7 +84,7 @@ if ($env:SIGN_THUMBPRINT) {
 # file back out of the warning. The same bytes inside a zip arrive without the
 # warning, and at 7 MB rather than 17. It is zipped after signing so that a
 # signed .exe is what goes in, and uploaded beside the .exe -- latest.json
-# still points installed copies at the .exe, which is what the updater fetches.
+# points installed copies at the zip, which is what the updater's link opens.
 $ZIP = Join-Path $PSScriptRoot 'bubbleTranslate-windows-x64.zip'
 Remove-Item $ZIP -Force -ErrorAction SilentlyContinue
 Compress-Archive -Path $OUT -DestinationPath $ZIP -CompressionLevel Optimal
