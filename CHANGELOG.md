@@ -13,7 +13,18 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## 0.2.4 — 2026-09-20
+
+**The feedback box names Apple Mail on a Mac.** The first choice beside "Write
+the mail" opens whatever your system treats as its mail program — on a Mac
+that is Apple Mail unless you have changed it — but calling it "my mail app"
+hid a perfectly good answer behind a vague one. It now says what it will
+actually open, on each system.
+
 ## 0.2.3 — 2026-09-20
+_0.2.3 was published for Linux only; macOS and Windows go straight from 0.2.2
+to 0.2.4._
+
 
 **There is a way to write in from inside the app.** A "Send feedback" box at
 the bottom of the window takes a complaint or a suggestion and opens it, already

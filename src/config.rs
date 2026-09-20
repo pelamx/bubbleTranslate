@@ -45,9 +45,20 @@ impl FeedbackVia {
     pub const ALL: &'static [FeedbackVia] =
         &[FeedbackVia::MailApp, FeedbackVia::Gmail, FeedbackVia::Outlook];
 
+    /// What to call each choice, in the name the machine in front of the user
+    /// actually uses.
+    ///
+    /// The first one is a `mailto:` link, which every system hands to whatever
+    /// it has been told is the mail program \u{2014} on a Mac that is Apple Mail
+    /// unless someone has changed it, so calling it "my mail app" there hid a
+    /// perfectly good answer behind a vague one.
     pub fn label(self) -> &'static str {
         match self {
-            FeedbackVia::MailApp => "my mail app",
+            FeedbackVia::MailApp => match std::env::consts::OS {
+                "macos" => "Apple Mail",
+                "windows" => "my mail app (Outlook, Mail\u{2026})",
+                _ => "my mail app",
+            },
             FeedbackVia::Gmail => "Gmail",
             FeedbackVia::Outlook => "Outlook.com",
         }
