@@ -20,6 +20,7 @@
 
 mod config;
 mod engine;
+mod i18n;
 mod ipc;
 mod license;
 mod main_window;
@@ -128,6 +129,7 @@ fn main() -> eframe::Result<()> {
     }
 
     let (loaded_config, loaded_quota) = load_state();
+    i18n::set(loaded_config.ui_lang);
     let config = Arc::new(Mutex::new(loaded_config));
     let licensing = Licensing {
         license: Arc::new(Mutex::new(License::load())),

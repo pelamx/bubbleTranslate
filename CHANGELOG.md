@@ -13,6 +13,13 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## 0.2.6 — 2026-09-21
+
+- The app's own interface now speaks English, Turkish and Spanish. Three
+  buttons in the top-right corner of the main window — EN, TR, ES, the same as
+  on the website — switch the window and the bubble in one click, and the
+  choice is remembered. English stays the default.
+
 ## 0.2.5 — 2026-09-21
 
 **The bubble waits for you to finish selecting. (Linux)** On a Wayland desktop

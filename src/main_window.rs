@@ -13,6 +13,7 @@ use crate::config::{
     BubbleTheme, Config, FeedbackVia, LANGUAGES, Provider, TriggerKey, language_name,
 };
 use crate::engine::Request;
+use crate::i18n::{self, UiLang, t};
 use crate::license::{self, Licensing, Status};
 use crate::platform::Readiness;
 use crate::translate::{TranslateError, Translation};
@@ -169,28 +170,40 @@ pub fn draw(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.add_space(4.0);
-            header(ui, &state, &cfg);
+            header(ui, &state, &mut cfg, &mut dirty);
             ui.add_space(10.0);
             update_banner(ui);
 
-            section(ui, "Translate", |ui| translate_box(ui, &mut state, &cfg));
-            section(ui, "Languages", |ui| {
+            section(ui, t("Translate", "Çevir", "Traducir"), |ui| {
+                translate_box(ui, &mut state, &cfg)
+            });
+            section(ui, t("Languages", "Diller", "Idiomas"), |ui| {
                 dirty |= languages(ui, &mut state, &mut cfg);
             });
-            section(ui, "Providers", |ui| {
+            section(ui, t("Providers", "Servisler", "Proveedores"), |ui| {
                 dirty |= providers(ui, &mut state, &mut cfg);
             });
-            section(ui, "Account", |ui| {
+            section(ui, t("Account", "Hesap", "Cuenta"), |ui| {
                 dirty |= account(ui, &mut state, &mut cfg, licensing);
             });
-            section(ui, "Behaviour", |ui| {
+            section(ui, t("Behaviour", "Davranış", "Comportamiento"), |ui| {
                 dirty |= behaviour(ui, &mut cfg);
             });
-            section(ui, "Send feedback", |ui| {
-                dirty |= feedback(ui, &mut state, &mut cfg);
-            });
+            section(
+                ui,
+                t(
+                    "Send feedback",
+                    "Geri bildirim gönder",
+                    "Enviar comentarios",
+                ),
+                |ui| {
+                    dirty |= feedback(ui, &mut state, &mut cfg);
+                },
+            );
             if !state.recent.is_empty() {
-                section(ui, "Recent", |ui| recent(ui, &state));
+                section(ui, t("Recent", "Son çeviriler", "Recientes"), |ui| {
+                    recent(ui, &state)
+                });
             }
 
             ui.add_space(8.0);
@@ -282,18 +295,26 @@ fn section(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
 /// should not also be the thing that stops the app.
 fn footer(ui: &mut egui::Ui) {
     ui.label(
-        egui::RichText::new(format!("Settings file: {}", Config::path().display()))
-            .size(10.5)
-            .color(TEXT_MUTED),
+        egui::RichText::new(format!(
+            "{} {}",
+            t("Settings file:", "Ayar dosyası:", "Archivo de ajustes:"),
+            Config::path().display()
+        ))
+        .size(10.5)
+        .color(TEXT_MUTED),
     );
 
     if crate::shell::has_indicator() {
         ui.add_space(4.0);
         ui.label(
-            egui::RichText::new(
+            egui::RichText::new(t(
                 "Closing this window leaves the translator running in the background. \
-                 To stop it, use Quit in the tray icon's menu.",
-            )
+                     To stop it, use Quit in the tray icon's menu.",
+                "Bu pencereyi kapatmak çevirmeni arka planda çalışır bırakır. \
+                     Durdurmak için tepsi simgesinin menüsündeki Quit'i kullan.",
+                "Cerrar esta ventana deja el traductor funcionando en segundo plano. \
+                     Para detenerlo, usa Quit en el menú del icono de la bandeja.",
+            ))
             .size(10.5)
             .color(TEXT_MUTED),
         );
@@ -313,28 +334,42 @@ fn update_banner(ui: &mut egui::Ui) {
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(
-                egui::RichText::new(format!("A new version is available: {}", newer.version))
-                    .size(13.0)
-                    .color(OK_GREEN)
-                    .strong(),
+                egui::RichText::new(format!(
+                    "{} {}",
+                    t(
+                        "A new version is available:",
+                        "Yeni sürüm var:",
+                        "Hay una versión nueva:"
+                    ),
+                    newer.version
+                ))
+                .size(13.0)
+                .color(OK_GREEN)
+                .strong(),
             );
             ui.label(
                 egui::RichText::new(format!(
-                    "You have {}. Your licence and settings stay as they are.",
-                    env!("CARGO_PKG_VERSION")
+                    "{} {}. {}",
+                    t("You have", "Sende olan:", "Tienes la"),
+                    env!("CARGO_PKG_VERSION"),
+                    t(
+                        "Your licence and settings stay as they are.",
+                        "Lisansın ve ayarların olduğu gibi kalır.",
+                        "Tu licencia y tus ajustes se mantienen.",
+                    ),
                 ))
                 .size(12.0)
                 .color(TEXT_SECONDARY),
             );
             ui.add_space(4.0);
-            if ui.button("Download").clicked() {
+            if ui.button(t("Download", "İndir", "Descargar")).clicked() {
                 crate::shell::open_url(&newer.url);
             }
         });
     ui.add_space(14.0);
 }
 
-fn header(ui: &mut egui::Ui, state: &MainState, cfg: &Config) {
+fn header(ui: &mut egui::Ui, state: &MainState, cfg: &mut Config, dirty: &mut bool) {
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new("bubbleTranslate")
@@ -356,14 +391,63 @@ fn header(ui: &mut egui::Ui, state: &MainState, cfg: &Config) {
                 .size(11.5)
                 .color(TEXT_MUTED),
         );
+        // The interface language, one click each, drawn the way the website
+        // draws it: a rounded strip, the active choice lifted onto a card with
+        // a short blue underline.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(4.0);
+            egui::Frame::new()
+                .fill(egui::Color32::from_white_alpha(10))
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(70)))
+                .corner_radius(10.0)
+                .inner_margin(egui::Margin::same(3))
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    // Right to left, inherited, so the list is walked backwards.
+                    for lang in UiLang::ALL.iter().rev() {
+                        let on = cfg.ui_lang == *lang;
+                        let text = egui::RichText::new(lang.code())
+                            .size(11.5)
+                            .strong()
+                            .color(if on { TEXT_PRIMARY } else { TEXT_MUTED });
+                        let button = egui::Button::new(text)
+                            .corner_radius(7.0)
+                            .stroke(egui::Stroke::NONE)
+                            .min_size(egui::vec2(32.0, 22.0))
+                            .fill(if on {
+                                egui::Color32::from_rgb(56, 58, 66)
+                            } else {
+                                egui::Color32::TRANSPARENT
+                            });
+                        let response = ui.add(button);
+                        if on {
+                            let r = response.rect;
+                            let y = r.bottom() - 3.0;
+                            ui.painter().line_segment(
+                                [egui::pos2(r.center().x - 7.0, y), egui::pos2(r.center().x + 7.0, y)],
+                                egui::Stroke::new(2.0, egui::Color32::from_rgb(79, 140, 255)),
+                            );
+                        }
+                        if response.clicked() && !on {
+                            cfg.ui_lang = *lang;
+                            i18n::set(*lang);
+                            *dirty = true;
+                        }
+                    }
+                });
+        });
     });
     ui.add_space(2.0);
 
     if state.readiness.ok {
         ui.label(
-            egui::RichText::new("● Watching for selections")
-                .size(12.5)
-                .color(OK_GREEN),
+            egui::RichText::new(t(
+                "● Watching for selections",
+                "● Seçimler izleniyor",
+                "● Vigilando selecciones",
+            ))
+            .size(12.5)
+            .color(OK_GREEN),
         );
         // Name the key the selection has to be made with. Without it this
         // line describes a gesture that does nothing: a selection made with
@@ -376,22 +460,42 @@ fn header(ui: &mut egui::Ui, state: &MainState, cfg: &Config) {
         .then(|| cfg.trigger_key.label());
         ui.label(
             egui::RichText::new(match hold {
-                Some(key) => format!(
-                    "Hold {key} and select text in any app — double-click a word, \
-                     drag a phrase, or triple-click a line."
-                ),
-                None => "Select text in any app — double-click a word, drag a phrase, \
-                         or triple-click a line."
-                    .to_string(),
+                Some(key) => match i18n::lang() {
+                    UiLang::En => format!(
+                        "Hold {key} and select text in any app — double-click a word, \
+                         drag a phrase, or triple-click a line."
+                    ),
+                    UiLang::Tr => format!(
+                        "{key} tuşunu basılı tutup herhangi bir uygulamada metin seç — \
+                         kelimeye çift tıkla, ifadeyi sürükle ya da satıra üç kez tıkla."
+                    ),
+                    UiLang::Es => format!(
+                        "Mantén {key} y selecciona texto en cualquier app — doble clic en \
+                         una palabra, arrastra una frase o triple clic en una línea."
+                    ),
+                },
+                None => t(
+                    "Select text in any app — double-click a word, drag a phrase, \
+                     or triple-click a line.",
+                    "Herhangi bir uygulamada metin seç — kelimeye çift tıkla, ifadeyi \
+                     sürükle ya da satıra üç kez tıkla.",
+                    "Selecciona texto en cualquier app — doble clic en una palabra, \
+                     arrastra una frase o triple clic en una línea.",
+                )
+                .to_string(),
             })
             .size(12.0)
             .color(TEXT_MUTED),
         );
     } else {
         ui.label(
-            egui::RichText::new("● Not watching for selections")
-                .size(12.5)
-                .color(ERR_RED),
+            egui::RichText::new(t(
+                "● Not watching for selections",
+                "● Seçimler izlenmiyor",
+                "● No se vigilan selecciones",
+            ))
+            .size(12.5)
+            .color(ERR_RED),
         );
         ui.label(
             egui::RichText::new(&state.readiness.detail)
@@ -416,14 +520,21 @@ fn translate_box(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
         egui::TextEdit::multiline(&mut state.input)
             .desired_rows(3)
             .desired_width(f32::INFINITY)
-            .hint_text("Type or paste text to translate…"),
+            .hint_text(t(
+                "Type or paste text to translate…",
+                "Çevrilecek metni yaz ya da yapıştır…",
+                "Escribe o pega el texto a traducir…",
+            )),
     );
     ui.add_space(6.0);
 
     ui.horizontal(|ui| {
         let can_send = !state.input.trim().is_empty() && !state.translating;
         if ui
-            .add_enabled(can_send, egui::Button::new("Translate"))
+            .add_enabled(
+                can_send,
+                egui::Button::new(t("Translate", "Çevir", "Traducir")),
+            )
             .clicked()
         {
             state.translating = true;
@@ -431,7 +542,7 @@ fn translate_box(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
             state.capped = None;
             let _ = state.requests.send(Request::Manual(state.input.clone()));
         }
-        if ui.button("Clear").clicked() {
+        if ui.button(t("Clear", "Temizle", "Borrar")).clicked() {
             state.input.clear();
             state.result = None;
             state.capped = None;
@@ -449,21 +560,34 @@ fn translate_box(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
     if let Some((_, limit)) = state.capped {
         ui.add_space(8.0);
         ui.label(
-            egui::RichText::new(format!("Today's {limit} free translations are used"))
-                .size(13.0)
-                .color(WARN_AMBER),
+            egui::RichText::new(match i18n::lang() {
+                UiLang::En => format!("Today's {limit} free translations are used"),
+                UiLang::Tr => format!("Bugünkü {limit} ücretsiz çeviri kullanıldı"),
+                UiLang::Es => format!("Se usaron las {limit} traducciones gratis de hoy"),
+            })
+            .size(13.0)
+            .color(WARN_AMBER),
         );
         ui.label(
             egui::RichText::new(format!(
-                "They come back at midnight. Pro removes the limit — {} or {}.",
+                "{} {} {} {}.",
+                t(
+                    "They come back at midnight. Pro removes the limit —",
+                    "Gece yarısı yenilenir. Pro sınırı kaldırır —",
+                    "Vuelven a medianoche. Pro quita el límite —",
+                ),
                 license::PRICE_MONTHLY,
+                t("or", "ya da", "o"),
                 license::PRICE_YEARLY,
             ))
             .size(11.5)
             .color(TEXT_MUTED),
         );
         ui.add_space(4.0);
-        if ui.button("Upgrade to Pro").clicked() {
+        if ui
+            .button(t("Upgrade to Pro", "Pro'ya geç", "Pasar a Pro"))
+            .clicked()
+        {
             crate::shell::open_url(&format!("{}?src=window", license::BUY_URL));
         }
     }
@@ -492,7 +616,7 @@ fn translate_box(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
                     .size(11.0)
                     .color(TEXT_MUTED),
                 );
-                if ui.small_button("Copy").clicked() {
+                if ui.small_button(t("Copy", "Kopyala", "Copiar")).clicked() {
                     crate::capture::set_clipboard(ui.ctx(), &result.text);
                 }
             });
@@ -500,9 +624,13 @@ fn translate_box(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
         Some(Err(errors)) => {
             ui.add_space(8.0);
             ui.label(
-                egui::RichText::new("No provider could translate this")
-                    .size(13.0)
-                    .color(ERR_RED),
+                egui::RichText::new(t(
+                    "No provider could translate this",
+                    "Hiçbir servis bunu çeviremedi",
+                    "Ningún proveedor pudo traducir esto",
+                ))
+                .size(13.0)
+                .color(ERR_RED),
             );
             for (provider, err) in errors {
                 ui.label(
@@ -520,7 +648,7 @@ fn languages(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Config) -> bool
 
     ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new("Translate into")
+            egui::RichText::new(t("Translate into", "Hedef dil", "Traducir a"))
                 .size(12.5)
                 .color(TEXT_SECONDARY),
         );
@@ -550,13 +678,17 @@ fn languages(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Config) -> bool
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new("Source language")
+            egui::RichText::new(t("Source language", "Kaynak dil", "Idioma de origen"))
                 .size(12.5)
                 .color(TEXT_SECONDARY),
         );
         let current = cfg.source_lang.clone();
         let label = if current == "auto" {
-            "Detect automatically"
+            t(
+                "Detect automatically",
+                "Otomatik algıla",
+                "Detectar automáticamente",
+            )
         } else {
             language_name(&current)
         };
@@ -566,7 +698,14 @@ fn languages(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Config) -> bool
             .width(170.0)
             .show_ui(ui, |ui| {
                 if ui
-                    .selectable_label(current == "auto", "Detect automatically")
+                    .selectable_label(
+                        current == "auto",
+                        t(
+                            "Detect automatically",
+                            "Otomatik algıla",
+                            "Detectar automáticamente",
+                        ),
+                    )
                     .clicked()
                 {
                     picked = Some("auto".to_string());
@@ -592,9 +731,13 @@ fn providers(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Config) -> bool
     let mut dirty = false;
 
     ui.label(
-        egui::RichText::new("Tried top to bottom; the first one to answer wins.")
-            .size(11.5)
-            .color(TEXT_MUTED),
+        egui::RichText::new(t(
+            "Tried top to bottom; the first one to answer wins.",
+            "Yukarıdan aşağı denenir; ilk yanıt veren kazanır.",
+            "Se prueban de arriba abajo; gana el primero que responde.",
+        ))
+        .size(11.5)
+        .color(TEXT_MUTED),
     );
     ui.add_space(6.0);
 
@@ -620,9 +763,13 @@ fn providers(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Config) -> bool
             // rather than letting it look like a silent failure.
             if *provider == Provider::DeepL && cfg.deepl_api_key.trim().is_empty() {
                 ui.label(
-                    egui::RichText::new("(skipped — no API key)")
-                        .size(11.0)
-                        .color(TEXT_MUTED),
+                    egui::RichText::new(t(
+                        "(skipped — no API key)",
+                        "(atlandı — API anahtarı yok)",
+                        "(omitido — sin clave API)",
+                    ))
+                    .size(11.0)
+                    .color(TEXT_MUTED),
                 );
             }
 
@@ -650,15 +797,23 @@ fn providers(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Config) -> bool
     ui.add_space(10.0);
     ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new("DeepL API key")
-                .size(12.5)
-                .color(TEXT_SECONDARY),
+            egui::RichText::new(t(
+                "DeepL API key",
+                "DeepL API anahtarı",
+                "Clave API de DeepL",
+            ))
+            .size(12.5)
+            .color(TEXT_SECONDARY),
         );
         if ui
             .add(
                 egui::TextEdit::singleline(&mut cfg.deepl_api_key)
                     .password(true)
-                    .hint_text("optional — free keys end in :fx")
+                    .hint_text(t(
+                        "optional — free keys end in :fx",
+                        "isteğe bağlı — ücretsiz anahtarlar :fx ile biter",
+                        "opcional — las claves gratis terminan en :fx",
+                    ))
                     .desired_width(220.0),
             )
             .lost_focus()
@@ -670,14 +825,22 @@ fn providers(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Config) -> bool
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new("MyMemory email")
-                .size(12.5)
-                .color(TEXT_SECONDARY),
+            egui::RichText::new(t(
+                "MyMemory email",
+                "MyMemory e-postası",
+                "Correo de MyMemory",
+            ))
+            .size(12.5)
+            .color(TEXT_SECONDARY),
         );
         if ui
             .add(
                 egui::TextEdit::singleline(&mut cfg.mymemory_email)
-                    .hint_text("optional — raises the daily quota")
+                    .hint_text(t(
+                        "optional — raises the daily quota",
+                        "isteğe bağlı — günlük kotayı artırır",
+                        "opcional — aumenta la cuota diaria",
+                    ))
                     .desired_width(220.0),
             )
             .lost_focus()
@@ -689,7 +852,14 @@ fn providers(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Config) -> bool
     ui.add_space(10.0);
     ui.horizontal(|ui| {
         if ui
-            .add_enabled(!state.testing, egui::Button::new("Test providers"))
+            .add_enabled(
+                !state.testing,
+                egui::Button::new(t(
+                    "Test providers",
+                    "Servisleri test et",
+                    "Probar proveedores",
+                )),
+            )
             .clicked()
         {
             state.testing = true;
@@ -764,15 +934,33 @@ fn account(
             let cycle = entitlement.cycle;
             ui.label(
                 egui::RichText::new(if grandfathered {
-                    "● Unlimited translations".to_string()
+                    t(
+                        "● Unlimited translations",
+                        "● Sınırsız çeviri",
+                        "● Traducciones ilimitadas",
+                    )
+                    .to_string()
                 } else {
                     match cycle {
                         Some(cycle) => format!(
-                            "● {} ({}) — unlimited translations",
+                            "● {} ({}) — {}",
                             plan.label(),
                             cycle.label(),
+                            t(
+                                "unlimited translations",
+                                "sınırsız çeviri",
+                                "traducciones ilimitadas"
+                            ),
                         ),
-                        None => format!("● {} — unlimited translations", plan.label()),
+                        None => format!(
+                            "● {} — {}",
+                            plan.label(),
+                            t(
+                                "unlimited translations",
+                                "sınırsız çeviri",
+                                "traducciones ilimitadas"
+                            ),
+                        ),
                     }
                 })
                 .size(13.0)
@@ -780,38 +968,70 @@ fn account(
             );
             if grandfathered {
                 ui.label(
-                    egui::RichText::new(
+                    egui::RichText::new(t(
                         "This install predates the free allowance, so the limit does \
-                         not apply to it.",
-                    )
+                             not apply to it.",
+                        "Bu kurulum ücretsiz kotadan önceye ait, sınır ona uygulanmaz.",
+                        "Esta instalación es anterior al cupo gratuito, así que el \
+                             límite no se le aplica.",
+                    ))
                     .size(11.0)
                     .color(TEXT_MUTED),
                 );
             }
             ui.label(
-                egui::RichText::new(format!("{used} translated today"))
-                    .size(11.5)
-                    .color(TEXT_MUTED),
+                egui::RichText::new(match i18n::lang() {
+                    UiLang::En => format!("{used} translated today"),
+                    UiLang::Tr => format!("Bugün {used} çeviri"),
+                    UiLang::Es => format!("{used} traducidas hoy"),
+                })
+                .size(11.5)
+                .color(TEXT_MUTED),
             );
         }
         Some(limit) => {
             let left = left.unwrap_or(0);
             let spent = left == 0;
             ui.label(
-                egui::RichText::new(if spent {
-                    format!("● Free — all {limit} of today's translations used")
-                } else {
-                    format!("● Free — {left} of {limit} translations left today")
+                egui::RichText::new(match (i18n::lang(), spent) {
+                    (UiLang::En, true) => {
+                        format!("● Free — all {limit} of today's translations used")
+                    }
+                    (UiLang::En, false) => {
+                        format!("● Free — {left} of {limit} translations left today")
+                    }
+                    (UiLang::Tr, true) => {
+                        format!("● Ücretsiz — bugünkü {limit} çevirinin hepsi kullanıldı")
+                    }
+                    (UiLang::Tr, false) => {
+                        format!("● Ücretsiz — bugün {limit} çeviriden {left} kaldı")
+                    }
+                    (UiLang::Es, true) => {
+                        format!("● Gratis — usadas las {limit} traducciones de hoy")
+                    }
+                    (UiLang::Es, false) => {
+                        format!("● Gratis — quedan {left} de {limit} traducciones hoy")
+                    }
                 })
                 .size(13.0)
                 .color(if spent { WARN_AMBER } else { TEXT_SECONDARY }),
             );
             ui.label(
                 egui::RichText::new(if spent {
-                    "The count comes back at midnight. Pro removes the limit."
+                    t(
+                        "The count comes back at midnight. Pro removes the limit.",
+                        "Sayaç gece yarısı yenilenir. Pro sınırı kaldırır.",
+                        "El contador vuelve a medianoche. Pro quita el límite.",
+                    )
                 } else {
-                    "Ten a day, counted at your local midnight. Re-reading something \
-                     already translated does not count."
+                    t(
+                        "Ten a day, counted at your local midnight. Re-reading something \
+                         already translated does not count.",
+                        "Günde on çeviri, yerel gece yarısında sıfırlanır. Zaten çevrilmiş \
+                         bir şeyi tekrar okumak sayılmaz.",
+                        "Diez al día, contadas desde tu medianoche local. Releer algo ya \
+                         traducido no cuenta.",
+                    )
                 })
                 .size(11.0)
                 .color(TEXT_MUTED),
@@ -825,25 +1045,42 @@ fn account(
         Status::Active { renews } => {
             if let Some(renews) = renews {
                 ui.label(
-                    egui::RichText::new(format!("Renews {renews}"))
-                        .size(11.5)
-                        .color(TEXT_MUTED),
+                    egui::RichText::new(format!(
+                        "{} {renews}",
+                        t("Renews", "Yenilenme:", "Se renueva el")
+                    ))
+                    .size(11.5)
+                    .color(TEXT_MUTED),
                 );
             }
             ui.label(
-                egui::RichText::new(format!(
-                    "Checked online about every {} days; works offline in between.",
-                    license::TOKEN_TTL_HINT / 86_400,
-                ))
+                egui::RichText::new(match i18n::lang() {
+                    UiLang::En => format!(
+                        "Checked online about every {} days; works offline in between.",
+                        license::TOKEN_TTL_HINT / 86_400,
+                    ),
+                    UiLang::Tr => format!(
+                        "Yaklaşık {} günde bir çevrimiçi kontrol edilir; arada çevrimdışı çalışır.",
+                        license::TOKEN_TTL_HINT / 86_400,
+                    ),
+                    UiLang::Es => format!(
+                        "Se comprueba en línea cada {} días más o menos; funciona sin conexión entre medias.",
+                        license::TOKEN_TTL_HINT / 86_400,
+                    ),
+                })
                 .size(11.0)
                 .color(TEXT_MUTED),
             );
         }
         Status::Lapsed => {
             ui.label(
-                egui::RichText::new("Your licence has expired.")
-                    .size(11.5)
-                    .color(WARN_AMBER),
+                egui::RichText::new(t(
+                    "Your licence has expired.",
+                    "Lisansının süresi doldu.",
+                    "Tu licencia ha caducado.",
+                ))
+                .size(11.5)
+                .color(WARN_AMBER),
             );
         }
         Status::Problem(why) => {
@@ -856,14 +1093,27 @@ fn account(
     // -- what can be done about it ----------------------------------------
     if is_pro {
         ui.horizontal(|ui| {
-            if ui.button("Manage subscription").clicked() {
+            if ui
+                .button(t(
+                    "Manage subscription",
+                    "Aboneliği yönet",
+                    "Gestionar suscripción",
+                ))
+                .clicked()
+            {
                 crate::shell::open_url(&format!("{}?src=window", license::MANAGE_URL));
             }
             if ui
-                .button("Remove from this device")
-                .on_hover_text(
+                .button(t(
+                    "Remove from this device",
+                    "Bu cihazdan kaldır",
+                    "Quitar de este dispositivo",
+                ))
+                .on_hover_text(t(
                     "Frees the device slot so the licence can be used on another machine.",
-                )
+                    "Cihaz yerini boşaltır, böylece lisans başka bir makinede kullanılabilir.",
+                    "Libera el hueco del dispositivo para usar la licencia en otra máquina.",
+                ))
                 .clicked()
             {
                 state.key_input.clear();
@@ -881,7 +1131,10 @@ fn account(
             );
             let ready = !state.key_input.trim().is_empty() && !busy;
             if ui
-                .add_enabled(ready, egui::Button::new("Activate"))
+                .add_enabled(
+                    ready,
+                    egui::Button::new(t("Activate", "Etkinleştir", "Activar")),
+                )
                 .clicked()
             {
                 // Saved before the exchange, not after: a key that the service
@@ -899,14 +1152,20 @@ fn account(
         });
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            if ui.button("Get Pro").clicked() {
+            if ui.button(t("Get Pro", "Pro al", "Obtener Pro")).clicked() {
                 crate::shell::open_url(&format!("{}?src=window", license::BUY_URL));
             }
             ui.label(
                 egui::RichText::new(format!(
-                    "{} or {} — unlimited translations, three devices.",
+                    "{} {} {} — {}",
                     license::PRICE_MONTHLY,
+                    t("or", "ya da", "o"),
                     license::PRICE_YEARLY,
+                    t(
+                        "unlimited translations, three devices.",
+                        "sınırsız çeviri, üç cihaz.",
+                        "traducciones ilimitadas, tres dispositivos.",
+                    ),
                 ))
                 .size(11.0)
                 .color(TEXT_MUTED),
@@ -917,8 +1176,14 @@ fn account(
     ui.add_space(4.0);
     ui.label(
         egui::RichText::new(format!(
-            "Device {} · translations are never sent through our servers",
+            "{} {} · {}",
+            t("Device", "Cihaz", "Dispositivo"),
             &license::device_id()[..8],
+            t(
+                "translations are never sent through our servers",
+                "çeviriler asla sunucularımızdan geçmez",
+                "las traducciones nunca pasan por nuestros servidores",
+            ),
         ))
         .size(10.5)
         .color(TEXT_MUTED),
@@ -931,11 +1196,18 @@ fn behaviour(ui: &mut egui::Ui, cfg: &mut Config) -> bool {
     let mut dirty = false;
 
     dirty |= ui
-        .checkbox(&mut cfg.auto_translate, "Translate on selection")
+        .checkbox(
+            &mut cfg.auto_translate,
+            t(
+                "Translate on selection",
+                "Seçince çevir",
+                "Traducir al seleccionar",
+            ),
+        )
         .changed();
 
     ui.horizontal(|ui| {
-        ui.label("Hold");
+        ui.label(t("Hold", "Seçerken", "Mantén"));
         egui::ComboBox::from_id_salt("trigger-key")
             .selected_text(cfg.trigger_key.label())
             .show_ui(ui, |ui| {
@@ -949,11 +1221,11 @@ fn behaviour(ui: &mut egui::Ui, cfg: &mut Config) -> bool {
                     }
                 }
             });
-        ui.label("while selecting");
+        ui.label(t("while selecting", "basılı tut", "al seleccionar"));
     });
 
     ui.horizontal(|ui| {
-        ui.label("Bubble theme");
+        ui.label(t("Bubble theme", "Baloncuk teması", "Tema de la burbuja"));
         egui::ComboBox::from_id_salt("bubble-theme-main")
             .selected_text(cfg.theme.label())
             .show_ui(ui, |ui| {
@@ -969,39 +1241,76 @@ fn behaviour(ui: &mut egui::Ui, cfg: &mut Config) -> bool {
             });
     });
     ui.label(
-        egui::RichText::new(
+        egui::RichText::new(t(
             "The colour scheme of the translation bubble. It changes the moment \
-             you pick one — the main window keeps its own look.",
-        )
+                 you pick one — the main window keeps its own look.",
+            "Çeviri baloncuğunun renk şeması. Seçtiğin an değişir — ana pencere \
+                 kendi görünümünü korur.",
+            "El esquema de colores de la burbuja. Cambia en cuanto eliges uno — \
+                 la ventana principal mantiene su aspecto.",
+        ))
         .size(11.0)
         .color(TEXT_MUTED),
     );
 
     ui.label(
         egui::RichText::new(match crate::monitor::trigger_key_blocked() {
-            None => "Only a selection made with that key held pops a bubble, so \
-                     selecting text for any other reason stays quiet."
-                .to_string(),
+            None => t(
+                "Only a selection made with that key held pops a bubble, so \
+                 selecting text for any other reason stays quiet.",
+                "Baloncuk yalnızca o tuş basılıyken yapılan seçimde açılır; başka \
+                 amaçla metin seçmek sessiz kalır.",
+                "Solo una selección hecha con esa tecla pulsada abre la burbuja, así \
+                 que seleccionar texto por otro motivo no molesta.",
+            )
+            .to_string(),
             // The reason travels from the platform rather than being written
             // here, because what the user can do about it differs: a group to
             // join is worth saying, a protocol that does not exist is not.
-            Some(reason) => format!(
-                "Not in force: {reason}. Every selection is translated until then — \
-                 or bind a key to `bubbleTranslate --translate-selection`, which \
-                 needs nothing from the session."
-            ),
+            Some(reason) => match i18n::lang() {
+                UiLang::En => format!(
+                    "Not in force: {reason}. Every selection is translated until then — \
+                     or bind a key to `bubbleTranslate --translate-selection`, which \
+                     needs nothing from the session."
+                ),
+                UiLang::Tr => format!(
+                    "Geçerli değil: {reason}. O zamana kadar her seçim çevrilir — ya da \
+                     oturumdan hiçbir şey gerektirmeyen `bubbleTranslate --translate-selection` \
+                     komutuna bir tuş ata."
+                ),
+                UiLang::Es => format!(
+                    "No está activo: {reason}. Hasta entonces se traduce cada selección — \
+                     o asigna una tecla a `bubbleTranslate --translate-selection`, que no \
+                     necesita nada de la sesión."
+                ),
+            },
         })
         .size(11.0)
         .color(TEXT_MUTED),
     );
     dirty |= ui
-        .checkbox(&mut cfg.watch_clipboard, "Also translate on copy (Ctrl+C)")
-        .on_hover_text(
-            "Selecting text publishes it to the desktop by itself, which is how the \
-             bubble works without the other application's help. A few — anything \
-             drawing its own text, this window included — publish nothing, and \
-             copying is the one gesture that always gets through.",
+        .checkbox(
+            &mut cfg.watch_clipboard,
+            t(
+                "Also translate on copy (Ctrl+C)",
+                "Kopyalayınca da çevir (Ctrl+C)",
+                "Traducir también al copiar (Ctrl+C)",
+            ),
         )
+        .on_hover_text(t(
+            "Selecting text publishes it to the desktop by itself, which is how the \
+                 bubble works without the other application's help. A few — anything \
+                 drawing its own text, this window included — publish nothing, and \
+                 copying is the one gesture that always gets through.",
+            "Metin seçmek onu masaüstüne kendiliğinden bildirir; baloncuk diğer \
+                 uygulamanın yardımı olmadan böyle çalışır. Kendi metnini çizen birkaç \
+                 uygulama — bu pencere dahil — hiçbir şey bildirmez; kopyalamak her \
+                 zaman işe yarayan tek harekettir.",
+            "Seleccionar texto lo publica en el escritorio por sí solo; así funciona \
+                 la burbuja sin ayuda de la otra aplicación. Algunas — las que dibujan \
+                 su propio texto, esta ventana incluida — no publican nada, y copiar es \
+                 el único gesto que siempre funciona.",
+        ))
         .changed();
 
     // Only macOS and Windows have a capture strategy to fall back to: both ask
@@ -1013,16 +1322,36 @@ fn behaviour(ui: &mut egui::Ui, cfg: &mut Config) -> bool {
         dirty |= ui
             .checkbox(
                 &mut cfg.clipboard_fallback,
-                "Use copy fallback when an app hides its selection",
+                t(
+                    "Use copy fallback when an app hides its selection",
+                    "Uygulama seçimini gizlerse kopyalama yedeğini kullan",
+                    "Usar copia de respaldo si una app oculta su selección",
+                ),
             )
             .on_hover_text(if cfg!(target_os = "windows") {
-                "Needed for PDF viewers and anything drawing its own text, which \
-                 expose nothing over UI Automation. Briefly borrows the clipboard \
-                 and restores the text afterwards."
+                t(
+                    "Needed for PDF viewers and anything drawing its own text, which \
+                     expose nothing over UI Automation. Briefly borrows the clipboard \
+                     and restores the text afterwards.",
+                    "UI Automation üzerinden hiçbir şey sunmayan PDF görüntüleyiciler ve \
+                     kendi metnini çizen uygulamalar için gerekir. Panoyu kısa süre ödünç \
+                     alır ve sonra geri koyar.",
+                    "Necesario para visores de PDF y apps que dibujan su propio texto, que \
+                     no exponen nada por UI Automation. Toma prestado el portapapeles un \
+                     momento y luego lo restaura.",
+                )
             } else {
-                "Needed for terminals and PDF viewers, which expose nothing over the \
-                 Accessibility API. Briefly borrows the clipboard and restores the \
-                 text afterwards."
+                t(
+                    "Needed for terminals and PDF viewers, which expose nothing over the \
+                     Accessibility API. Briefly borrows the clipboard and restores the \
+                     text afterwards.",
+                    "Erişilebilirlik API'si üzerinden hiçbir şey sunmayan terminaller ve \
+                     PDF görüntüleyiciler için gerekir. Panoyu kısa süre ödünç alır ve \
+                     sonra geri koyar.",
+                    "Necesario para terminales y visores de PDF, que no exponen nada por la \
+                     API de Accesibilidad. Toma prestado el portapapeles un momento y luego \
+                     lo restaura.",
+                )
             })
             .changed();
     }
@@ -1031,25 +1360,46 @@ fn behaviour(ui: &mut egui::Ui, cfg: &mut Config) -> bool {
     // this would be a switch that makes the app unreachable on its next start.
     if crate::shell::has_indicator() {
         dirty |= ui
-            .checkbox(&mut cfg.start_in_background, "Start without the window")
-            .on_hover_text(
-                "Launches straight into the background: no settings window, just the \
-                 tray icon and the bubble. The window is one click on that icon away.",
+            .checkbox(
+                &mut cfg.start_in_background,
+                t(
+                    "Start without the window",
+                    "Pencere olmadan başlat",
+                    "Iniciar sin la ventana",
+                ),
             )
+            .on_hover_text(t(
+                "Launches straight into the background: no settings window, just the \
+                     tray icon and the bubble. The window is one click on that icon away.",
+                "Doğrudan arka planda açılır: ayar penceresi yok, sadece tepsi simgesi \
+                     ve baloncuk. Pencere o simgeye bir tık uzaklıkta.",
+                "Arranca directamente en segundo plano: sin ventana de ajustes, solo el \
+                     icono de la bandeja y la burbuja. La ventana está a un clic en ese icono.",
+            ))
             .changed();
     }
 
     ui.add_space(8.0);
     let mut scale = cfg.ui_scale * 100.0;
-    if slider(ui, "Interface scale", &mut scale, 60.0..=140.0, "%") {
+    if slider(
+        ui,
+        t("Interface scale", "Arayüz ölçeği", "Escala de la interfaz"),
+        &mut scale,
+        60.0..=140.0,
+        "%",
+    ) {
         cfg.ui_scale = scale / 100.0;
         dirty = true;
     }
     ui.label(
-        egui::RichText::new(
+        egui::RichText::new(t(
             "Sizes the whole app. The display's own scaling is already matched; \
-             this is for desktops that run denser or looser than that.",
-        )
+                 this is for desktops that run denser or looser than that.",
+            "Tüm uygulamayı boyutlandırır. Ekranın kendi ölçeği zaten uygulanır; \
+                 bu, daha sık ya da daha seyrek çalışan masaüstleri içindir.",
+            "Ajusta el tamaño de toda la app. La escala de la pantalla ya se aplica; \
+                 esto es para escritorios más densos o más holgados.",
+        ))
         .size(11.0)
         .color(TEXT_MUTED),
     );
@@ -1057,7 +1407,11 @@ fn behaviour(ui: &mut egui::Ui, cfg: &mut Config) -> bool {
     ui.add_space(8.0);
     dirty |= slider(
         ui,
-        "Bubble text size",
+        t(
+            "Bubble text size",
+            "Baloncuk yazı boyutu",
+            "Tamaño del texto de la burbuja",
+        ),
         &mut cfg.font_size,
         12.0..=26.0,
         "pt",
@@ -1065,34 +1419,64 @@ fn behaviour(ui: &mut egui::Ui, cfg: &mut Config) -> bool {
 
     ui.add_space(4.0);
     let mut hide = cfg.auto_hide_secs as f32;
-    if slider(ui, "Auto-hide after", &mut hide, 0.0..=60.0, "s") {
+    if slider(
+        ui,
+        t("Auto-hide after", "Otomatik gizle", "Ocultar tras"),
+        &mut hide,
+        0.0..=60.0,
+        "s",
+    ) {
         cfg.auto_hide_secs = hide as u64;
         dirty = true;
     }
     ui.label(
-        egui::RichText::new("0 keeps the bubble up until closed. Pauses while hovered.")
-            .size(10.5)
-            .color(TEXT_MUTED),
+        egui::RichText::new(t(
+            "0 keeps the bubble up until closed. Pauses while hovered.",
+            "0, baloncuğu kapatılana kadar açık tutar. Üzerindeyken durur.",
+            "0 mantiene la burbuja hasta cerrarla. Se pausa al pasar el ratón.",
+        ))
+        .size(10.5)
+        .color(TEXT_MUTED),
     );
 
     ui.add_space(6.0);
     let mut debounce = cfg.debounce_ms as f32;
-    if slider(ui, "Settle delay", &mut debounce, 50.0..=600.0, "ms") {
+    if slider(
+        ui,
+        t(
+            "Settle delay",
+            "Bekleme süresi",
+            "Retardo de estabilización",
+        ),
+        &mut debounce,
+        50.0..=600.0,
+        "ms",
+    ) {
         cfg.debounce_ms = debounce as u64;
         dirty = true;
     }
     ui.label(
-        egui::RichText::new(
+        egui::RichText::new(t(
             "How still the selection must be to count as finished. Raise it if the \
-             bubble appears mid-sweep or an app returns a stale selection.",
-        )
+                 bubble appears mid-sweep or an app returns a stale selection.",
+            "Seçimin bitmiş sayılması için ne kadar sabit kalması gerektiği. Baloncuk \
+                 sürüklerken çıkıyorsa ya da bir uygulama eski seçimi veriyorsa artır.",
+            "Cuánto debe quedarse quieta la selección para darla por terminada. Súbelo \
+                 si la burbuja sale a mitad del arrastre o una app da una selección vieja.",
+        ))
         .size(10.5)
         .color(TEXT_MUTED),
     );
 
     ui.add_space(6.0);
     let mut max = cfg.max_chars as f32;
-    if slider(ui, "Longest selection", &mut max, 100.0..=8000.0, " chars") {
+    if slider(
+        ui,
+        t("Longest selection", "En uzun seçim", "Selección más larga"),
+        &mut max,
+        100.0..=8000.0,
+        t(" chars", " karakter", " caracteres"),
+    ) {
         cfg.max_chars = max as usize;
         dirty = true;
     }
@@ -1149,10 +1533,14 @@ const MAILTO_BUDGET: usize = 1200;
 fn feedback(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Config) -> bool {
     let mut dirty = false;
     ui.label(
-        egui::RichText::new(
+        egui::RichText::new(t(
             "Something broken, something missing, or something that annoyed you \u{2014} \
-             it is read by the person who wrote the app.",
-        )
+                 it is read by the person who wrote the app.",
+            "Bozuk, eksik ya da seni rahatsız eden bir şey mi var \u{2014} uygulamayı \
+                 yazan kişi okur.",
+            "Algo roto, algo que falta o algo que te molestó \u{2014} lo lee quien \
+                 escribió la app.",
+        ))
         .size(11.5)
         .color(TEXT_SECONDARY),
     );
@@ -1162,21 +1550,38 @@ fn feedback(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Config) -> bool 
         egui::TextEdit::multiline(&mut state.feedback)
             .desired_rows(4)
             .desired_width(f32::INFINITY)
-            .hint_text("What happened, or what you wish it did\u{2026}"),
+            .hint_text(t(
+                "What happened, or what you wish it did\u{2026}",
+                "Ne oldu, ya da ne yapmasını isterdin\u{2026}",
+                "Qué pasó, o qué te gustaría que hiciera\u{2026}",
+            )),
     );
     ui.add_space(6.0);
 
     ui.horizontal(|ui| {
         let ready = !state.feedback.trim().is_empty();
         if ui
-            .add_enabled(ready, egui::Button::new("Write the mail"))
-            .on_hover_text(format!("Addressed to {SUPPORT_EMAIL}"))
+            .add_enabled(
+                ready,
+                egui::Button::new(t("Write the mail", "E-postayı yaz", "Escribir el correo")),
+            )
+            .on_hover_text(format!(
+                "{} {SUPPORT_EMAIL}",
+                t("Addressed to", "Alıcı:", "Dirigido a")
+            ))
             .clicked()
         {
-            state.feedback_note =
-                Some(send_feedback(ui.ctx(), state.feedback.trim(), cfg.feedback_via));
+            state.feedback_note = Some(send_feedback(
+                ui.ctx(),
+                state.feedback.trim(),
+                cfg.feedback_via,
+            ));
         }
-        ui.label(egui::RichText::new("in").size(11.5).color(TEXT_MUTED));
+        ui.label(
+            egui::RichText::new(t("in", "ile", "en"))
+                .size(11.5)
+                .color(TEXT_MUTED),
+        );
         // Remembered, because someone who reads their mail on the web will
         // answer this question the same way every time.
         egui::ComboBox::from_id_salt("feedback-via")
@@ -1193,12 +1598,27 @@ fn feedback(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Config) -> bool 
                 }
             });
         if ui
-            .button("Copy the address")
-            .on_hover_text("If you would rather write from somewhere else")
+            .button(t(
+                "Copy the address",
+                "Adresi kopyala",
+                "Copiar la dirección",
+            ))
+            .on_hover_text(t(
+                "If you would rather write from somewhere else",
+                "Başka bir yerden yazmayı tercih edersen",
+                "Si prefieres escribir desde otro sitio",
+            ))
             .clicked()
         {
             ui.ctx().copy_text(SUPPORT_EMAIL.to_string());
-            state.feedback_note = Some(format!("{SUPPORT_EMAIL} is on the clipboard."));
+            state.feedback_note = Some(format!(
+                "{SUPPORT_EMAIL} {}",
+                t(
+                    "is on the clipboard.",
+                    "panoya kopyalandı.",
+                    "está en el portapapeles."
+                )
+            ));
         }
     });
 
@@ -1211,13 +1631,26 @@ fn feedback(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Config) -> bool 
     // Said plainly, because a message that silently carried system details
     // would be exactly the kind of thing someone writes in to complain about.
     ui.label(
-        egui::RichText::new(format!(
-            "Goes through your own mail app \u{2014} nothing is sent from here. The version \
-             ({}) and system ({}) are added to the end so a reply can make sense; \
-             you can delete them before sending.",
-            env!("CARGO_PKG_VERSION"),
-            std::env::consts::OS,
-        ))
+        egui::RichText::new({
+            let (v, os) = (env!("CARGO_PKG_VERSION"), std::env::consts::OS);
+            match i18n::lang() {
+                UiLang::En => format!(
+                    "Goes through your own mail app \u{2014} nothing is sent from here. The version \
+                     ({v}) and system ({os}) are added to the end so a reply can make sense; \
+                     you can delete them before sending."
+                ),
+                UiLang::Tr => format!(
+                    "Kendi e-posta uygulamandan gider \u{2014} buradan hiçbir şey gönderilmez. \
+                     Yanıt anlamlı olsun diye sürüm ({v}) ve sistem ({os}) sona eklenir; \
+                     göndermeden önce silebilirsin."
+                ),
+                UiLang::Es => format!(
+                    "Sale desde tu propia app de correo \u{2014} desde aquí no se envía nada. \
+                     La versión ({v}) y el sistema ({os}) se añaden al final para que la \
+                     respuesta tenga sentido; puedes borrarlos antes de enviar."
+                ),
+            }
+        })
         .size(10.5)
         .color(TEXT_MUTED),
     );
@@ -1226,10 +1659,14 @@ fn feedback(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Config) -> bool 
     // the person is left thinking the button is broken.
     if cfg.feedback_via == FeedbackVia::MailApp {
         ui.label(
-            egui::RichText::new(
+            egui::RichText::new(t(
                 "Opened an empty tab instead? You read your mail on the web \u{2014} pick \
-                 Gmail or Outlook.com above and it will open there.",
-            )
+                     Gmail or Outlook.com above and it will open there.",
+                "Boş bir sekme mi açıldı? E-postanı web'de okuyorsun \u{2014} yukarıdan \
+                     Gmail ya da Outlook.com'u seç, orada açılsın.",
+                "¿Se abrió una pestaña vacía? Lees tu correo en la web \u{2014} elige \
+                     Gmail u Outlook.com arriba y se abrirá allí.",
+            ))
             .size(10.5)
             .color(TEXT_MUTED),
         );
@@ -1261,14 +1698,22 @@ fn compose(message: &str, version: &str, os: &str, via: FeedbackVia) -> Mail {
         FeedbackVia::Gmail => Mail {
             url: format!("https://mail.google.com/mail/?view=cm&fs=1&to={to}&su={su}&body={bo}"),
             clipboard: None,
-            note: "Gmail should be open with it. Nothing has been sent until you send it.",
+            note: t(
+                "Gmail should be open with it. Nothing has been sent until you send it.",
+                "Gmail onunla açılmış olmalı. Sen gönderene kadar hiçbir şey gönderilmedi.",
+                "Gmail debería estar abierto con él. No se envía nada hasta que lo envíes.",
+            ),
         },
         FeedbackVia::Outlook => Mail {
             url: format!(
                 "https://outlook.live.com/mail/0/deeplink/compose?to={to}&subject={su}&body={bo}"
             ),
             clipboard: None,
-            note: "Outlook should be open with it. Nothing has been sent until you send it.",
+            note: t(
+                "Outlook should be open with it. Nothing has been sent until you send it.",
+                "Outlook onunla açılmış olmalı. Sen gönderene kadar hiçbir şey gönderilmedi.",
+                "Outlook debería estar abierto con él. No se envía nada hasta que lo envíes.",
+            ),
         },
         FeedbackVia::MailApp => {
             // A long message is not squeezed into the link: past the budget the
@@ -1279,15 +1724,27 @@ fn compose(message: &str, version: &str, os: &str, via: FeedbackVia) -> Mail {
                 return Mail {
                     url: format!("mailto:{to}?subject={su}"),
                     clipboard: Some(body),
-                    note: "That is a long one, so it is on the clipboard \u{2014} paste it into \
-                           the mail that just opened.",
+                    note: t(
+                        "That is a long one, so it is on the clipboard \u{2014} paste it into \
+                         the mail that just opened.",
+                        "Bu uzun bir mesaj, panoya kopyalandı \u{2014} az önce açılan e-postaya \
+                         yapıştır.",
+                        "Es largo, así que está en el portapapeles \u{2014} pégalo en el correo \
+                         que se acaba de abrir.",
+                    ),
                 };
             }
             Mail {
                 url: format!("mailto:{to}?subject={su}&body={bo}"),
                 clipboard: None,
-                note: "Your mail app should be open with it. Nothing has been sent until \
-                       you send it.",
+                note: t(
+                    "Your mail app should be open with it. Nothing has been sent until \
+                     you send it.",
+                    "E-posta uygulaman onunla açılmış olmalı. Sen gönderene kadar hiçbir \
+                     şey gönderilmedi.",
+                    "Tu app de correo debería estar abierta con él. No se envía nada hasta \
+                     que lo envíes.",
+                ),
             }
         }
     }
@@ -1295,7 +1752,12 @@ fn compose(message: &str, version: &str, os: &str, via: FeedbackVia) -> Mail {
 
 /// Hands the message to the mail program, and says what became of it.
 fn send_feedback(ctx: &egui::Context, message: &str, via: FeedbackVia) -> String {
-    let mail = compose(message, env!("CARGO_PKG_VERSION"), std::env::consts::OS, via);
+    let mail = compose(
+        message,
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        via,
+    );
     if let Some(text) = mail.clipboard {
         ctx.copy_text(text);
     }
@@ -1317,7 +1779,7 @@ fn recent(ui: &mut egui::Ui, state: &MainState) {
                     .color(TEXT_PRIMARY),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("Copy").clicked() {
+                if ui.small_button(t("Copy", "Kopyala", "Copiar")).clicked() {
                     crate::capture::set_clipboard(ui.ctx(), &entry.translated);
                 }
                 ui.label(
@@ -1345,7 +1807,12 @@ mod tests {
 
     #[test]
     fn a_short_message_travels_in_the_link() {
-        let mail = compose("The bubble is too small", "0.2.2", "linux", FeedbackVia::MailApp);
+        let mail = compose(
+            "The bubble is too small",
+            "0.2.2",
+            "linux",
+            FeedbackVia::MailApp,
+        );
         assert!(mail.clipboard.is_none());
         assert!(
             mail.url
@@ -1404,6 +1871,10 @@ mod tests {
         // under the budget in characters is over it in a link.
         let cyrillic = "\u{434}".repeat(MAILTO_BUDGET / 4);
         assert!(cyrillic.chars().count() < MAILTO_BUDGET);
-        assert!(compose(&cyrillic, "0.2.2", "linux", FeedbackVia::MailApp).clipboard.is_some());
+        assert!(
+            compose(&cyrillic, "0.2.2", "linux", FeedbackVia::MailApp)
+                .clipboard
+                .is_some()
+        );
     }
 }

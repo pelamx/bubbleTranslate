@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::t;
+
 /// Which backend to ask for a translation. The engine walks `Config::providers`
 /// in order and keeps the first answer it gets, so ordering here is the
 /// failover policy.
@@ -42,8 +44,11 @@ pub enum FeedbackVia {
 }
 
 impl FeedbackVia {
-    pub const ALL: &'static [FeedbackVia] =
-        &[FeedbackVia::MailApp, FeedbackVia::Gmail, FeedbackVia::Outlook];
+    pub const ALL: &'static [FeedbackVia] = &[
+        FeedbackVia::MailApp,
+        FeedbackVia::Gmail,
+        FeedbackVia::Outlook,
+    ];
 
     /// What to call each choice, in the name the machine in front of the user
     /// actually uses.
@@ -56,8 +61,12 @@ impl FeedbackVia {
         match self {
             FeedbackVia::MailApp => match std::env::consts::OS {
                 "macos" => "Apple Mail",
-                "windows" => "my mail app (Outlook, Mail\u{2026})",
-                _ => "my mail app",
+                "windows" => t(
+                    "my mail app (Outlook, Mail\u{2026})",
+                    "e-posta uygulamam (Outlook, Mail\u{2026})",
+                    "mi app de correo (Outlook, Mail\u{2026})",
+                ),
+                _ => t("my mail app", "e-posta uygulamam", "mi app de correo"),
             },
             FeedbackVia::Gmail => "Gmail",
             FeedbackVia::Outlook => "Outlook.com",
@@ -98,7 +107,11 @@ impl TriggerKey {
     /// front of the user actually uses.
     pub fn label(self) -> &'static str {
         match self {
-            TriggerKey::Always => "Any selection (no key)",
+            TriggerKey::Always => t(
+                "Any selection (no key)",
+                "Her seçim (tuşsuz)",
+                "Cualquier selección (sin tecla)",
+            ),
             TriggerKey::Shift => "Shift",
             TriggerKey::Ctrl => {
                 if cfg!(target_os = "macos") {
@@ -165,14 +178,22 @@ impl BubbleTheme {
 
     pub fn label(self) -> &'static str {
         match self {
-            BubbleTheme::Slate => "Slate (original)",
+            BubbleTheme::Slate => t("Slate (original)", "Slate (orijinal)", "Slate (original)"),
             BubbleTheme::TokyoNight => "Tokyo Night",
             BubbleTheme::Catppuccin => "Catppuccin",
             BubbleTheme::Gruvbox => "Gruvbox",
             BubbleTheme::Nord => "Nord",
             BubbleTheme::RosePine => "Rosé Pine",
-            BubbleTheme::CatppuccinLatte => "Catppuccin Latte (light)",
-            BubbleTheme::RosePineDawn => "Rosé Pine Dawn (light)",
+            BubbleTheme::CatppuccinLatte => t(
+                "Catppuccin Latte (light)",
+                "Catppuccin Latte (açık)",
+                "Catppuccin Latte (claro)",
+            ),
+            BubbleTheme::RosePineDawn => t(
+                "Rosé Pine Dawn (light)",
+                "Rosé Pine Dawn (açık)",
+                "Rosé Pine Dawn (claro)",
+            ),
         }
     }
 }
@@ -257,6 +278,8 @@ pub struct Config {
     /// the version and free/pro. It is how the number of people using the
     /// app is known at all. Never the text, never the languages.
     pub usage_ping: bool,
+    /// The language of the app's own interface. English unless changed.
+    pub ui_lang: crate::i18n::UiLang,
 }
 
 impl Default for Config {
@@ -287,6 +310,7 @@ impl Default for Config {
             ui_scale: if cfg!(target_os = "linux") { 0.85 } else { 1.0 },
             theme: BubbleTheme::default(),
             usage_ping: true,
+            ui_lang: crate::i18n::UiLang::En,
         }
     }
 }

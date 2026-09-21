@@ -14,6 +14,7 @@ use eframe::egui;
 use crate::capture;
 use crate::config::{BubbleTheme, Config, LANGUAGES, Provider, TriggerKey, language_name};
 use crate::engine::{Engine, Request, UiEvent};
+use crate::i18n::t;
 use crate::license::{self, Licensing};
 use crate::main_window::{self, MainState};
 use crate::monitor;
@@ -1160,7 +1161,7 @@ impl BubbleApp {
                     .add(
                         egui::Button::new(egui::RichText::new(CLOSE_GLYPH).size(17.0)).frame(false),
                     )
-                    .on_hover_text("Close")
+                    .on_hover_text(t("Close", "Kapat", "Cerrar"))
                     .clicked()
                 {
                     dismiss = true;
@@ -1184,9 +1185,13 @@ impl BubbleApp {
                     ui.label(
                         egui::RichText::new(match via {
                             CaptureSource::Accessibility | CaptureSource::PrimarySelection => {
-                                "Translating…"
+                                t("Translating…", "Çevriliyor…", "Traduciendo…")
                             }
-                            CaptureSource::Clipboard => "Translating (via copy)…",
+                            CaptureSource::Clipboard => t(
+                                "Translating (via copy)…",
+                                "Çevriliyor (kopyalama ile)…",
+                                "Traduciendo (vía copia)…",
+                            ),
                         })
                         .size(13.5)
                         .color(pal().text_secondary),
@@ -1209,15 +1214,31 @@ impl BubbleApp {
             State::Capped { limit } => {
                 let limit = *limit;
                 ui.label(
-                    egui::RichText::new(format!("You have used today's {limit} free translations"))
-                        .size(14.0)
-                        .color(pal().text_primary),
+                    egui::RichText::new(match crate::i18n::lang() {
+                        crate::i18n::UiLang::En => {
+                            format!("You have used today's {limit} free translations")
+                        }
+                        crate::i18n::UiLang::Tr => {
+                            format!("Bugünkü {limit} ücretsiz çeviriyi kullandın")
+                        }
+                        crate::i18n::UiLang::Es => {
+                            format!("Ya usaste las {limit} traducciones gratis de hoy")
+                        }
+                    })
+                    .size(14.0)
+                    .color(pal().text_primary),
                 );
                 ui.add_space(3.0);
                 ui.label(
                     egui::RichText::new(format!(
-                        "They come back at midnight. Pro removes the limit — {} or {}.",
+                        "{} {} {} {}.",
+                        t(
+                            "They come back at midnight. Pro removes the limit —",
+                            "Gece yarısı yenilenir. Pro sınırı kaldırır —",
+                            "Vuelven a medianoche. Pro quita el límite —",
+                        ),
                         license::PRICE_MONTHLY,
+                        t("or", "ya da", "o"),
                         license::PRICE_YEARLY,
                     ))
                     .size(12.0)
@@ -1230,14 +1251,20 @@ impl BubbleApp {
                 // "Not now" beside it is what keeps this from being a nag.
                 ui.add_space(9.0);
                 ui.horizontal(|ui| {
-                    if ui.button("Upgrade to Pro").clicked() {
+                    if ui
+                        .button(t("Upgrade to Pro", "Pro'ya geç", "Pasar a Pro"))
+                        .clicked()
+                    {
                         shell::open_url(&format!("{}?src=bubble", license::BUY_URL));
                         dismiss = true;
                     }
                     if ui
                         .add(
-                            egui::Button::new(egui::RichText::new("Not now").size(12.0))
-                                .frame(false),
+                            egui::Button::new(
+                                egui::RichText::new(t("Not now", "Şimdi değil", "Ahora no"))
+                                    .size(12.0),
+                            )
+                            .frame(false),
                         )
                         .clicked()
                     {
@@ -1247,9 +1274,13 @@ impl BubbleApp {
             }
             State::Failed { errors, .. } => {
                 ui.label(
-                    egui::RichText::new("No provider could translate this")
-                        .size(14.0)
-                        .color(pal().text_error),
+                    egui::RichText::new(t(
+                        "No provider could translate this",
+                        "Hiçbir servis bunu çeviremedi",
+                        "Ningún proveedor pudo traducir esto",
+                    ))
+                    .size(14.0)
+                    .color(pal().text_error),
                 );
                 ui.add_space(2.0);
                 for (provider, err) in errors {
@@ -1303,7 +1334,7 @@ impl BubbleApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
                     .add(egui::Button::new(egui::RichText::new("⚙").size(14.0)).frame(false))
-                    .on_hover_text("Settings")
+                    .on_hover_text(t("Settings", "Ayarlar", "Ajustes"))
                     .clicked()
                 {
                     self.settings_open = !self.settings_open;
@@ -1313,7 +1344,11 @@ impl BubbleApp {
                     let just_copied = self
                         .copied_at
                         .is_some_and(|t| t.elapsed() < Duration::from_secs(2));
-                    let label = if just_copied { "Copied" } else { "Copy" };
+                    let label = if just_copied {
+                        t("Copied", "Kopyalandı", "Copiado")
+                    } else {
+                        t("Copy", "Kopyala", "Copiar")
+                    };
                     if ui
                         .add(egui::Button::new(egui::RichText::new(label).size(12.0)).frame(false))
                         .clicked()
@@ -1332,7 +1367,11 @@ impl BubbleApp {
                         egui::Button::new(egui::RichText::new(language_name(&target)).size(12.0))
                             .frame(false),
                     )
-                    .on_hover_text("Change target language")
+                    .on_hover_text(t(
+                        "Change target language",
+                        "Hedef dili değiştir",
+                        "Cambiar idioma de destino",
+                    ))
                     .clicked()
                 {
                     self.settings_open = !self.settings_open;
@@ -1360,7 +1399,14 @@ impl BubbleApp {
         }
 
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Providers, in order").size(12.0));
+            ui.label(
+                egui::RichText::new(t(
+                    "Providers, in order",
+                    "Servisler, sırayla",
+                    "Proveedores, en orden",
+                ))
+                .size(12.0),
+            );
             ui.label(
                 egui::RichText::new(
                     cfg.providers
@@ -1377,7 +1423,12 @@ impl BubbleApp {
         if ui
             .checkbox(
                 &mut cfg.auto_translate,
-                egui::RichText::new("Translate on selection").size(12.0),
+                egui::RichText::new(t(
+                    "Translate on selection",
+                    "Seçince çevir",
+                    "Traducir al seleccionar",
+                ))
+                .size(12.0),
             )
             .changed()
         {
@@ -1389,9 +1440,13 @@ impl BubbleApp {
         // not wanted — which is exactly when someone goes looking for it.
         ui.horizontal(|ui| {
             ui.label(
-                egui::RichText::new("Hold while selecting")
-                    .size(12.0)
-                    .color(pal().text_secondary),
+                egui::RichText::new(t(
+                    "Hold while selecting",
+                    "Seçerken basılı tut",
+                    "Mantener al seleccionar",
+                ))
+                .size(12.0)
+                .color(pal().text_secondary),
             );
             egui::ComboBox::from_id_salt("bubble-trigger-key")
                 .selected_text(egui::RichText::new(cfg.trigger_key.label()).size(12.0))
@@ -1415,7 +1470,7 @@ impl BubbleApp {
         // colours without the bubble being reopened. See [`set_palette`].
         ui.horizontal(|ui| {
             ui.label(
-                egui::RichText::new("Theme")
+                egui::RichText::new(t("Theme", "Tema", "Tema"))
                     .size(12.0)
                     .color(pal().text_secondary),
             );
@@ -1450,7 +1505,7 @@ impl BubbleApp {
         // list scrolls instead of running off the bottom of a short bubble.
         ui.horizontal(|ui| {
             ui.label(
-                egui::RichText::new("Translate into")
+                egui::RichText::new(t("Translate into", "Hedef dil", "Traducir a"))
                     .size(12.0)
                     .color(pal().text_secondary),
             );
@@ -1481,7 +1536,9 @@ impl BubbleApp {
         ui.add_space(8.0);
 
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Text size").size(12.0));
+            ui.label(
+                egui::RichText::new(t("Text size", "Yazı boyutu", "Tamaño del texto")).size(12.0),
+            );
             if ui
                 .add(
                     egui::Slider::new(&mut cfg.font_size, 12.0..=26.0)
@@ -1500,12 +1557,14 @@ impl BubbleApp {
         });
 
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("DeepL key").size(12.0));
+            ui.label(
+                egui::RichText::new(t("DeepL key", "DeepL anahtarı", "Clave de DeepL")).size(12.0),
+            );
             if ui
                 .add(
                     egui::TextEdit::singleline(&mut cfg.deepl_api_key)
                         .password(true)
-                        .hint_text("optional")
+                        .hint_text(t("optional", "isteğe bağlı", "opcional"))
                         .desired_width(180.0),
                 )
                 .lost_focus()
@@ -1515,9 +1574,13 @@ impl BubbleApp {
         });
 
         ui.label(
-            egui::RichText::new(format!("Config: {}", Config::path().display()))
-                .size(10.5)
-                .color(pal().text_muted),
+            egui::RichText::new(format!(
+                "{} {}",
+                t("Config:", "Ayarlar:", "Ajustes:"),
+                Config::path().display()
+            ))
+            .size(10.5)
+            .color(pal().text_muted),
         );
 
         self.lang_popup_open = popup_open;
