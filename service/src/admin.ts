@@ -154,6 +154,41 @@ async function usage(env: Env): Promise<Usage> {
   };
 }
 
+/** The same installs the weekly tile counts, split by the OS each one reported
+ *  on its last ping. Answers "a new person turned up — what are they running?"
+ *  without naming any single machine. `os` is Rust's `env::consts::OS`, so the
+ *  values are `macos` / `windows` / `linux`. */
+async function osBreakdown(
+  env: Env,
+): Promise<{ os: string; active: number; fresh: number; today: number }[]> {
+  const t = now();
+  const { results } = await env.DB.prepare(
+    `SELECT COALESCE(os, 'unknown') AS os,
+            SUM(CASE WHEN last_seen  > ?1 THEN 1 ELSE 0 END) AS active,
+            SUM(CASE WHEN first_seen > ?1 THEN 1 ELSE 0 END) AS fresh,
+            SUM(CASE WHEN first_seen > ?2 THEN 1 ELSE 0 END) AS today
+       FROM installs
+      WHERE last_seen > ?1 OR first_seen > ?1
+      GROUP BY os
+      ORDER BY active DESC, os ASC`,
+  )
+    .bind(t - 8 * DAY, t - DAY)
+    .all<{ os: string; active: number; fresh: number; today: number }>();
+  return results ?? [];
+}
+
+/** How the app names an OS to how a person reads it. An unlisted value (a
+ *  phone build, a BSD) is shown as it arrived rather than hidden. */
+function osLabel(os: string): string {
+  const known: Record<string, string> = {
+    macos: "macOS",
+    windows: "Windows",
+    linux: "Linux",
+    unknown: "Unknown",
+  };
+  return known[os] ?? os;
+}
+
 async function stats(env: Env): Promise<Stats> {
   const t = now();
   // One pass with conditional sums rather than eight queries. "Live" here is
@@ -405,10 +440,119 @@ interface Notice {
   key?: string;
 }
 
+/** The operator panel wears a Tokyo Night terminal skin, kept to this page.
+ *  It is injected through `page()`'s `head`, which lands after the shared
+ *  stylesheet, so every rule here overrides the base without touching the
+ *  buyer-facing pages. The base CSS is variable-driven, so re-pointing the
+ *  palette variables re-themes the whole panel; the rest is polish. */
+const ADMIN_STYLE = `
+  :root {
+    --bg:#16161e; --bg-soft:#1f2335; --card:#1a1b26; --border:#2a2e42;
+    --text:#c0caf5; --muted:#7982a9; --comment:#565f89;
+    --brand:#7aa2f7; --brand-2:#bb9af7; --accent:#9ece6a;
+    --cyan:#7dcfff; --red:#f7768e; --orange:#ff9e64; --yellow:#e0af68;
+  }
+  body {
+    font-family: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--text);
+    background:
+      radial-gradient(900px 520px at 100% -10%, rgba(122,162,247,.10), transparent 60%),
+      radial-gradient(760px 520px at -10% 110%, rgba(187,154,247,.10), transparent 55%),
+      var(--bg);
+    background-attachment: fixed;
+  }
+  .sheet {
+    background: linear-gradient(180deg, #1a1b26, #16161e);
+    border: 1px solid var(--border); border-radius: 14px;
+    padding: 0 clamp(16px,3vw,30px) 34px;
+    box-shadow: 0 24px 70px rgba(0,0,0,.55);
+    overflow: hidden;
+  }
+  /* Window title bar, bled to the sheet's edges. */
+  .term-bar {
+    display: flex; align-items: center; gap: 12px;
+    margin: 0 calc(-1 * clamp(16px,3vw,30px)) 24px;
+    padding: 11px 16px;
+    background: #15161f; border-bottom: 1px solid var(--border);
+  }
+  .term-bar .tl { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  .term-bar .tl + .tl { margin-left: -4px; }
+  .tl.r { background: #f7768e; } .tl.y { background: #e0af68; } .tl.g { background: #9ece6a; }
+  .term-bar .title { color: var(--comment); font-size: 12.5px; letter-spacing: .2px; }
+  .term-bar .title b { color: var(--brand); font-weight: 600; }
+  .term-bar .spacer { flex: 1; }
+  .term-bar .env {
+    font-size: 11px; color: var(--muted); letter-spacing: .3px;
+    border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px;
+  }
+  .term-bar .env.prod { color: var(--accent); border-color: rgba(158,206,106,.4); }
+  h1 {
+    font-size: 22px; font-weight: 700; letter-spacing: -.2px; color: var(--text);
+    display: flex; align-items: baseline; gap: 10px; margin: 4px 0 4px;
+  }
+  h1::before { content: "❯"; color: var(--accent); font-weight: 700; }
+  h2 {
+    color: var(--brand); font-size: 13px; font-weight: 600;
+    text-transform: lowercase; letter-spacing: .4px;
+    margin: 30px 0 12px; padding-left: 12px; border-left: 2px solid var(--brand-2);
+  }
+  h2::before { content: "# "; color: var(--comment); }
+  .tile {
+    background: #1a1b26; border: 1px solid var(--border); border-radius: 10px;
+    padding: 13px 14px; position: relative; overflow: hidden;
+    transition: border-color .15s ease, transform .15s ease;
+  }
+  .tile::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--brand); }
+  .tile:hover { border-color: var(--brand); transform: translateY(-1px); }
+  .tile .n { font-size: 24px; font-weight: 700; color: var(--cyan); font-variant-numeric: tabular-nums; }
+  .tile .l { font-size: 11px; color: var(--muted); text-transform: lowercase; letter-spacing: .3px; }
+  table { font-size: 13px; }
+  th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; }
+  th { color: var(--comment); text-transform: lowercase; letter-spacing: .4px; font-size: 11px; }
+  table tr:hover td { background: rgba(122,162,247,.05); }
+  code { color: var(--cyan); background: rgba(122,162,247,.09); padding: 1px 5px; border-radius: 5px; }
+  button {
+    font-family: inherit; font-weight: 600; font-size: 13px; color: #16161e;
+    background: linear-gradient(180deg, #7aa2f7, #6a8ef0); border: 0; border-radius: 9px;
+    padding: 9px 14px; cursor: pointer; box-shadow: 0 6px 18px rgba(122,162,247,.25);
+  }
+  button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 12px 26px rgba(122,162,247,.42); }
+  button.quiet { background: transparent; border: 1px solid var(--border); color: var(--text); box-shadow: none; }
+  button.quiet:hover:not(:disabled) { background: var(--bg-soft); }
+  button.danger { background: linear-gradient(180deg, #f7768e, #e05f79); color: #16161e; box-shadow: 0 6px 18px rgba(247,118,142,.25); }
+  form.inline button { font-size: 12px; padding: 5px 10px; }
+  input, select, textarea {
+    font-family: inherit; background: #15161f; color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 14px;
+  }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(122,162,247,.2); }
+  label.field { color: var(--muted); font-size: 12px; }
+  .ok { color: var(--accent); } .err { color: var(--red); } .warn { color: var(--orange); }
+  .muted { color: var(--muted); }
+  .key {
+    font-family: inherit; color: var(--cyan); background: #15161f;
+    border: 1px dashed var(--border); border-radius: 8px; padding: 12px 14px; letter-spacing: 1px;
+  }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 26px 0; }
+`;
+
+/** The terminal window's title bar. Names the host and the live environment so
+ *  a sandbox panel is never mistaken for the production one. */
+const termBar = (env: Env) => {
+  const prod = env.PADDLE_ENV === "production";
+  return `<div class="term-bar">
+    <span class="tl r"></span><span class="tl y"></span><span class="tl g"></span>
+    <span class="title">root@bubbletranslate:<b>~/admin</b></span>
+    <span class="spacer"></span>
+    <span class="env${prod ? " prod" : ""}">${escapeHtml(env.PADDLE_ENV ?? "sandbox")}</span>
+  </div>`;
+};
+
 async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, rows, failures] = await Promise.all([
+  const [s, u, byOs, rows, failures] = await Promise.all([
     stats(env),
     usage(env),
+    osBreakdown(env),
     search(env, query),
     recentFailures(env),
   ]);
@@ -434,7 +578,8 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
 
   return page(
     "Admin — bubbleTranslate",
-    `<h1>Subscribers</h1>
+    `${termBar(env)}
+     <h1>Subscribers</h1>
      ${notice.message ? `<p class="ok">${escapeHtml(notice.message)}</p>` : ""}
      ${notice.error ? `<p class="err">${escapeHtml(notice.error)}</p>` : ""}
      ${
@@ -462,6 +607,36 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
        ${tile(u.monthly, "active this month")}
        ${tile(u.new_weekly, "new this week")}
        ${tile(u.total, "ever seen")}
+     </div>
+     <p class="muted">Active this week, by operating system:</p>
+     <div class="tiles">
+       ${
+         byOs.length
+           ? byOs.map((o) => tile(o.active, osLabel(o.os))).join("")
+           : `<p class="muted">No installs seen this week.</p>`
+       }
+     </div>
+     <p class="muted">New this week, by operating system:</p>
+     <div class="tiles">
+       ${
+         byOs.some((o) => o.fresh > 0)
+           ? byOs
+               .filter((o) => o.fresh > 0)
+               .map((o) => tile(o.fresh, osLabel(o.os)))
+               .join("")
+           : `<p class="muted">No new installs this week.</p>`
+       }
+     </div>
+     <p class="muted">New today, by operating system:</p>
+     <div class="tiles">
+       ${
+         byOs.some((o) => o.today > 0)
+           ? byOs
+               .filter((o) => o.today > 0)
+               .map((o) => tile(o.today, osLabel(o.os)))
+               .join("")
+           : `<p class="muted">No new installs today.</p>`
+       }
      </div>
 
      <form method="get" action="/admin" class="row">
@@ -514,7 +689,7 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
        webhook updates this automatically. The Refund button here only marks the
        licence, and does not move any money. Support: ${escapeHtml(supportEmail(env))}
      </p>`,
-    "",
+    `<style>${ADMIN_STYLE}</style>`,
     true,
   );
 }
