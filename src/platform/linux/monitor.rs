@@ -23,7 +23,7 @@
 //!     whether a button is down, so quiet is the only evidence available.
 
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::config::TriggerKey;
 use crate::platform::Trigger;
@@ -34,6 +34,40 @@ use super::{Backend, backend, capture, compositor, cursor, evdev, wayland, x11};
 /// paragraph, short enough that a button held for some other reason entirely
 /// does not silence the translator.
 const MAX_DRAG: Duration = Duration::from_secs(10);
+
+/// Wayland's answer to X11's [`x11::wait_while_dragging`]: hold the trigger
+/// back until the left button comes up, so the bubble lands at the end of the
+/// sweep rather than the moment the selection first grows.
+///
+/// Where X11 reads the button off the server it is already talking to, Wayland
+/// has no protocol for it, so the button comes from `/dev/input` through
+/// [`evdev`]. Only reached when that reader is running; without the permission
+/// it needs there is no button to watch and the engine's settle window is the
+/// only filter, as before.
+fn wait_while_button_down(timeout: Duration) {
+    /// Fast enough that the bubble feels like it follows the release, cheap
+    /// enough to be nothing next to the round trip a translation costs.
+    const POLL: Duration = Duration::from_millis(15);
+
+    let deadline = Instant::now() + timeout;
+    let mut waited = false;
+    while Instant::now() < deadline {
+        match evdev::button_down() {
+            Some(true) => {
+                waited = true;
+                std::thread::sleep(POLL);
+            }
+            // Up, or no longer readable: both mean stop waiting.
+            _ => {
+                if waited {
+                    crate::trace!("evdev: the drag ended; taking the selection");
+                }
+                return;
+            }
+        }
+    }
+    crate::trace!("evdev: a button is still down after {timeout:?}; taking the selection anyway");
+}
 
 /// Whether a copy should be treated like a selection.
 ///
@@ -165,6 +199,12 @@ pub fn spawn(on_trigger: impl Fn(Trigger) + Send + 'static) -> std::io::Result<(
     // Pages that draw their own selection publish nothing to watch; see
     // `borrow` for when a copy is sent on the user's behalf instead.
     if matches!(backend, Backend::WaylandDataControl) {
+        // The left button is what says a drag has ended, the one signal
+        // Wayland will not give but `/dev/input` will. Started here so the
+        // handler below can wait a sweep out instead of guessing at its end
+        // with a timer; it is silent and harmless where the mouse cannot be
+        // read.
+        evdev::ensure_pointer_started();
         super::borrow::start();
     }
     std::thread::Builder::new()
@@ -195,6 +235,15 @@ pub fn spawn(on_trigger: impl Fn(Trigger) + Send + 'static) -> std::io::Result<(
                 // engine is what puts the anchor at the end of the sweep.
                 if dragging {
                     held |= x11::wait_while_dragging(MAX_DRAG, key);
+                } else if evdev::pointer_available() && (!gated || held) {
+                    // Wayland's drag wait. This selection is going to
+                    // translate -- it is ungated, or the key was held when the
+                    // sweep began -- so hold the bubble until the button comes
+                    // up rather than flinging it out the instant the selection
+                    // starts to grow. Skipped for a gated selection with no key
+                    // yet seen: that one is likely to be turned away below, and
+                    // the way-out sample catches a key pressed a beat late.
+                    wait_while_button_down(MAX_DRAG);
                 }
                 // The drag wait is X11's; on Wayland the settle happens in the
                 // engine, so the keyboard is asked once more on the way out.

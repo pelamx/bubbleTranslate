@@ -39,6 +39,13 @@ static HELD: AtomicU32 = AtomicU32::new(0);
 /// an empty [`HELD`] means "we do not know", not "nothing is pressed".
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
+/// The shared left-button reader's state, kept apart from the keyboard's so a
+/// session that can read the mouse but not the keyboard (or the reverse) is
+/// believed about the one it can. `POINTER_RUNNING` is the same "we do not
+/// know yet" guard [`RUNNING`] is for the keyboard.
+static POINTER_RUNNING: AtomicBool = AtomicBool::new(false);
+static BUTTON_DOWN: AtomicBool = AtomicBool::new(false);
+
 /// The kernel keycodes for the keys this cares about. Left and right halves
 /// are the same modifier as far as a gate is concerned.
 mod keycode {
@@ -92,6 +99,35 @@ pub fn held(key: TriggerKey) -> Option<bool> {
 /// Whether the keyboard can be read at all on this machine.
 pub fn available() -> bool {
     RUNNING.load(Ordering::Relaxed)
+}
+
+/// Starts a shared left-button reader once, so [`button_down`] can answer.
+///
+/// Separate from [`ensure_started`]: the button is wanted on the selection
+/// path even where the keyboard is not (a compositor that reports modifiers
+/// but not the mouse), and it is not wanted where nothing waits on a drag.
+/// Idempotent, and silent when the mouse cannot be read — the caller falls
+/// back to the settle window, exactly as it does without this reader at all.
+pub fn ensure_pointer_started() {
+    static ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    ONCE.get_or_init(|| {
+        match start_pointer(|down| BUTTON_DOWN.store(down, Ordering::Relaxed)) {
+            Ok(()) => POINTER_RUNNING.store(true, Ordering::Relaxed),
+            Err(reason) => crate::trace!("evdev: not reading the mouse button — {reason}"),
+        }
+    });
+}
+
+/// Whether the left mouse button is being read, so its state can be trusted.
+pub fn pointer_available() -> bool {
+    POINTER_RUNNING.load(Ordering::Relaxed)
+}
+
+/// Whether the left button is down right now, or `None` when it is not read.
+pub fn button_down() -> Option<bool> {
+    POINTER_RUNNING
+        .load(Ordering::Relaxed)
+        .then(|| BUTTON_DOWN.load(Ordering::Relaxed))
 }
 
 /// Why [`start`] did not get a reader, once it has been tried.
