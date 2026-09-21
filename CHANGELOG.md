@@ -13,6 +13,18 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## 0.2.5 — 2026-09-21
+
+**The bubble waits for you to finish selecting. (Linux)** On a Wayland desktop
+nothing tells an app that a sweep of text has ended, so the translator had to
+guess from a short pause — and a pause in the middle of selecting, or a double
+click that you then dragged into a longer selection, could throw the bubble up
+before you were done, over half a phrase or over the wrong text. Where the
+mouse can be read it now holds off until you let the button go, the way it
+already did under X11, so the bubble arrives at the end of the selection and on
+what you actually picked. On a session where the mouse cannot be read it falls
+back to the old timing, and the settings window says so.
+
 ## 0.2.4 — 2026-09-20
 
 **The feedback box names Apple Mail on a Mac.** The first choice beside "Write
