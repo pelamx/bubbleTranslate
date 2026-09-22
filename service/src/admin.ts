@@ -209,19 +209,19 @@ async function stats(env: Env): Promise<Stats> {
     .bind(t, t, t, t, t, t, t + 7 * DAY, t - 30 * DAY)
     .first<Stats>();
 
-  return (
-    row ?? {
-      live: 0,
-      monthly: 0,
-      yearly: 0,
-      paddle: 0,
-      winding_down: 0,
-      expiring: 0,
-      fresh: 0,
-      total: 0,
-    }
-  );
+  // SUM over an empty table is NULL, not 0.
+  return {
+    live: row?.live ?? 0,
+    monthly: row?.monthly ?? 0,
+    yearly: row?.yearly ?? 0,
+    paddle: row?.paddle ?? 0,
+    winding_down: row?.winding_down ?? 0,
+    expiring: row?.expiring ?? 0,
+    fresh: row?.fresh ?? 0,
+    total: row?.total ?? 0,
+  };
 }
+
 
 interface Row extends Licence {
   created_at: number;
@@ -440,129 +440,165 @@ interface Notice {
   key?: string;
 }
 
-/** The operator panel wears a Tokyo Night terminal skin, kept to this page.
- *  It is injected through `page()`'s `head`, which lands after the shared
- *  stylesheet, so every rule here overrides the base without touching the
- *  buyer-facing pages. The base CSS is variable-driven, so re-pointing the
- *  palette variables re-themes the whole panel; the rest is polish. */
+interface Pulse {
+  installs_today: number;
+  installs_yesterday: number;
+  active_today: number;
+  subs_today: number;
+  subs_yesterday: number;
+  /** New installs per day, oldest first; the last entry is the last 24 hours. */
+  series: number[];
+}
+
+/** What changed: the last 24 hours against the 24 before them. "Today" is a
+ *  rolling day rather than a calendar one, so the comparison is never between
+ *  a full yesterday and a morning. */
+async function pulse(env: Env): Promise<Pulse> {
+  const t = now();
+  const [inst, subs, days] = await Promise.all([
+    env.DB.prepare(
+      `SELECT
+         SUM(CASE WHEN first_seen > ?1 THEN 1 ELSE 0 END) AS today,
+         SUM(CASE WHEN first_seen > ?2 AND first_seen <= ?1 THEN 1 ELSE 0 END) AS yesterday,
+         SUM(CASE WHEN last_seen  > ?1 THEN 1 ELSE 0 END) AS active
+       FROM installs`,
+    )
+      .bind(t - DAY, t - 2 * DAY)
+      .first<{ today: number; yesterday: number; active: number }>(),
+    env.DB.prepare(
+      `SELECT
+         SUM(CASE WHEN created_at > ?1 THEN 1 ELSE 0 END) AS today,
+         SUM(CASE WHEN created_at > ?2 AND created_at <= ?1 THEN 1 ELSE 0 END) AS yesterday
+       FROM licences`,
+    )
+      .bind(t - DAY, t - 2 * DAY)
+      .first<{ today: number; yesterday: number }>(),
+    env.DB.prepare(
+      `SELECT CAST((?1 - first_seen) / ${DAY} AS INTEGER) AS ago, COUNT(*) AS n
+         FROM installs WHERE first_seen > ?1 - 14 * ${DAY}
+        GROUP BY ago`,
+    )
+      .bind(t)
+      .all<{ ago: number; n: number }>(),
+  ]);
+  const series = new Array<number>(14).fill(0);
+  for (const d of days.results ?? []) {
+    if (d.ago >= 0 && d.ago < 14) series[13 - d.ago] = d.n;
+  }
+  return {
+    installs_today: inst?.today ?? 0,
+    installs_yesterday: inst?.yesterday ?? 0,
+    active_today: inst?.active ?? 0,
+    subs_today: subs?.today ?? 0,
+    subs_yesterday: subs?.yesterday ?? 0,
+    series,
+  };
+}
+
+/** The operator panel's own look, kept to this page. Injected through
+ *  `page()`'s `head`, after the shared stylesheet, so it overrides the base
+ *  without touching the buyer-facing pages. Three layers, loudest first:
+ *  what changed since yesterday, where things stand, and the tools. */
 const ADMIN_STYLE = `
   :root {
-    --bg:#16161e; --bg-soft:#1f2335; --card:#1a1b26; --border:#2a2e42;
-    --text:#c0caf5; --muted:#7982a9; --comment:#565f89;
-    --brand:#7aa2f7; --brand-2:#bb9af7; --accent:#9ece6a;
-    --cyan:#7dcfff; --red:#f7768e; --orange:#ff9e64; --yellow:#e0af68;
+    --bg:#0f1117; --card:#171a23; --card-2:#1d212c; --border:#262b38;
+    --text:#e6e8ef; --muted:#8a91a5; --faint:#5b6275;
+    --brand:#6ea8fe; --accent:#4ade80; --red:#f87171; --orange:#fb923c;
   }
   body {
-    font-family: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    color: var(--text);
-    background:
-      radial-gradient(900px 520px at 100% -10%, rgba(122,162,247,.10), transparent 60%),
-      radial-gradient(760px 520px at -10% 110%, rgba(187,154,247,.10), transparent 55%),
-      var(--bg);
-    background-attachment: fixed;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--text); background: var(--bg);
   }
-  .sheet {
-    background: linear-gradient(180deg, #1a1b26, #16161e);
-    border: 1px solid var(--border); border-radius: 14px;
-    padding: 0 clamp(16px,3vw,30px) 34px;
-    box-shadow: 0 24px 70px rgba(0,0,0,.55);
-    overflow: hidden;
-  }
-  /* Window title bar, bled to the sheet's edges. */
-  .term-bar {
-    display: flex; align-items: center; gap: 12px;
-    margin: 0 calc(-1 * clamp(16px,3vw,30px)) 24px;
-    padding: 11px 16px;
-    background: #15161f; border-bottom: 1px solid var(--border);
-  }
-  .term-bar .tl { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
-  .term-bar .tl + .tl { margin-left: -4px; }
-  .tl.r { background: #f7768e; } .tl.y { background: #e0af68; } .tl.g { background: #9ece6a; }
-  .term-bar .title { color: var(--comment); font-size: 12.5px; letter-spacing: .2px; }
-  .term-bar .title b { color: var(--brand); font-weight: 600; }
-  .term-bar .spacer { flex: 1; }
-  .term-bar .env {
-    font-size: 11px; color: var(--muted); letter-spacing: .3px;
-    border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px;
-  }
-  .term-bar .env.prod { color: var(--accent); border-color: rgba(158,206,106,.4); }
-  h1 {
-    font-size: 22px; font-weight: 700; letter-spacing: -.2px; color: var(--text);
-    display: flex; align-items: baseline; gap: 10px; margin: 4px 0 4px;
-  }
-  h1::before { content: "❯"; color: var(--accent); font-weight: 700; }
-  h2 {
-    color: var(--brand); font-size: 13px; font-weight: 600;
-    text-transform: lowercase; letter-spacing: .4px;
-    margin: 30px 0 12px; padding-left: 12px; border-left: 2px solid var(--brand-2);
-  }
-  h2::before { content: "# "; color: var(--comment); }
-  .tile {
-    background: #1a1b26; border: 1px solid var(--border); border-radius: 10px;
-    padding: 13px 14px; position: relative; overflow: hidden;
-    transition: border-color .15s ease, transform .15s ease;
-  }
-  .tile::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--brand); }
-  .tile:hover { border-color: var(--brand); transform: translateY(-1px); }
-  .tile .n { font-size: 24px; font-weight: 700; color: var(--cyan); font-variant-numeric: tabular-nums; }
-  .tile .l { font-size: 11px; color: var(--muted); text-transform: lowercase; letter-spacing: .3px; }
+  .sheet { background: transparent; border: 0; box-shadow: none; padding: 0 0 40px; }
+  .topbar { display: flex; align-items: center; gap: 12px; margin: 8px 0 22px; }
+  .topbar h1 { font-size: 20px; font-weight: 700; margin: 0; }
+  .topbar .spacer { flex: 1; }
+  .pill { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; }
+  .pill.prod { color: var(--accent); border-color: rgba(74,222,128,.4); }
+  .label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin: 0 0 10px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; margin-bottom: 16px; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+  .stat { background: var(--card-2); border-radius: 10px; padding: 14px 16px; }
+  .stat .k { font-size: 13px; color: var(--muted); }
+  .stat .v { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; margin-top: 2px; }
+  .stat .d { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+  .stat .sub { font-size: 12.5px; color: var(--faint); margin-top: 6px; }
+  .up { color: var(--accent); } .down { color: var(--red); }
+  .stat.alert { box-shadow: inset 3px 0 0 var(--orange); }
+  .stat.alert .v { color: var(--orange); }
+  .os { display: inline-block; font-size: 12px; background: var(--bg); border-radius: 6px; padding: 2px 7px; margin: 6px 4px 0 0; color: var(--text); }
+  .bars { display: flex; align-items: flex-end; gap: 4px; height: 70px; margin-top: 12px; }
+  .bars div { flex: 1; background: var(--brand); opacity: .75; border-radius: 3px 3px 0 0; min-height: 2px; }
+  .bars div:last-child { opacity: 1; }
+  .bars-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--faint); margin-top: 4px; }
+  details.card { padding: 0; }
+  details.card > summary { cursor: pointer; padding: 15px 20px; font-weight: 600; list-style: none; }
+  details.card > summary::-webkit-details-marker { display: none; }
+  details.card > summary::before { content: "▸ "; color: var(--muted); }
+  details.card[open] > summary::before { content: "▾ "; }
+  details.card > .body { padding: 0 20px 18px; }
+  details.card.bad > summary { color: var(--red); }
   table { font-size: 13px; }
   th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; }
-  th { color: var(--comment); text-transform: lowercase; letter-spacing: .4px; font-size: 11px; }
-  table tr:hover td { background: rgba(122,162,247,.05); }
-  code { color: var(--cyan); background: rgba(122,162,247,.09); padding: 1px 5px; border-radius: 5px; }
+  th { color: var(--muted); font-size: 11.5px; font-weight: 600; }
+  table tr:hover td { background: rgba(110,168,254,.05); }
+  code { color: var(--brand); background: rgba(110,168,254,.1); padding: 1px 5px; border-radius: 5px; }
   button {
-    font-family: inherit; font-weight: 600; font-size: 13px; color: #16161e;
-    background: linear-gradient(180deg, #7aa2f7, #6a8ef0); border: 0; border-radius: 9px;
-    padding: 9px 14px; cursor: pointer; box-shadow: 0 6px 18px rgba(122,162,247,.25);
+    font-family: inherit; font-weight: 600; font-size: 13px; color: #0f1117;
+    background: var(--brand); border: 0; border-radius: 8px; padding: 9px 14px; cursor: pointer;
   }
-  button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 12px 26px rgba(122,162,247,.42); }
-  button.quiet { background: transparent; border: 1px solid var(--border); color: var(--text); box-shadow: none; }
-  button.quiet:hover:not(:disabled) { background: var(--bg-soft); }
-  button.danger { background: linear-gradient(180deg, #f7768e, #e05f79); color: #16161e; box-shadow: 0 6px 18px rgba(247,118,142,.25); }
+  button:hover:not(:disabled) { filter: brightness(1.1); }
+  button.quiet { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  button.danger { background: var(--red); }
   form.inline button { font-size: 12px; padding: 5px 10px; }
   input, select, textarea {
-    font-family: inherit; background: #15161f; color: var(--text);
+    font-family: inherit; background: var(--bg); color: var(--text);
     border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 14px;
   }
-  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(122,162,247,.2); }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--brand); }
   label.field { color: var(--muted); font-size: 12px; }
   .ok { color: var(--accent); } .err { color: var(--red); } .warn { color: var(--orange); }
   .muted { color: var(--muted); }
-  .key {
-    font-family: inherit; color: var(--cyan); background: #15161f;
-    border: 1px dashed var(--border); border-radius: 8px; padding: 12px 14px; letter-spacing: 1px;
-  }
-  hr { border: 0; border-top: 1px solid var(--border); margin: 26px 0; }
+  .key { color: var(--brand); background: var(--bg); border: 1px dashed var(--border); border-radius: 8px; padding: 12px 14px; letter-spacing: 1px; font-family: ui-monospace, monospace; }
+  .foot { font-size: 12.5px; }
 `;
 
-/** The terminal window's title bar. Names the host and the live environment so
- *  a sandbox panel is never mistaken for the production one. */
-const termBar = (env: Env) => {
-  const prod = env.PADDLE_ENV === "production";
-  return `<div class="term-bar">
-    <span class="tl r"></span><span class="tl y"></span><span class="tl g"></span>
-    <span class="title">root@bubbletranslate:<b>~/admin</b></span>
-    <span class="spacer"></span>
-    <span class="env${prod ? " prod" : ""}">${escapeHtml(env.PADDLE_ENV ?? "sandbox")}</span>
-  </div>`;
-};
+/** "▲ +4 (dün 8)" — today against yesterday, coloured by direction. */
+function delta(today: number, yesterday: number): string {
+  const d = today - yesterday;
+  const cls = d > 0 ? "up" : d < 0 ? "down" : "";
+  const arrow = d > 0 ? "▲" : d < 0 ? "▼" : "•";
+  return `<div class="d"><span class="${cls}">${arrow} ${d > 0 ? "+" : ""}${d}</span> · yesterday ${yesterday}</div>`;
+}
 
 async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, byOs, rows, failures] = await Promise.all([
+  const [s, u, p, byOs, rows, failures] = await Promise.all([
     stats(env),
     usage(env),
+    pulse(env),
     osBreakdown(env),
     search(env, query),
     recentFailures(env),
   ]);
 
-  const tile = (n: number | string, label: string) =>
-    `<div class="tile"><div class="n">${escapeHtml(n)}</div><div class="l">${escapeHtml(label)}</div></div>`;
+  const prod = env.PADDLE_ENV === "production";
+  const osChips = (pick: (o: { os: string; active: number; fresh: number; today: number }) => number) =>
+    byOs
+      .filter((o) => pick(o) > 0)
+      .map((o) => `<span class="os">${escapeHtml(osLabel(o.os))} ${pick(o)}</span>`)
+      .join("");
+  const peak = Math.max(1, ...p.series);
+  const bars = p.series
+    .map((n, i) => {
+      const ago = 13 - i;
+      const when = ago === 0 ? "last 24h" : `${ago} days ago`;
+      return `<div style="height:${Math.round((n / peak) * 100)}%" title="${when}: ${n}"></div>`;
+    })
+    .join("");
 
   const failureTable = failures.length
-    ? `<h2>Failed checkouts, last 7 days</h2>
-       <div class="scroll"><table>
+    ? `<details class="card bad"><summary>Failed checkouts, last 7 days (${failures.length})</summary>
+       <div class="body scroll"><table>
          <tr><th>When</th><th>Provider</th><th>Plan</th><th>Email</th><th>Reason</th></tr>
          ${failures
            .map(
@@ -573,13 +609,15 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
                          <td class="muted">${escapeHtml(f.failure ?? "")}</td></tr>`,
            )
            .join("")}
-       </table></div>`
+       </table></div></details>`
     : "";
 
   return page(
     "Admin — bubbleTranslate",
-    `${termBar(env)}
-     <h1>Subscribers</h1>
+    `<div class="topbar">
+       <h1>bubbleTranslate admin</h1><span class="spacer"></span>
+       <span class="pill${prod ? " prod" : ""}">${escapeHtml(env.PADDLE_ENV ?? "sandbox")}</span>
+     </div>
      ${notice.message ? `<p class="ok">${escapeHtml(notice.message)}</p>` : ""}
      ${notice.error ? `<p class="err">${escapeHtml(notice.error)}</p>` : ""}
      ${
@@ -589,102 +627,92 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
          : ""
      }
 
-     <div class="tiles">
-       ${tile(s.live, "live subscribers")}
-       ${tile(s.monthly, "monthly")}
-       ${tile(s.yearly, "yearly")}
-       ${tile(s.paddle, "via Paddle")}
-       ${tile(s.fresh, "new in 30 days")}
-       ${tile(s.expiring, "ending in 7 days")}
-       ${tile(s.winding_down, "cancelled, still paid")}
-     </div>
+     <section class="card">
+       <p class="label">Last 24 hours</p>
+       <div class="grid">
+         <div class="stat"><div class="k">New installs</div><div class="v">${p.installs_today}</div>
+           ${delta(p.installs_today, p.installs_yesterday)}
+           <div>${osChips((o) => o.today)}</div></div>
+         <div class="stat"><div class="k">New subscribers</div><div class="v">${p.subs_today}</div>
+           ${delta(p.subs_today, p.subs_yesterday)}</div>
+         <div class="stat"><div class="k">Active installs</div><div class="v">${p.active_today}</div>
+           <div class="sub">opened the app in the last 24h</div></div>
+       </div>
+     </section>
 
-     <h2>Installs in use</h2>
-     <div class="tiles">
-       ${tile(u.daily, "active today")}
-       ${tile(u.weekly, "active this week")}
-       ${tile(u.free_weekly, "free, this week")}
-       ${tile(u.monthly, "active this month")}
-       ${tile(u.new_weekly, "new this week")}
-       ${tile(u.total, "ever seen")}
-     </div>
-     <p class="muted">Active this week, by operating system:</p>
-     <div class="tiles">
-       ${
-         byOs.length
-           ? byOs.map((o) => tile(o.active, osLabel(o.os))).join("")
-           : `<p class="muted">No installs seen this week.</p>`
-       }
-     </div>
-     <p class="muted">New this week, by operating system:</p>
-     <div class="tiles">
-       ${
-         byOs.some((o) => o.fresh > 0)
-           ? byOs
-               .filter((o) => o.fresh > 0)
-               .map((o) => tile(o.fresh, osLabel(o.os)))
-               .join("")
-           : `<p class="muted">No new installs this week.</p>`
-       }
-     </div>
-     <p class="muted">New today, by operating system:</p>
-     <div class="tiles">
-       ${
-         byOs.some((o) => o.today > 0)
-           ? byOs
-               .filter((o) => o.today > 0)
-               .map((o) => tile(o.today, osLabel(o.os)))
-               .join("")
-           : `<p class="muted">No new installs today.</p>`
-       }
-     </div>
+     <section class="card">
+       <p class="label">Overall</p>
+       <div class="grid">
+         <div class="stat"><div class="k">Live subscribers</div><div class="v">${s.live}</div>
+           <div class="sub">${s.monthly} monthly · ${s.yearly} yearly · ${s.fresh} new in 30d</div></div>
+         <div class="stat"><div class="k">Active this week</div><div class="v">${u.weekly}</div>
+           <div>${osChips((o) => o.active)}</div>
+           <div class="sub">${u.free_weekly} free · ${u.new_weekly} new this week</div></div>
+         <div class="stat"><div class="k">Installs ever seen</div><div class="v">${u.total}</div>
+           <div class="sub">${u.monthly} active this month</div></div>
+         <div class="stat${s.expiring > 0 ? " alert" : ""}"><div class="k">Ending in 7 days</div><div class="v">${s.expiring}</div>
+           <div class="sub">${s.winding_down} cancelled, still paid</div></div>
+       </div>
+       <p class="label" style="margin-top:20px">New installs, last 14 days</p>
+       <div class="bars">${bars}</div>
+       <div class="bars-axis"><span>14 days ago</span><span>today</span></div>
+     </section>
 
-     <form method="get" action="/admin" class="row">
-       <div style="flex:1 1 260px">
-         <label class="field" for="q">Search — email, licence key, <code>lc_…</code> id, or subscription ref</label>
-         <input id="q" type="text" name="q" value="${escapeHtml(query)}"
-                placeholder="musteri@ornek.com" spellcheck="false">
-       </div>
-       <button type="submit">Search</button>
-     </form>
-
-     <h2>Issue a licence</h2>
-     <p class="muted">
-       For the cases that never go through checkout: a press copy, a support
-       apology, a beta tester. It creates a real licence with no payment behind
-       it, marked <code>manual</code> so no Paddle webhook will ever move it and
-       the account page offers it no cancel button. The key is shown once.
-     </p>
-     <form method="post" action="/admin/issue" class="row">
-       <div style="flex:2 1 240px">
-         <label class="field" for="issue-email">Email — for your records; delivery is up to you</label>
-         <input id="issue-email" type="email" name="email" spellcheck="false"
-                placeholder="gazeteci@ornek.com">
-       </div>
-       <div style="flex:0 1 150px">
-         <label class="field" for="issue-cycle">Term</label>
-         <select id="issue-cycle" name="cycle">
-           <option value="yearly">Yearly</option>
-           <option value="monthly">Monthly</option>
-         </select>
-       </div>
-       <div style="flex:0 1 130px">
-         <label class="field" for="issue-days">Days — overrides the term</label>
-         <input id="issue-days" type="number" name="days" min="1" max="400" placeholder="365">
-       </div>
-       <div style="flex:0 1 110px">
-         <label class="field" for="issue-seats">Devices</label>
-         <input id="issue-seats" type="number" name="seats" min="1" max="20"
-                value="${DEFAULT_SEATS}">
-       </div>
-       <button type="submit">Issue</button>
-     </form>
-
-     <h2>${query ? "Results" : `Latest ${PAGE_SIZE}`}</h2>
-     ${rowsTable(rows)}
      ${failureTable}
-     <hr>
-     <p class="muted">
+
+     <details class="card"${query ? " open" : ""}>
+       <summary>Licences${query ? ` — results for “${escapeHtml(query)}”` : ""}</summary>
+       <div class="body">
+         <form method="get" action="/admin" class="row">
+           <div style="flex:1 1 260px">
+             <label class="field" for="q">Search — email, licence key, <code>lc_…</code> id, or subscription ref</label>
+             <input id="q" type="text" name="q" value="${escapeHtml(query)}"
+                    placeholder="musteri@ornek.com" spellcheck="false">
+           </div>
+           <button type="submit">Search</button>
+         </form>
+         <p class="muted">${query ? "Results" : `Latest ${PAGE_SIZE}`}</p>
+         ${rowsTable(rows)}
+       </div>
+     </details>
+
+     <details class="card">
+       <summary>Issue a licence</summary>
+       <div class="body">
+         <p class="muted">
+           For the cases that never go through checkout: a press copy, a support
+           apology, a beta tester. It creates a real licence with no payment behind
+           it, marked <code>manual</code> so no Paddle webhook will ever move it and
+           the account page offers it no cancel button. The key is shown once.
+         </p>
+         <form method="post" action="/admin/issue" class="row">
+           <div style="flex:2 1 240px">
+             <label class="field" for="issue-email">Email — for your records; delivery is up to you</label>
+             <input id="issue-email" type="email" name="email" spellcheck="false"
+                    placeholder="gazeteci@ornek.com">
+           </div>
+           <div style="flex:0 1 150px">
+             <label class="field" for="issue-cycle">Term</label>
+             <select id="issue-cycle" name="cycle">
+               <option value="yearly">Yearly</option>
+               <option value="monthly">Monthly</option>
+             </select>
+           </div>
+           <div style="flex:0 1 130px">
+             <label class="field" for="issue-days">Days — overrides the term</label>
+             <input id="issue-days" type="number" name="days" min="1" max="400" placeholder="365">
+           </div>
+           <div style="flex:0 1 110px">
+             <label class="field" for="issue-seats">Devices</label>
+             <input id="issue-seats" type="number" name="seats" min="1" max="20"
+                    value="${DEFAULT_SEATS}">
+           </div>
+           <button type="submit">Issue</button>
+         </form>
+       </div>
+     </details>
+
+     <p class="muted foot">
        Refunds and cancellations should normally be done in Paddle — its
        webhook updates this automatically. The Refund button here only marks the
        licence, and does not move any money. Support: ${escapeHtml(supportEmail(env))}
