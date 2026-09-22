@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.2.7 — 2026-09-22
 
 **Everyone on the free version gets ten translations a day, and only Pro is
 unlimited.** Copies installed before the daily limit existed used to keep
