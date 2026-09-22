@@ -15,6 +15,14 @@ days before the others.
 
 ## Unreleased
 
+**The Windows download is back at 0.2.6 for now. (Windows)** The bubble can
+come up as an empty black rectangle — the translation arrives, and there is
+nothing readable in it. Going back a version does not cure that on every
+machine, because the fault is older than 0.2.7 and only came to light there;
+it undoes the one thing 0.2.7 changed for Windows while the black bubble is
+being fixed properly. Until then a Windows copy keeps the free allowance it
+had rather than the sealed one described below.
+
 **The downloads have moved, and this version knows where.** They are published
 from their own place now rather than from the same page as the source code, so
 every download link on the website points somewhere new. Nothing about
