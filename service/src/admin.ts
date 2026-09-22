@@ -131,6 +131,106 @@ const NOT_MINE_INSTALL = `install NOT IN (SELECT value FROM json_each(?9))
   AND install NOT IN (SELECT install FROM ignored_installs)`;
 const NOT_MINE_LICENCE = `(email IS NULL OR LOWER(email) NOT IN (SELECT value FROM json_each(?9)))`;
 
+const PLATFORMS = ["windows", "linux", "macos"] as const;
+
+interface HealthRow {
+  os: string;
+  total: number;
+  day_base: number;
+  day_back: number;
+  week_base: number;
+  week_back: number;
+  lost: number;
+}
+
+/** Whether people keep using it, per OS. The installs table keeps only the
+ *  first and the latest ping, so "came back" means the latest ping is at least
+ *  a day (or a week) after the first — a floor, never an overcount. Only
+ *  installs old enough to have had the chance are in each base. "Lost" is
+ *  seen in the last 30 days but not in the last 7. */
+async function health(env: Env): Promise<HealthRow[]> {
+  const t = now();
+  const { results } = await env.DB.prepare(
+    `SELECT COALESCE(os, 'unknown') AS os,
+            COUNT(*) AS total,
+            SUM(CASE WHEN first_seen < ?1 - 2 * ${DAY} THEN 1 ELSE 0 END) AS day_base,
+            SUM(CASE WHEN first_seen < ?1 - 2 * ${DAY} AND last_seen >= first_seen + ${DAY} THEN 1 ELSE 0 END) AS day_back,
+            SUM(CASE WHEN first_seen < ?1 - 8 * ${DAY} THEN 1 ELSE 0 END) AS week_base,
+            SUM(CASE WHEN first_seen < ?1 - 8 * ${DAY} AND last_seen >= first_seen + 7 * ${DAY} THEN 1 ELSE 0 END) AS week_back,
+            SUM(CASE WHEN last_seen < ?1 - 7 * ${DAY} AND last_seen >= ?1 - 30 * ${DAY} THEN 1 ELSE 0 END) AS lost
+       FROM installs WHERE ${NOT_MINE_INSTALL}
+      GROUP BY COALESCE(os, 'unknown')`,
+  )
+    .bind(t, null, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
+    .all<HealthRow>();
+  return results ?? [];
+}
+
+/** Which version each install in use this month is on, by OS. */
+async function versions(env: Env): Promise<{ app: string; os: string; n: number }[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT COALESCE(app, '?') AS app, COALESCE(os, 'unknown') AS os, COUNT(*) AS n
+       FROM installs WHERE last_seen > ?1 AND ${NOT_MINE_INSTALL}
+      GROUP BY app, os`,
+  )
+    .bind(now() - 30 * DAY, null, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
+    .all<{ app: string; os: string; n: number }>();
+  return results ?? [];
+}
+
+/** Newest version first: "0.2.10" after "0.2.9". */
+function compareVersions(a: string, b: string): number {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pb[i] || 0) - (pa[i] || 0);
+    if (d) return d;
+  }
+  return 0;
+}
+
+/** Every release asset's download count on GitHub, summed per OS. Cached for
+ *  fifteen minutes: the API allows sixty unauthenticated calls an hour, and a
+ *  Worker's outbound address is shared. Null when GitHub cannot be reached,
+ *  so the panel says so rather than showing zeros. */
+async function downloads(): Promise<Record<string, number> | null> {
+  const url = "https://api.github.com/repos/pelamx/bubbleTranslate/releases?per_page=100";
+  const cache = caches.default;
+  const key = new Request(url);
+  let res = await cache.match(key);
+  if (!res) {
+    try {
+      const fresh = await fetch(url, {
+        headers: { "user-agent": "bubbleTranslate-admin", accept: "application/vnd.github+json" },
+      });
+      if (!fresh.ok) return null;
+      res = new Response(await fresh.text(), {
+        headers: { "content-type": "application/json", "cache-control": "max-age=900" },
+      });
+      await cache.put(key, res.clone());
+    } catch {
+      return null;
+    }
+  }
+  const releases = (await res.json()) as { assets: { name: string; download_count: number }[] }[];
+  const out: Record<string, number> = { windows: 0, linux: 0, macos: 0 };
+  for (const r of releases) {
+    for (const a of r.assets) {
+      const name = a.name.toLowerCase();
+      if (name.endsWith(".zip") || name.endsWith(".exe")) out.windows += a.download_count;
+      else if (name.endsWith(".dmg")) out.macos += a.download_count;
+      else if (name.includes("linux")) out.linux += a.download_count;
+    }
+  }
+  return out;
+}
+
+/** "3 / 10 · 30%", or a dash when nobody is old enough to count yet. */
+function ratio(part: number, whole: number): string {
+  if (!whole) return `<span class="muted">—</span>`;
+  return `<b>${Math.round((part / whole) * 100)}%</b> <span class="muted">${part}/${whole}</span>`;
+}
+
 interface UserRow {
   install: string;
   os: string | null;
@@ -673,6 +773,7 @@ const ADMIN_STYLE = `
   .badge.off { color: var(--faint); }
   .badge.you { background: rgba(251,146,60,.15); color: var(--orange); }
   tr.mine td { opacity: .6; }
+  tr.total td { border-top: 1px solid var(--border); font-weight: 600; }
   .os.zero { color: var(--faint); }
   .os { display: inline-block; font-size: 12px; background: var(--bg); border-radius: 6px; padding: 2px 7px; margin: 6px 4px 0 0; color: var(--text); }
   .bars { display: flex; align-items: flex-end; gap: 4px; height: 70px; margin-top: 12px; }
@@ -720,7 +821,7 @@ function delta(today: number, yesterday: number): string {
 }
 
 async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, licOs, rows, failures, people] = await Promise.all([
+  const [s, u, p, byOs, licOs, rows, failures, people, hl, vers, dl] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -729,7 +830,40 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
     search(env, query),
     recentFailures(env),
     users(env),
+    health(env),
+    versions(env),
+    downloads(),
   ]);
+
+  const h = (os: string) =>
+    hl.find((x) => x.os === os) ?? { os, total: 0, day_base: 0, day_back: 0, week_base: 0, week_back: 0, lost: 0 };
+  const sum = (f: (r: HealthRow) => number) => hl.reduce((a, r) => a + f(r), 0);
+  const healthRows = [...PLATFORMS.map((os) => ({ label: osLabel(os), r: h(os), dl: dl?.[os] })),
+    { label: "All", r: { os: "all", total: sum((r) => r.total), day_base: sum((r) => r.day_base),
+        day_back: sum((r) => r.day_back), week_base: sum((r) => r.week_base),
+        week_back: sum((r) => r.week_back), lost: sum((r) => r.lost) },
+      dl: dl ? PLATFORMS.reduce((a, os) => a + dl[os], 0) : undefined }]
+    .map(({ label, r, dl: d }) => `<tr${label === "All" ? ' class="total"' : ""}>
+        <td>${escapeHtml(label)}</td>
+        <td class="num">${d ?? "—"}</td>
+        <td class="num">${r.total}</td>
+        <td>${d ? ratio(Math.min(r.total, d), d) : `<span class="muted">—</span>`}</td>
+        <td>${ratio(r.day_back, r.day_base)}</td>
+        <td>${ratio(r.week_back, r.week_base)}</td>
+        <td class="num">${r.lost}</td>
+      </tr>`)
+    .join("");
+
+  const versionList = [...new Set(vers.map((v) => v.app))].sort(compareVersions);
+  const versionRows = versionList
+    .map((app, i) => {
+      const n = (os: string) => vers.filter((v) => v.app === app && v.os === os).reduce((a, v) => a + v.n, 0);
+      const all = vers.filter((v) => v.app === app).reduce((a, v) => a + v.n, 0);
+      return `<tr><td>${escapeHtml(app)} ${i === 0 ? `<span class="badge on">latest</span>` : ""}</td>
+        ${PLATFORMS.map((os) => `<td class="num">${n(os) || `<span class="muted">0</span>`}</td>`).join("")}
+        <td class="num"><b>${all}</b></td></tr>`;
+    })
+    .join("");
   const real = people.filter((x) => !x.mine).length;
   const own = people.length - real;
 
@@ -821,6 +955,29 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
        <p class="label" style="margin-top:20px">New installs, last 14 days</p>
        <div class="bars">${bars}</div>
        <div class="bars-axis"><span>14 days ago</span><span>today</span></div>
+     </section>
+
+     <section class="card">
+       <p class="label">Growth &amp; health</p>
+       <div class="scroll"><table>
+         <tr><th>Platform</th><th class="num">Downloads</th><th class="num">Opened</th>
+             <th>Opened after download</th><th>Came back next day</th><th>Still using after a week</th>
+             <th class="num">Lost</th></tr>
+         ${healthRows}
+       </table></div>
+       <p class="muted foot">
+         <b>Downloads</b>: every release file on GitHub, all versions${dl ? "" : " — GitHub could not be reached just now"}.
+         <b>Opened</b>: installs that ever reported in; one person downloading twice counts twice on
+         the left and once here. <b>Came back / still using</b>: of the installs old enough to tell,
+         how many were seen again at least a day / a week after their first day.
+         <b>Lost</b>: used in the last 30 days, but not in the last 7.
+       </p>
+
+       <p class="label" style="margin-top:22px">Versions in use, last 30 days</p>
+       <div class="scroll"><table>
+         <tr><th>Version</th>${PLATFORMS.map((os) => `<th class="num">${osLabel(os)}</th>`).join("")}<th class="num">Total</th></tr>
+         ${versionRows || `<tr><td colspan="5" class="muted">No installs this month.</td></tr>`}
+       </table></div>
      </section>
 
      <section class="card" id="users">
