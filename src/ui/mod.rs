@@ -386,7 +386,7 @@ impl BubbleApp {
                 return false;
             };
             crate::platform::mark_as_notification(win32.hwnd.get());
-            return true;
+            true
         }
         #[cfg(target_os = "macos")]
         {
@@ -399,7 +399,7 @@ impl BubbleApp {
                 return false;
             };
             shell::drop_window_shadow(appkit.ns_view.as_ptr());
-            return true;
+            true
         }
     }
 

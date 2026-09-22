@@ -132,14 +132,6 @@ pub fn preferred_zoom(_native_pixels_per_point: f32) -> Option<f32> {
     None
 }
 
-/// Declares the bubble a notification window, so the window manager leaves it
-/// undecorated, out of the taskbar, and unfocused.
-///
-/// Nothing to do on macOS: the bubble's viewport is already borderless and
-/// non-activating, and AppKit has no equivalent hint to set.
-#[cfg(target_os = "macos")]
-pub fn mark_as_notification(_window: u32) {}
-
 /// Cuts the bubble's window to the shape of the card painted inside it.
 ///
 /// Nothing to do wherever the bubble's window is transparent, which is

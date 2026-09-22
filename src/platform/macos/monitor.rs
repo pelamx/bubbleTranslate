@@ -104,11 +104,6 @@ fn trigger_key() -> TriggerKey {
     }
 }
 
-/// The tap sees every modifier on every event, so the gate is exact here:
-/// there is nothing to poll and nothing to miss.
-pub fn trigger_key_enforced() -> bool {
-    true
-}
 
 /// Never blocked here, so there is nothing to explain.
 pub fn trigger_key_blocked() -> Option<String> {

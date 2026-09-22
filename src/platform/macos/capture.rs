@@ -75,7 +75,7 @@ pub fn readiness() -> Readiness {
         let key = CFString::wrap_under_get_rule(kAXTrustedCheckOptionPrompt);
         let value = core_foundation::boolean::CFBoolean::true_value();
         let options = CFDictionary::from_CFType_pairs(&[(key.as_CFType(), value.as_CFType())]);
-        AXIsProcessTrustedWithOptions(options.as_CFTypeRef() as *const c_void)
+        AXIsProcessTrustedWithOptions(options.as_CFTypeRef())
     };
     if trusted {
         return Readiness::ready();
@@ -139,16 +139,16 @@ pub fn selected_text(allow_clipboard: bool, clipboard_before: Option<isize>) -> 
     // double-click.
     if let Some(before) = clipboard_before {
         let pasteboard = NSPasteboard::generalPasteboard();
-        if pasteboard.changeCount() != before {
-            if let Some(text) = read_pasteboard_string(&pasteboard) {
-                let trimmed = text.trim();
-                if !trimmed.is_empty() {
-                    crate::trace!("clipboard the app copied it itself during the gesture");
-                    return Some(Capture {
-                        text: trimmed.to_string(),
-                        via: CaptureSource::Clipboard,
-                    });
-                }
+        if pasteboard.changeCount() != before
+            && let Some(text) = read_pasteboard_string(&pasteboard)
+        {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                crate::trace!("clipboard the app copied it itself during the gesture");
+                return Some(Capture {
+                    text: trimmed.to_string(),
+                    via: CaptureSource::Clipboard,
+                });
             }
         }
     }
@@ -215,7 +215,7 @@ unsafe fn cf_string_to_owned(s: CFStringRef) -> Option<String> {
     // back any CFType — a CFArray from a hostile or simply buggy element.
     // Checking the type id first turns that from undefined behaviour into an
     // ordinary `None`, which is exactly how an empty selection reads.
-    if unsafe { CFGetTypeID(s as CFTypeRef) } != unsafe { CFString::type_id() } {
+    if unsafe { CFGetTypeID(s as CFTypeRef) } != CFString::type_id() {
         crate::trace!("capture   AXSelectedText arrived as something other than a string");
         return None;
     }
@@ -257,10 +257,10 @@ fn clipboard_selection() -> Option<String> {
     // image or a file reference there replaced what the user had just the
     // same, and `copied` says nothing about that. This only restores text; a
     // clobbered image or file reference is not preserved either way.
-    if pasteboard.changeCount() != before_count {
-        if let Some(previous) = previous {
-            write_pasteboard_string(&pasteboard, &previous);
-        }
+    if pasteboard.changeCount() != before_count
+        && let Some(previous) = previous
+    {
+        write_pasteboard_string(&pasteboard, &previous);
     }
 
     copied
