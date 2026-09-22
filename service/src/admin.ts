@@ -167,20 +167,22 @@ function ago(unix: number): string {
   return `${Math.round(s / DAY)}d ago`;
 }
 
-function usersTable(list: UserRow[], mine: boolean): string {
-  if (!list.length) return `<p class="muted">${mine ? "None marked yet." : "No installs in the last 30 days."}</p>`;
+function usersTable(list: UserRow[]): string {
+  if (!list.length) return `<p class="muted">No installs in the last 30 days.</p>`;
   const t = now();
   const body = list
     .map((u) => {
-      const badge =
-        u.first_seen > t - DAY
+      const mine = u.mine === 1;
+      const badge = mine
+        ? `<span class="badge you">you</span>`
+        : u.first_seen > t - DAY
           ? `<span class="badge new">new</span>`
           : u.last_seen > t - 2 * DAY
             ? `<span class="badge on">active</span>`
             : u.last_seen > t - 8 * DAY
               ? `<span class="badge">this week</span>`
               : `<span class="badge off">idle</span>`;
-      return `<tr>
+      return `<tr${mine ? ' class="mine"' : ""}>
         <td>${badge}</td>
         <td>${escapeHtml(osLabel(u.os ?? "unknown"))}</td>
         <td>${escapeHtml(u.app ?? "—")}</td>
@@ -630,6 +632,8 @@ const ADMIN_STYLE = `
   .badge.new { background: rgba(110,168,254,.18); color: var(--brand); }
   .badge.on { background: rgba(74,222,128,.15); color: var(--accent); }
   .badge.off { color: var(--faint); }
+  .badge.you { background: rgba(251,146,60,.15); color: var(--orange); }
+  tr.mine td { opacity: .6; }
   .os { display: inline-block; font-size: 12px; background: var(--bg); border-radius: 6px; padding: 2px 7px; margin: 6px 4px 0 0; color: var(--text); }
   .bars { display: flex; align-items: flex-end; gap: 4px; height: 70px; margin-top: 12px; }
   .bars div { flex: 1; background: var(--brand); opacity: .75; border-radius: 3px 3px 0 0; min-height: 2px; }
@@ -685,8 +689,8 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
     recentFailures(env),
     users(env),
   ]);
-  const real = people.filter((x) => !x.mine);
-  const own = people.filter((x) => x.mine);
+  const real = people.filter((x) => !x.mine).length;
+  const own = people.length - real;
 
   const prod = env.PADDLE_ENV === "production";
   const osChips = (pick: (o: { os: string; active: number; fresh: number; today: number }) => number) =>
@@ -766,16 +770,11 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
      </section>
 
      <section class="card" id="users">
-       <p class="label">Users, last 30 days (${real.length})</p>
-       <p class="muted" style="margin-top:0">One row per install. If a row is one of your own
-         machines, press <b>This is me</b> and it leaves every count on this page.</p>
-       ${usersTable(real, false)}
+       <p class="label">Users, last 30 days — ${real} real${own ? ` · ${own} yours` : ""}</p>
+       <p class="muted" style="margin-top:0">One row per install. Press <b>This is me</b> on your
+         own machines: they stay in this list, tagged <b>you</b>, but leave every count on this page.</p>
+       ${usersTable(people)}
      </section>
-
-     <details class="card">
-       <summary>Your devices (${own.length}) — not counted</summary>
-       <div class="body">${usersTable(own, true)}</div>
-     </details>
 
      ${failureTable}
 
