@@ -14,6 +14,9 @@ export interface Env {
   SIGNING_KEY_PKCS8?: string;
   /** Its public half, 32 bytes as hex. This is what goes in PUBLIC_KEY_HEX. */
   SIGNING_KEY_PUBLIC?: string;
+  /** Optional read-only GitHub token for the admin download counts; without it
+   *  the API rate-limits by the Worker's shared outbound address. */
+  GITHUB_TOKEN?: string;
 
   // -- Paddle ----------------------------------------------------------------
   /** Sandbox until it is set to "production". Chooses both the API host and
