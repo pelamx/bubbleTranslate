@@ -7,11 +7,14 @@
     "schema": "wrangler d1 execute bubbletranslate-licence --local --file=schema.sql",
     "schema:reset": "wrangler d1 execute bubbletranslate-licence --local --file=reset.sql && npm run schema",
     "schema:remote": "wrangler d1 execute bubbletranslate-licence --remote --file=schema.sql",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "test": "vitest run"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@cloudflare/workers-types": "^5.20260831.1",
     "typescript": "^5.7.0",
+    "vitest": "~4.1",
     "wrangler": "^4.0.0"
   },
   "allowScripts": {
