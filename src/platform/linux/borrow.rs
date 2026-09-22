@@ -108,27 +108,38 @@ fn continues_a_click(released: Option<Instant>) -> bool {
 
 fn consider(generation: u64, from: Option<(f64, f64)>, multi_click: bool) {
     let key = monitor::trigger_key();
-    if key == TriggerKey::Always || monitor::key_held(key) != Some(true) {
+    if key == TriggerKey::Always {
+        return;
+    }
+    let held = monitor::key_held(key);
+    if held != Some(true) {
+        crate::trace!("borrow    skip: trigger key held = {held:?}");
         return;
     }
     // A double click has no distance to measure; it is the gesture itself
     // that says the user picked a word out.
     if !multi_click {
         let (Some(from), Some(to)) = (from, cursor::position()) else {
+            crate::trace!("borrow    skip: pointer position unknown");
             return;
         };
-        if (to.0 - from.0).hypot(to.1 - from.1) < MIN_DRAG {
+        let moved = (to.0 - from.0).hypot(to.1 - from.1);
+        if moved < MIN_DRAG {
+            crate::trace!("borrow    skip: a click, moved {moved:.1}");
             return;
         }
     }
     let Some(class) = compositor::focused_class() else {
+        crate::trace!("borrow    skip: focused window unknown");
         return;
     };
     if !is_browser(&class) {
+        crate::trace!("borrow    skip: {class} is not a browser");
         return;
     }
     std::thread::sleep(PUBLISH_GRACE);
     if wayland::primary_generation() != generation {
+        crate::trace!("borrow    skip: {class} published a selection itself");
         return;
     }
     let Ok(saved) = wayland::read_clipboard() else {
@@ -142,6 +153,7 @@ fn consider(generation: u64, from: Option<(f64, f64)>, multi_click: bool) {
     if compositor::send_copy() {
         crate::trace!("borrow    no selection published in {class}; copying");
     } else {
+        crate::trace!("borrow    the compositor would not send the copy");
         PENDING.lock().unwrap().take();
     }
 }
