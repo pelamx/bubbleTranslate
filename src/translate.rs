@@ -548,4 +548,97 @@ mod tests {
         cfg.deepl_api_key = "abc:fx".into();
         assert_eq!(cfg.active_providers().len(), 3);
     }
+
+    // -- the chain -------------------------------------------------------------
+    //
+    // Every case below fails before the network is touched, so the chain's own
+    // behaviour is what is under test: it walks past a failure to the next
+    // provider and, when all of them fail, says why for each one, in order.
+
+    #[test]
+    fn a_failed_provider_hands_over_to_the_next_and_every_reason_comes_back() {
+        let mut cfg = Config::default();
+        cfg.providers = vec![Provider::MyMemory, Provider::DeepL];
+        cfg.deepl_api_key = "abc:fx".into();
+        cfg.target_lang = "fa".into();
+        let long = "x".repeat(MYMEMORY_MAX_BYTES + 1);
+
+        let failures = Translator::new().translate(&long, &cfg).unwrap_err();
+        let order: Vec<Provider> = failures.iter().map(|(p, _)| *p).collect();
+        assert_eq!(order, vec![Provider::MyMemory, Provider::DeepL]);
+        assert!(failures.iter().all(|(_, e)| matches!(e, TranslateError::Unavailable(_))));
+        assert!(failures[0].1.to_string().contains("MyMemory accepts 500"));
+        assert!(failures[1].1.to_string().contains("no target language 'fa'"));
+    }
+
+    #[test]
+    fn deepl_without_a_key_is_not_tried_at_all() {
+        let mut cfg = Config::default();
+        cfg.providers = vec![Provider::DeepL, Provider::MyMemory];
+        cfg.deepl_api_key = "   ".into();
+        let long = "x".repeat(MYMEMORY_MAX_BYTES + 1);
+        let failures = Translator::new().translate(&long, &cfg).unwrap_err();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].0, Provider::MyMemory);
+    }
+
+    #[test]
+    fn an_empty_chain_says_so_rather_than_failing_silently() {
+        let mut cfg = Config::default();
+        cfg.providers.clear();
+        let failures = Translator::new().translate("hello", &cfg).unwrap_err();
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].1.to_string().contains("no providers enabled"));
+    }
+
+    #[test]
+    fn mymemory_refuses_a_same_language_pair_before_asking() {
+        let mut cfg = Config::default();
+        cfg.source_lang = "en".into();
+        cfg.target_lang = "en".into();
+        let err = Translator::new()
+            .translate_with(Provider::MyMemory, "hello", &cfg)
+            .unwrap_err();
+        assert!(matches!(err, TranslateError::Unavailable(_)));
+    }
+
+    // -- parsing -----------------------------------------------------------------
+
+    #[test]
+    fn google_html_is_caught_even_after_leading_whitespace() {
+        assert!(parse_google("\n  <html>captcha</html>").is_err());
+    }
+
+    #[test]
+    fn google_answers_that_are_not_a_translation_are_rejected() {
+        for body in ["not json", "{}", "[]", r#"[[["   ","x"]],null,"tr"]"#, r#"{"sentences":[]}"#] {
+            assert!(
+                matches!(parse_google(body), Err(TranslateError::BadResponse(_))),
+                "{body} should be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn google_without_a_detected_language_still_translates() {
+        let (text, src) = parse_google(r#"[[["hello","merhaba"]]]"#).unwrap();
+        assert_eq!(text, "hello");
+        assert_eq!(src, "");
+    }
+
+    #[test]
+    fn deepl_region_variants_fold_to_what_deepl_accepts() {
+        assert_eq!(deepl_target("pt-BR").as_deref(), Some("PT-PT"));
+        assert_eq!(deepl_target("zh-TW").as_deref(), Some("ZH"));
+        assert_eq!(deepl_target("EN-gb").as_deref(), Some("EN-US"));
+        assert_eq!(deepl_source("en-US").as_deref(), Some("EN"));
+        assert_eq!(deepl_source("auto"), None);
+    }
+
+    #[test]
+    fn html_entities_are_decoded_once_and_ampersand_last() {
+        assert_eq!(decode_html_entities("&quot;a&quot; &amp; b&#39;s"), "\"a\" & b's");
+        // `&amp;lt;` is a literal "&lt;" in the source text, not a "<".
+        assert_eq!(decode_html_entities("&amp;lt;"), "&lt;");
+    }
 }
