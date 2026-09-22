@@ -156,3 +156,10 @@ CREATE TABLE IF NOT EXISTS installs (
 );
 
 CREATE INDEX IF NOT EXISTS installs_by_last_seen ON installs (last_seen);
+
+-- Installs the operator marked as their own from the admin panel. Left out of
+-- every admin count, so the panel shows real users only.
+CREATE TABLE IF NOT EXISTS ignored_installs (
+  install     TEXT PRIMARY KEY,
+  created_at  INTEGER NOT NULL
+);

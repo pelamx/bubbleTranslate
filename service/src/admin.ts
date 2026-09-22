@@ -127,8 +127,97 @@ function ignoreList(value: string | undefined): string {
 }
 
 /** Keeps the operator's own machines and licences out of the counts. */
-const NOT_MINE_INSTALL = `install NOT IN (SELECT value FROM json_each(?9))`;
+const NOT_MINE_INSTALL = `install NOT IN (SELECT value FROM json_each(?9))
+  AND install NOT IN (SELECT install FROM ignored_installs)`;
 const NOT_MINE_LICENCE = `(email IS NULL OR LOWER(email) NOT IN (SELECT value FROM json_each(?9)))`;
+
+interface UserRow {
+  install: string;
+  os: string | null;
+  app: string | null;
+  plan: string | null;
+  first_seen: number;
+  last_seen: number;
+  mine: number;
+}
+
+/** Every install seen in the last 30 days, newest first, each marked with
+ *  whether the operator said it is theirs. */
+async function users(env: Env): Promise<UserRow[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT install, os, app, plan, first_seen, last_seen,
+            CASE WHEN install IN (SELECT value FROM json_each(?9))
+                   OR install IN (SELECT install FROM ignored_installs)
+                 THEN 1 ELSE 0 END AS mine
+       FROM installs
+      WHERE last_seen > ?1
+      ORDER BY first_seen DESC
+      LIMIT 300`,
+  )
+    .bind(now() - 30 * DAY, null, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
+    .all<UserRow>();
+  return results ?? [];
+}
+
+/** "5m ago", "3h ago", "2d ago". */
+function ago(unix: number): string {
+  const s = Math.max(0, now() - unix);
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m ago`;
+  if (s < DAY) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / DAY)}d ago`;
+}
+
+function usersTable(list: UserRow[], mine: boolean): string {
+  if (!list.length) return `<p class="muted">${mine ? "None marked yet." : "No installs in the last 30 days."}</p>`;
+  const t = now();
+  const body = list
+    .map((u) => {
+      const badge =
+        u.first_seen > t - DAY
+          ? `<span class="badge new">new</span>`
+          : u.last_seen > t - 2 * DAY
+            ? `<span class="badge on">active</span>`
+            : u.last_seen > t - 8 * DAY
+              ? `<span class="badge">this week</span>`
+              : `<span class="badge off">idle</span>`;
+      return `<tr>
+        <td>${badge}</td>
+        <td>${escapeHtml(osLabel(u.os ?? "unknown"))}</td>
+        <td>${escapeHtml(u.app ?? "—")}</td>
+        <td>${escapeHtml(u.plan ?? "—")}</td>
+        <td title="${escapeHtml(date(u.first_seen))}">${ago(u.first_seen)}</td>
+        <td title="${escapeHtml(date(u.last_seen))}">${ago(u.last_seen)}</td>
+        <td><code>${escapeHtml(u.install.slice(0, 8))}</code></td>
+        <td><form method="post" action="/admin/mine" class="inline">
+          <input type="hidden" name="install" value="${escapeHtml(u.install)}">
+          <input type="hidden" name="mine" value="${mine ? "0" : "1"}">
+          <button class="quiet" type="submit">${mine ? "Not me" : "This is me"}</button>
+        </form></td>
+      </tr>`;
+    })
+    .join("");
+  return `<div class="scroll"><table>
+    <tr><th></th><th>OS</th><th>Version</th><th>Plan</th><th>First seen</th><th>Last seen</th><th>Id</th><th></th></tr>
+    ${body}
+  </table></div>`;
+}
+
+/** Marks an install as the operator's own, or takes the mark off. */
+async function markMine(env: Env, request: Request): Promise<Response> {
+  if (!sameOrigin(request)) return new Response("Cross-site request refused.", { status: 403 });
+  const form = await request.formData();
+  const install = String(form.get("install") ?? "").trim();
+  if (install) {
+    if (form.get("mine") === "1") {
+      await env.DB.prepare("INSERT OR IGNORE INTO ignored_installs (install, created_at) VALUES (?, ?)")
+        .bind(install, now())
+        .run();
+    } else {
+      await env.DB.prepare("DELETE FROM ignored_installs WHERE install = ?").bind(install).run();
+    }
+  }
+  return new Response(null, { status: 303, headers: { location: "/admin#users" } });
+}
 
 interface Usage {
   daily: number;
@@ -537,6 +626,10 @@ const ADMIN_STYLE = `
   .up { color: var(--accent); } .down { color: var(--red); }
   .stat.alert { box-shadow: inset 3px 0 0 var(--orange); }
   .stat.alert .v { color: var(--orange); }
+  .badge { font-size: 11px; border-radius: 999px; padding: 2px 8px; background: var(--card-2); color: var(--muted); white-space: nowrap; }
+  .badge.new { background: rgba(110,168,254,.18); color: var(--brand); }
+  .badge.on { background: rgba(74,222,128,.15); color: var(--accent); }
+  .badge.off { color: var(--faint); }
   .os { display: inline-block; font-size: 12px; background: var(--bg); border-radius: 6px; padding: 2px 7px; margin: 6px 4px 0 0; color: var(--text); }
   .bars { display: flex; align-items: flex-end; gap: 4px; height: 70px; margin-top: 12px; }
   .bars div { flex: 1; background: var(--brand); opacity: .75; border-radius: 3px 3px 0 0; min-height: 2px; }
@@ -583,14 +676,17 @@ function delta(today: number, yesterday: number): string {
 }
 
 async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, rows, failures] = await Promise.all([
+  const [s, u, p, byOs, rows, failures, people] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
     osBreakdown(env),
     search(env, query),
     recentFailures(env),
+    users(env),
   ]);
+  const real = people.filter((x) => !x.mine);
+  const own = people.filter((x) => x.mine);
 
   const prod = env.PADDLE_ENV === "production";
   const osChips = (pick: (o: { os: string; active: number; fresh: number; today: number }) => number) =>
@@ -668,6 +764,18 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
        <div class="bars">${bars}</div>
        <div class="bars-axis"><span>14 days ago</span><span>today</span></div>
      </section>
+
+     <section class="card" id="users">
+       <p class="label">Users, last 30 days (${real.length})</p>
+       <p class="muted" style="margin-top:0">One row per install. If a row is one of your own
+         machines, press <b>This is me</b> and it leaves every count on this page.</p>
+       ${usersTable(real, false)}
+     </section>
+
+     <details class="card">
+       <summary>Your devices (${own.length}) — not counted</summary>
+       <div class="body">${usersTable(own, true)}</div>
+     </details>
 
      ${failureTable}
 
@@ -952,6 +1060,7 @@ export async function handleAdmin(
   if (request.method === "POST") {
     const action = pathname.slice("/admin/".length);
     if (action === "issue") return issue(env, request);
+    if (action === "mine") return markMine(env, request);
     if (["extend", "seats", "rotate", "end", "update", "delete"].includes(action)) {
       return act(env, request, action);
     }
