@@ -51,26 +51,11 @@ rm -f "$SUMS.new"
 
 # --- tell installed copies --------------------------------------------------
 #
-# latest.json is what running copies read to say "a new version is available".
-# Only the Linux line is touched: the other platforms are released on their own
-# machines. Commit it together with the upload, or nobody is told.
+# latest.json lives in the downloads repository, because that is the one that
+# stays public and every installed copy reads it on startup. Only the Linux
+# line is touched: the other platforms are released on their own machines.
 
-PUBLISHED="$(perl -0ne 'print $1 if /"linux"\s*:\s*\{\s*"version"\s*:\s*"([^"]*)"/' latest.json)"
-if [[ -z "$PUBLISHED" ]]; then
-    echo "error: latest.json has no linux version to update" >&2
-    exit 1
-fi
-perl -0pi -e 's/("linux"\s*:\s*\{\s*"version"\s*:\s*")[^"]*(")/${1}'"$VERSION"'${2}/' latest.json
-# And the URL beside it, which names the release the download is an asset of.
-# Bumping the version alone is how a build gets announced as new and then hands
-# over the previous one: the app compares versions and opens whatever URL it is
-# given, so the two have to move together.
-VERSION="$VERSION" perl -0pi -e 's{("linux"\s*:\s*\{.*?"url"\s*:\s*"[^"]*?/download/)v[^/]+(/)}{$1 . "v" . $ENV{VERSION} . $2}se' latest.json
-if [[ "$VERSION" == "$PUBLISHED" ]]; then
-    echo
-    echo "warning: latest.json already says Linux $VERSION — bump the version in"
-    echo "         Cargo.toml, or installed copies will not be told about this build"
-fi
+./scripts/publish-manifest.sh linux "$VERSION" "$OUT"
 
 # --- what is left to do -----------------------------------------------------
 #
@@ -83,11 +68,11 @@ echo
 echo "built $OUT ($(du -h "$OUT" | cut -f1)), version $VERSION"
 echo "checksummed into $SUMS"
 echo
-echo "  gh release create v$VERSION --title \"bubbleTranslate $VERSION\" \\"
-echo "      $OUT $SUMS"
+echo "  gh release create v$VERSION -R bubbleTranslate/downloads \\"
+echo "      --title \"bubbleTranslate $VERSION\" $OUT $SUMS"
 echo
 echo "use this version's section of CHANGELOG.md as the release notes -- it is"
 echo "what the download page shows to whoever just saw the update banner"
 echo
-echo "then commit latest.json (the binary is not tracked — latest.json and the"
-echo "version in Cargo.toml are the only things that are)"
+echo "latest.json is already published; the version in Cargo.toml is the only"
+echo "thing left to commit here (the binary is not tracked)"

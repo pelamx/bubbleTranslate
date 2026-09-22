@@ -75,13 +75,25 @@ archive is the signed executable. `latest.json` and every download link point
 at `bubbleTranslate-windows-x64.zip`; the bare `.exe` is uploaded beside it for
 anyone who wants it, and nothing links to it as the primary download.
 
-One script per platform, each rewriting only its own line of `latest.json`:
-`release.sh` (macOS), `release.ps1` (Windows), `release-linux.sh` (Linux).
-Each warns when `Cargo.toml` was not bumped, because a release that reuses the
-published version tells nobody. The version lives in `Cargo.toml` and
+**The downloads live in `bubbleTranslate/downloads`, not here.** This
+repository holds the source and is private; that one is public, and it is
+where every release asset and `latest.json` are published. An installed copy
+reads `latest.json` from it on startup, so anything that takes it offline or
+renames it stops the update notice for every copy already out there.
+
+One script per platform, each rewriting only its own line of `latest.json` —
+fetched from the downloads repository, patched and put back through the API,
+so a release on one machine leaves the other two platforms alone:
+`release.sh` (macOS), `release.ps1` (Windows), `release-linux.sh` (Linux);
+the shared half is `scripts/publish-manifest.sh`. Each warns when
+`Cargo.toml` was not bumped, because a release that reuses the published
+version tells nobody. The version lives in `Cargo.toml` and in that
 `latest.json` and nowhere else: the links in README.md and on the website are
 `/releases/latest/download/…`, which GitHub resolves to the current release, so
 publishing one is what moves them.
+
+Every release machine therefore needs `gh` logged in to the `bubbleTranslate`
+account, which owns the downloads repository.
 
 ## Paddle
 

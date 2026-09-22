@@ -13,6 +13,16 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**The downloads have moved, and this version knows where.** They are published
+from their own place now rather than from the same page as the source code, so
+every download link on the website points somewhere new. Nothing about
+installing or updating changes for you: this version checks the new address
+for newer builds, and the old links keep working. A copy older than this one
+will stop noticing new versions once the old page closes, so it is worth
+taking this update.
+
 ## 0.2.7 — 2026-09-22
 
 **Everyone on the free version gets ten translations a day, and only Pro is

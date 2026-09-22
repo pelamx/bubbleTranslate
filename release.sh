@@ -157,26 +157,17 @@ fi
 
 # --- tell installed copies ---------------------------------------------------
 #
-# latest.json is what running copies read to say "a new version is available".
-# Only the macOS line is touched: the other platforms are released on their
-# own machines. Commit it together with the DMG, or nobody is told.
+# latest.json lives in the downloads repository, because that is the one that
+# stays public and every installed copy reads it on startup. Only the macOS
+# line is touched: the other platforms are released on their own machines.
 
-PUBLISHED="$(perl -0ne 'print $1 if /"macos"\s*:\s*\{\s*"version"\s*:\s*"([^"]*)"/' latest.json)"
-perl -0pi -e 's/("macos"\s*:\s*\{\s*"version"\s*:\s*")[^"]*(")/${1}'"$VERSION"'${2}/' latest.json
-# And the URL beside it, which names the release the download is an asset of.
-# Bumping the version alone is how a build gets announced as new and then hands
-# over the previous one: the app compares versions and opens whatever URL it is
-# given, so the two have to move together.
-VERSION="$VERSION" perl -0pi -e 's{("macos"\s*:\s*\{.*?"url"\s*:\s*"[^"]*?/download/)v[^/]+(/)}{$1 . "v" . $ENV{VERSION} . $2}se' latest.json
-if [[ "$VERSION" == "$PUBLISHED" ]]; then
-    echo "warning: latest.json already says macOS $VERSION — bump the version in"
-    echo "         Cargo.toml, or installed copies will not be told about this build"
-fi
+./scripts/publish-manifest.sh macos "$VERSION" "$DMG"
 
 echo
 echo "built $DMG ($(du -h "$DMG" | cut -f1)), version $VERSION"
-echo "upload $DMG to the v$VERSION GitHub release, then commit latest.json"
-echo "(the binary is not tracked — latest.json is the only thing to commit)"
+echo "upload $DMG to the v$VERSION release in bubbleTranslate/downloads:"
+echo "  gh release upload v$VERSION -R bubbleTranslate/downloads $DMG --clobber"
+echo "(latest.json is already published; the binary is not tracked)"
 if [[ -z "$NOTARY_PROFILE" ]]; then
     echo
     echo "Not notarized. On another Mac the first launch is blocked; clear it once"

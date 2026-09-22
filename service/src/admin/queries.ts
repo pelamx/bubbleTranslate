@@ -91,7 +91,7 @@ export function compareVersions(a: string, b: string): number {
  *  Worker's outbound address is shared. Null when GitHub cannot be reached,
  *  so the panel says so rather than showing zeros. */
 export async function downloads(env: Env): Promise<Record<string, number> | null> {
-  const url = "https://api.github.com/repos/pelamx/bubbleTranslate/releases?per_page=100";
+  const url = "https://api.github.com/repos/bubbleTranslate/downloads/releases?per_page=100";
   const cache = caches.default;
   const key = new Request(url);
   let res = await cache.match(key);

@@ -105,41 +105,53 @@ Remove-Item $ZIP -Force -ErrorAction SilentlyContinue
 Compress-Archive -Path $OUT -DestinationPath $ZIP -CompressionLevel Optimal
 
 # latest.json is what running copies read to say "a new version is available".
-# Only the Windows line is touched: the other platforms are released on their
-# own machines. Commit it together with the .exe, or nobody is told.
-$manifestPath = Join-Path $PSScriptRoot 'latest.json'
+# It lives in the downloads repository -- the one that stays public -- rather
+# than beside the source, so it is fetched, patched and put back through the
+# API. Only the Windows line is touched: the other platforms are released on
+# their own machines.
+$repo = 'bubbleTranslate/downloads'
+if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+    throw "gh is not installed; latest.json was not published. Install it, or edit latest.json in $repo by hand."
+}
+
+$encoded = gh api "repos/$repo/contents/latest.json" --jq .content
+$sha = gh api "repos/$repo/contents/latest.json" --jq .sha
+$raw = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String(($encoded -replace '\s', '')))
 
 # Edited in place rather than round-tripped through ConvertFrom-Json: the
 # ConvertTo-Json of PowerShell 5.1 re-indents the whole file and aligns the
 # colons, so every Windows release would arrive as a diff of all three
 # platforms. A substitution touches the one value, the way release.sh does.
-$raw = Get-Content $manifestPath -Raw
 $pattern = '("windows"\s*:\s*\{\s*"version"\s*:\s*")([^"]*)(")'
 $found = [regex]::Match($raw, $pattern)
-if (-not $found.Success) { throw "latest.json has no windows version to update" }
+if (-not $found.Success) { throw "latest.json in $repo has no windows version to update" }
 if ($found.Groups[2].Value -eq $version) {
     Write-Host "warning: latest.json already says Windows $version - bump the version in"
     Write-Host "         Cargo.toml, or installed copies will not be told about this build"
 }
-# Written without a byte-order mark: the app reads it as plain UTF-8 JSON.
 $raw = [regex]::Replace($raw, $pattern, "`${1}$version`${3}")
 
 # And the URL beside it, which names the release the download is an asset of.
 # Bumping the version alone is how a build gets announced as new and then hands
 # over the previous one: the app compares versions and opens whatever URL it is
 # given, so the two have to move together.
-$urlPattern = '("windows"\s*:\s*\{[\s\S]*?"url"\s*:\s*"[^"]*?/download/)v[^/]+(/)'
-$raw = [regex]::Replace($raw, $urlPattern, "`${1}v$version`${2}")
+$zipName = Split-Path $ZIP -Leaf
+$url = "https://github.com/$repo/releases/download/v$version/$zipName"
+$urlPattern = '("windows"\s*:\s*\{[\s\S]*?"url"\s*:\s*")[^"]*(")'
+$raw = [regex]::Replace($raw, $urlPattern, "`${1}$url`${2}")
 
-[System.IO.File]::WriteAllText($manifestPath, $raw)
+$content = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($raw))
+gh api "repos/$repo/contents/latest.json" -X PUT -f message="windows $version" -f sha="$sha" -f content="$content" --jq .commit.sha | Out-Null
+Write-Host "published: installed copies on Windows are now told about $version"
 
 $size = [math]::Round((Get-Item $OUT).Length / 1MB, 1)
 $zipSize = [math]::Round((Get-Item $ZIP).Length / 1MB, 1)
 Write-Host ""
 Write-Host "built $OUT ($size MB), version $version"
 Write-Host "      $ZIP ($zipSize MB)"
-Write-Host "upload both to the v$version GitHub release, then commit latest.json"
-Write-Host "(neither is tracked -- latest.json is the only thing to commit)"
+Write-Host "upload both to the v$version release in $repo:"
+Write-Host "  gh release upload v$version -R $repo $OUT $ZIP --clobber"
+Write-Host "(latest.json is already published; neither file is tracked)"
 Write-Host ""
 Write-Host "First run:"
 Write-Host "  double-click bubbleTranslate.exe"
