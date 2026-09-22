@@ -260,22 +260,53 @@ async function usage(env: Env): Promise<Usage> {
  *  on its last ping. Answers "a new person turned up — what are they running?"
  *  without naming any single machine. `os` is Rust's `env::consts::OS`, so the
  *  values are `macos` / `windows` / `linux`. */
-async function osBreakdown(
-  env: Env,
-): Promise<{ os: string; active: number; fresh: number; today: number }[]> {
-  const t = now();
+interface OsRow {
+  os: string;
+  today: number;
+  active_today: number;
+  active: number;
+  total: number;
+}
+
+async function osBreakdown(env: Env): Promise<OsRow[]> {
   const { results } = await env.DB.prepare(
     `SELECT COALESCE(os, 'unknown') AS os,
-            SUM(CASE WHEN last_seen  > ?1 THEN 1 ELSE 0 END) AS active,
-            SUM(CASE WHEN first_seen > ?1 THEN 1 ELSE 0 END) AS fresh,
-            SUM(CASE WHEN first_seen >= ?2 THEN 1 ELSE 0 END) AS today
+            SUM(CASE WHEN first_seen >= ?2 THEN 1 ELSE 0 END) AS today,
+            SUM(CASE WHEN last_seen  >= ?2 THEN 1 ELSE 0 END) AS active_today,
+            SUM(CASE WHEN last_seen  >  ?1 THEN 1 ELSE 0 END) AS active,
+            COUNT(*) AS total
        FROM installs
-      WHERE (last_seen > ?1 OR first_seen > ?1) AND ${NOT_MINE_INSTALL}
-      GROUP BY os
-      ORDER BY active DESC, os ASC`,
+      WHERE ${NOT_MINE_INSTALL}
+      GROUP BY os`,
   )
-    .bind(t - 8 * DAY, startOfToday(), null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
-    .all<{ os: string; active: number; fresh: number; today: number }>();
+    .bind(now() - 8 * DAY, startOfToday(), null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
+    .all<OsRow>();
+  return results ?? [];
+}
+
+interface LicenceOsRow {
+  os: string;
+  today: number;
+  live: number;
+  expiring: number;
+}
+
+/** Licences by the OS of the devices they were activated on. A licence on two
+ *  systems counts under both; one never activated counts as "unknown". */
+async function licenceOs(env: Env): Promise<LicenceOsRow[]> {
+  const t = now();
+  const { results } = await env.DB.prepare(
+    `SELECT COALESCE(s.os, 'unknown') AS os,
+            COUNT(DISTINCT CASE WHEN l.created_at >= ?2 THEN l.id END) AS today,
+            COUNT(DISTINCT CASE WHEN l.status != 'refunded' AND l.expires_at > ?1 THEN l.id END) AS live,
+            COUNT(DISTINCT CASE WHEN l.status != 'refunded' AND l.expires_at > ?1
+                                 AND l.expires_at < ?1 + 7 * ${DAY} THEN l.id END) AS expiring
+       FROM licences l LEFT JOIN seats s ON s.licence_id = l.id
+      WHERE (l.email IS NULL OR LOWER(l.email) NOT IN (SELECT value FROM json_each(?9)))
+      GROUP BY COALESCE(s.os, 'unknown')`,
+  )
+    .bind(t, startOfToday(), null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_EMAILS))
+    .all<LicenceOsRow>();
   return results ?? [];
 }
 
@@ -642,6 +673,7 @@ const ADMIN_STYLE = `
   .badge.off { color: var(--faint); }
   .badge.you { background: rgba(251,146,60,.15); color: var(--orange); }
   tr.mine td { opacity: .6; }
+  .os.zero { color: var(--faint); }
   .os { display: inline-block; font-size: 12px; background: var(--bg); border-radius: 6px; padding: 2px 7px; margin: 6px 4px 0 0; color: var(--text); }
   .bars { display: flex; align-items: flex-end; gap: 4px; height: 70px; margin-top: 12px; }
   .bars div { flex: 1; background: var(--brand); opacity: .75; border-radius: 3px 3px 0 0; min-height: 2px; }
@@ -688,11 +720,12 @@ function delta(today: number, yesterday: number): string {
 }
 
 async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, rows, failures, people] = await Promise.all([
+  const [s, u, p, byOs, licOs, rows, failures, people] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
     osBreakdown(env),
+    licenceOs(env),
     search(env, query),
     recentFailures(env),
     users(env),
@@ -701,11 +734,19 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
   const own = people.length - real;
 
   const prod = env.PADDLE_ENV === "production";
-  const osChips = (pick: (o: { os: string; active: number; fresh: number; today: number }) => number) =>
-    byOs
-      .filter((o) => pick(o) > 0)
-      .map((o) => `<span class="os">${escapeHtml(osLabel(o.os))} ${pick(o)}</span>`)
-      .join("");
+  // Always Windows, Linux and macOS, zeros included, so every card reads the
+  // same way; anything else only when it has a count.
+  const chipsFor = <R extends { os: string }>(list: R[], pick: (o: R) => number) => {
+    const count = (os: string) => list.filter((o) => o.os === os).reduce((a, o) => a + pick(o), 0);
+    const extra = [...new Set(list.map((o) => o.os))].filter(
+      (os) => !["windows", "linux", "macos"].includes(os) && count(os) > 0,
+    );
+    return `<div>${["windows", "linux", "macos", ...extra]
+      .map((os) => `<span class="os${count(os) ? "" : " zero"}">${escapeHtml(osLabel(os))} ${count(os)}</span>`)
+      .join("")}</div>`;
+  };
+  const osChips = (pick: (o: OsRow) => number) => chipsFor(byOs, pick);
+  const licChips = (pick: (o: LicenceOsRow) => number) => chipsFor(licOs, pick);
   const peak = Math.max(1, ...p.series);
   const bars = p.series
     .map((n, i) => {
@@ -751,11 +792,13 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
        <div class="grid">
          <div class="stat"><div class="k">New users <span class="muted">(downloaded &amp; opened)</span></div><div class="v">${p.installs_today}</div>
            ${delta(p.installs_today, p.installs_yesterday)}
-           <div>${osChips((o) => o.today)}</div></div>
+           ${osChips((o) => o.today)}</div>
          <div class="stat"><div class="k">New paying customers</div><div class="v">${p.subs_today}</div>
-           ${delta(p.subs_today, p.subs_yesterday)}</div>
+           ${delta(p.subs_today, p.subs_yesterday)}
+           ${licChips((o) => o.today)}</div>
          <div class="stat"><div class="k">Active users</div><div class="v">${p.active_today}</div>
-           <div class="sub">opened the app today</div></div>
+           <div class="sub">opened the app today</div>
+           ${osChips((o) => o.active_today)}</div>
        </div>
      </section>
 
@@ -763,13 +806,16 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
        <p class="label">Overall</p>
        <div class="grid">
          <div class="stat"><div class="k">Live subscribers</div><div class="v">${s.live}</div>
+           ${licChips((o) => o.live)}
            <div class="sub">${s.monthly} monthly · ${s.yearly} yearly · ${s.fresh} new in 30d</div></div>
          <div class="stat"><div class="k">Active this week</div><div class="v">${u.weekly}</div>
-           <div>${osChips((o) => o.active)}</div>
+           ${osChips((o) => o.active)}
            <div class="sub">${u.free_weekly} free · ${u.new_weekly} new this week</div></div>
          <div class="stat"><div class="k">Installs ever seen</div><div class="v">${u.total}</div>
+           ${osChips((o) => o.total)}
            <div class="sub">${u.monthly} active this month</div></div>
          <div class="stat${s.expiring > 0 ? " alert" : ""}"><div class="k">Ending in 7 days</div><div class="v">${s.expiring}</div>
+           ${licChips((o) => o.expiring)}
            <div class="sub">${s.winding_down} cancelled, still paid</div></div>
        </div>
        <p class="label" style="margin-top:20px">New installs, last 14 days</p>
