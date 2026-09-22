@@ -166,7 +166,10 @@ fn main() -> eframe::Result<()> {
     let viewport = egui::ViewportBuilder::default()
         .with_inner_size([BUBBLE_WIDTH, 120.0])
         .with_min_inner_size([BUBBLE_WIDTH, 60.0])
-        .with_decorations(false)
+        // Everywhere but Windows, where a window built without a frame is one
+        // the graphics stack may never paint — the bubble there keeps a frame
+        // and cuts it away instead. See [`platform::shape_bubble`].
+        .with_decorations(cfg!(target_os = "windows"))
         // Not everywhere: see [`ui::TRANSPARENT_BUBBLE`] for why Windows gets
         // an opaque card instead of a floating one.
         .with_transparent(ui::TRANSPARENT_BUBBLE)

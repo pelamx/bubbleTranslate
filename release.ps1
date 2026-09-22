@@ -149,7 +149,7 @@ $zipSize = [math]::Round((Get-Item $ZIP).Length / 1MB, 1)
 Write-Host ""
 Write-Host "built $OUT ($size MB), version $version"
 Write-Host "      $ZIP ($zipSize MB)"
-Write-Host "upload both to the v$version release in $repo:"
+Write-Host "upload both to the v$version release in ${repo}:"
 Write-Host "  gh release upload v$version -R $repo $OUT $ZIP --clobber"
 Write-Host "(latest.json is already published; neither file is tracked)"
 Write-Host ""

@@ -264,7 +264,9 @@ impl BubbleApp {
             BUBBLE_WIDTH,
             self.last_height.max(MIN_HEIGHT),
         )));
-        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
+        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(Self::window_origin(
+            pos,
+        )));
         if !self.visible {
             self.pending_show = true;
             // Ask again for the bubble to be on every workspace. Not a
@@ -274,6 +276,16 @@ impl BubbleApp {
             self.workspace_pending = true;
         }
         self.shown_at = Instant::now();
+    }
+
+    /// Where the *window* goes so that the bubble lands at `pos`.
+    ///
+    /// The two are the same everywhere but Windows, where the bubble's window
+    /// keeps a frame it never shows and the contents therefore start a title
+    /// bar below the window's own corner. See [`crate::platform::frame_offset`].
+    fn window_origin(pos: egui::Pos2) -> egui::Pos2 {
+        let (dx, dy) = crate::platform::frame_offset();
+        egui::pos2(pos.x - dx, pos.y - dy)
     }
 
     fn hide(&mut self, ctx: &egui::Context) {
@@ -735,7 +747,9 @@ impl eframe::App for BubbleApp {
             // Re-anchor: a taller bubble may no longer fit below the cursor.
             let pos = self.clamped_position(&ctx);
             self.last_pos = pos;
-            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
+            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(Self::window_origin(
+                pos,
+            )));
         }
 
         if dismiss {

@@ -13,15 +13,17 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.2.8 — 2026-09-22
 
-**The Windows download is back at 0.2.6 for now. (Windows)** The bubble can
-come up as an empty black rectangle — the translation arrives, and there is
-nothing readable in it. Going back a version does not cure that on every
-machine, because the fault is older than 0.2.7 and only came to light there;
-it undoes the one thing 0.2.7 changed for Windows while the black bubble is
-being fixed properly. Until then a Windows copy keeps the free allowance it
-had rather than the sealed one described below.
+**The bubble is no longer a black rectangle. (Windows)** On some machines —
+virtual machines and remote desktops especially — every translation came up as
+an empty black box: the text had been fetched and there was simply nothing
+readable on screen. The bubble has no title bar and no border, and asking for a
+window that way turns out to be what some graphics drivers decline to draw at
+all. It now asks for an ordinary window, which is always drawn, and trims the
+frame off itself, so it looks exactly as it did before on the machines where it
+already worked. This was not new in 0.2.7; it needed a Windows machine of the
+wrong kind to show up.
 
 **The downloads have moved, and this version knows where.** They are published
 from their own place now rather than from the same page as the source code, so

@@ -32,8 +32,8 @@ use eframe::egui;
 
 use ::windows::Win32::Foundation::{HWND, POINT, RECT};
 use ::windows::Win32::Graphics::Gdi::{
-    CreateRoundRectRgn, GetMonitorInfoW, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITORINFO,
-    MonitorFromPoint, SetWindowRgn,
+    ClientToScreen, CreateRoundRectRgn, GetMonitorInfoW, HMONITOR, MONITOR_DEFAULTTONEAREST,
+    MONITORINFO, MonitorFromPoint, SetWindowRgn,
 };
 use ::windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
@@ -41,9 +41,9 @@ use ::windows::Win32::System::Com::{
 use ::windows::Win32::UI::HiDpi::GetDpiForWindow;
 use ::windows::Win32::UI::Shell::{IVirtualDesktopManager, VirtualDesktopManager};
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    GWL_EXSTYLE, GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect,
-    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW,
-    SetWindowPos, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    GWL_EXSTYLE, GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowLongPtrW,
+    GetWindowRect, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SetWindowLongPtrW, SetWindowPos, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 /// The bubble's window, once the toolkit has made one.
@@ -187,14 +187,60 @@ const BUBBLE_RADIUS: i32 = 10;
 /// rather than once per frame.
 static SHAPED: AtomicIsize = AtomicIsize::new(0);
 
-/// Cuts the bubble's window to the shape of the card drawn inside it.
+/// Where the bubble's contents start inside its window, in device pixels.
 ///
-/// Without this the card is a rounded rectangle painted on a square window:
-/// the corners outside the curve are still the window, still opaque, and still
-/// drawn — four little square ears where the desktop should be. Transparency
-/// is the usual answer and it is not available here (see
-/// [`crate::ui::TRANSPARENT_BUBBLE`]), so the window is given the curve
-/// instead, and the desktop manager stops drawing what falls outside it.
+/// Zero on a window with no frame. The bubble's window has one — see
+/// [`shape_bubble`] — so this is the title bar and the border that the frame
+/// puts between the window's own top-left corner and the first pixel the app
+/// gets to paint.
+fn frame_inset(window: HWND) -> (i32, i32) {
+    let mut outer = RECT::default();
+    if unsafe { GetWindowRect(window, &mut outer) }.is_err() {
+        return (0, 0);
+    }
+    let mut origin = POINT::default();
+    if !unsafe { ClientToScreen(window, &mut origin) }.as_bool() {
+        return (0, 0);
+    }
+    (origin.x - outer.left, origin.y - outer.top)
+}
+
+/// How far the bubble's window has to be placed above and left of where the
+/// bubble itself should appear, in the toolkit's points.
+///
+/// The toolkit positions the *window*; what the user sees is the client area
+/// inside it, which on Windows starts a title bar further down. Subtracting
+/// this puts the visible bubble where the cursor is rather than a frame's
+/// width away from it.
+pub fn frame_offset() -> (f32, f32) {
+    let Some(window) = bubble() else {
+        return (0.0, 0.0);
+    };
+    let (x, y) = frame_inset(window);
+    let dpi = unsafe { GetDpiForWindow(window) };
+    let scale = if dpi > 0 { dpi as f32 / 96.0 } else { 1.0 };
+    (x as f32 / scale, y as f32 / scale)
+}
+
+/// Cuts the bubble's window down to the card drawn inside it.
+///
+/// Two things at once, and they are the same cut.
+///
+/// The card is a rounded rectangle painted on a square window, so without a
+/// curve here the corners outside it are still the window, still opaque, and
+/// still drawn — four little square ears where the desktop should be.
+/// Transparency is the usual answer and it is not available here; see
+/// [`crate::ui::TRANSPARENT_BUBBLE`].
+///
+/// And the window has a title bar, which is not something a bubble should
+/// ever show. It has one because a window *without* one is, on this system,
+/// liable never to be painted at all: the toolkit builds a borderless window
+/// by keeping the frame and telling Windows the frame has no size, and where
+/// the graphics stack does not follow that — a virtual machine, a remote
+/// session, a driver that claims more than it does — what reaches the screen
+/// is a black rectangle. That is what 0.2.7 shipped. So the bubble's window
+/// is an ordinary framed one, which is always painted, and the frame is cut
+/// away here instead of never being asked for.
 ///
 /// Called every frame the bubble is on screen, because the bubble resizes to
 /// fit whatever was translated; it costs a rectangle comparison on the frames
@@ -203,15 +249,16 @@ pub fn shape_bubble() {
     let Some(window) = bubble() else {
         return;
     };
-    let mut rect = RECT::default();
-    if unsafe { GetWindowRect(window, &mut rect) }.is_err() {
+    let mut client = RECT::default();
+    if unsafe { GetClientRect(window, &mut client) }.is_err() {
         return;
     }
-    let width = rect.right - rect.left;
-    let height = rect.bottom - rect.top;
+    let width = client.right - client.left;
+    let height = client.bottom - client.top;
     if width <= 0 || height <= 0 {
         return;
     }
+    let (inset_x, inset_y) = frame_inset(window);
 
     // Both sizes in one word: two edges have to match, and comparing them
     // together is what makes this a single atomic read on a quiet frame.
@@ -222,10 +269,21 @@ pub fn shape_bubble() {
 
     let dpi = unsafe { GetDpiForWindow(window) };
     let scale = if dpi > 0 { dpi as f32 / 96.0 } else { 1.0 };
-    // The region is measured in whole device pixels and its right and bottom
-    // edges are exclusive, hence the extra pixel on each.
+    // The region is measured in whole device pixels, relative to the window
+    // rather than to the client area inside it, and its right and bottom
+    // edges are exclusive — hence the inset on two sides and the extra pixel
+    // on the other two.
     let diameter = (BUBBLE_RADIUS as f32 * scale * 2.0).round() as i32;
-    let region = unsafe { CreateRoundRectRgn(0, 0, width + 1, height + 1, diameter, diameter) };
+    let region = unsafe {
+        CreateRoundRectRgn(
+            inset_x,
+            inset_y,
+            inset_x + width + 1,
+            inset_y + height + 1,
+            diameter,
+            diameter,
+        )
+    };
     if region.is_invalid() {
         return;
     }

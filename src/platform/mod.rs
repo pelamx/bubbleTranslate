@@ -140,6 +140,15 @@ pub fn preferred_zoom(_native_pixels_per_point: f32) -> Option<f32> {
 #[cfg(not(target_os = "windows"))]
 pub fn shape_bubble() {}
 
+/// How far above and left of the bubble its window has to be placed.
+///
+/// Nothing anywhere but Windows, where the bubble's window keeps a frame it
+/// never shows; see [`windows::frame_offset`].
+#[cfg(not(target_os = "windows"))]
+pub fn frame_offset() -> (f32, f32) {
+    (0.0, 0.0)
+}
+
 /// Asks for the bubble to appear on every workspace.
 ///
 /// Nothing to do on macOS: a non-activating panel already shows on whichever
@@ -156,8 +165,8 @@ pub use linux::{
 
 #[cfg(target_os = "windows")]
 pub use windows::{
-    cursor_position, keep_on_all_workspaces, mark_as_notification, pointer_over, preferred_zoom,
-    shape_bubble, to_points,
+    cursor_position, frame_offset, keep_on_all_workspaces, mark_as_notification, pointer_over,
+    preferred_zoom, shape_bubble, to_points,
 };
 
 /// Whether selections can actually be watched here, and what to tell the user
