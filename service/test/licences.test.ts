@@ -79,8 +79,16 @@ describe("keys and tokens", () => {
 
   it("rejects a tampered token", async () => {
     const { token } = await grantToken(env, base(), "dev1");
-    const flipped = token.slice(0, -2) + (token.endsWith("A") ? "BB" : "AA");
-    expect(await open(env, flipped)).toBeNull();
+    const [payload, sig] = token.split(".");
+    // A character in the middle of the signature: the last one carries
+    // padding bits, and changing only those would leave the bytes the same.
+    const i = Math.floor(sig.length / 2);
+    const bad = sig.slice(0, i) + (sig[i] === "A" ? "B" : "A") + sig.slice(i + 1);
+    expect(await open(env, `${payload}.${bad}`)).toBeNull();
+    // And the claims: raising the plan's limit must not survive the signature.
+    const forged = btoa(JSON.stringify({ ...JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))), lim: 999 }))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    expect(await open(env, `${forged}.${sig}`)).toBeNull();
   });
 });
 
