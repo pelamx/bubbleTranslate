@@ -155,10 +155,9 @@ fn main() -> eframe::Result<()> {
         // read a selection has nothing else to offer anyone who lands in the
         // window instead. Not while starting in the background, which is what
         // a login item does: nobody asked for System Settings at login.
-        if !background
-            && let Some(fix) = &readiness.fix {
-                shell::open_url(fix.url);
-            }
+        if !background && let Some(fix) = &readiness.fix {
+            shell::open_url(fix.url);
+        }
     }
     let warning = (!readiness.ok).then(|| readiness.summary.clone());
 
@@ -307,14 +306,7 @@ fn license_status() -> i32 {
 
     match quota.limit(&licence.entitlement) {
         None => {
-            println!(
-                "allowance unlimited{}",
-                if quota.is_grandfathered() {
-                    " (install predates the free allowance)"
-                } else {
-                    ""
-                },
-            );
+            println!("allowance unlimited");
             println!("used      {} translated today", quota.used_today());
         }
         Some(limit) => {
@@ -356,10 +348,6 @@ fn license_status() -> i32 {
 #[cfg(debug_assertions)]
 fn reset_quota() -> i32 {
     let (_config, mut quota) = load_state();
-    if quota.is_grandfathered() {
-        println!("This install predates the allowance and is already unlimited.");
-        return 0;
-    }
     quota.reset_today();
     println!(
         "Allowance reset: {} free translations again today.",

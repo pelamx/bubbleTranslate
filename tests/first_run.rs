@@ -1,22 +1,17 @@
-//! A fresh install must never be born unlimited.
+//! The free allowance cannot be enlarged by touching its file.
 //!
-//! The counter treats "config.toml exists but usage.json does not" as an
-//! install that predates metering and grants it unlimited use forever. That
-//! rule is right for a genuine upgrade and catastrophic for a new install, so
-//! every command that writes the config has to write the counter in the same
-//! breath.
+//! The counter lives on the user's machine, so deleting it or editing it is
+//! the obvious way to ask for more. Deleting it once handed out unlimited use
+//! forever, because a config with no counter beside it was read as an install
+//! from before metering. Now a missing, edited or foreign counter reads as a
+//! day already spent, and only a machine with no files at all starts with ten.
 //!
-//! `--check` and `--translate` once wrote only the config, which meant the
-//! next launch grandfathered itself. `--check` is the command the installer
-//! prints at the end, so this was the ordinary first thing a user ran rather
-//! than an obscure corner.
-//!
-//! Driven through the real binary because the bug lived in the order two
-//! loads happen in at startup, which no unit test of either one can see. The
-//! commands here reach the network and are expected to fail without it;
-//! nothing below looks at their exit status, only at what they left on disk.
+//! Driven through the real binary because the rule depends on the order two
+//! files are loaded in at startup, which no unit test of either one can see.
+//! Some commands here reach the network and are expected to fail without it;
+//! nothing below looks at their exit status, only at what they report.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 const BIN: &str = env!("CARGO_BIN_EXE_bubbleTranslate");
@@ -42,12 +37,29 @@ impl Sandbox {
         Self { root }
     }
 
-    fn run(&self, args: &[&str]) {
-        Command::new(BIN)
+    fn run(&self, args: &[&str]) -> String {
+        let out = Command::new(BIN)
             .args(args)
             .env("BUBBLETRANSLATE_HOME", &self.root)
             .output()
             .expect("could not run the binary");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// How many free translations `--license` says are left today, or `None`
+    /// when it reports the install as unlimited.
+    fn left_today(&self) -> Option<u32> {
+        let report = self.run(&["--license"]);
+        assert!(
+            report.contains("allowance"),
+            "--license no longer reports the allowance; this test needs rewriting:\n{report}",
+        );
+        if report.contains("allowance unlimited") {
+            return None;
+        }
+        let line = report.lines().find(|l| l.starts_with("used")).expect("no `used` line");
+        let left = line.split(", ").nth(1).expect("no `left` in the `used` line");
+        Some(left.split_whitespace().next().unwrap().parse().unwrap())
     }
 
     fn config(&self) -> PathBuf {
@@ -65,22 +77,10 @@ impl Drop for Sandbox {
     }
 }
 
-fn grandfathered(usage: &Path) -> bool {
-    let raw = std::fs::read_to_string(usage).expect("no counter was written");
-    // Matched as text rather than parsed, so this test keeps working if the
-    // counter grows fields, and fails loudly if the flag is renamed.
-    assert!(
-        raw.contains("legacy_unlimited"),
-        "the counter has no legacy_unlimited field; this test needs rewriting",
-    );
-    raw.contains("\"legacy_unlimited\": true")
-}
-
-/// Every command that creates the config must create the counter too. If one
-/// of these leaves the counter missing, the *next* launch reads the lone
-/// config file as a pre-metering install and hands out unlimited use.
+/// Every command that creates the config must create the counter too, and a
+/// brand-new install starts metered with its full ten.
 #[test]
-fn no_command_leaves_the_config_without_a_counter() {
+fn a_new_install_starts_with_ten() {
     for (name, args) in [
         ("license", vec!["--license"]),
         ("check", vec!["--check"]),
@@ -88,50 +88,47 @@ fn no_command_leaves_the_config_without_a_counter() {
     ] {
         let box_ = Sandbox::new(name);
         box_.run(&args);
-
-        assert!(
-            box_.config().exists(),
-            "`{name}` did not write a config; this test is no longer exercising the bug",
-        );
-        assert!(
-            box_.usage().exists(),
-            "`{name}` wrote a config with no counter — the next launch will grandfather itself",
-        );
-        assert!(
-            !grandfathered(&box_.usage()),
-            "`{name}` produced a brand-new install that is already unlimited",
-        );
+        assert!(box_.config().exists(), "`{name}` did not write a config");
+        assert!(box_.usage().exists(), "`{name}` wrote a config with no counter");
+        // `--translate` may have spent one if the network was there.
+        let left = box_.left_today().expect("a new install is unlimited");
+        assert!(left >= 9, "`{name}` left a new install with {left}");
     }
 }
 
-/// The installer prints `--check` as the thing to run first, so this is the
-/// exact sequence a new user follows. It must end on the free tier.
+/// Deleting the counter used to grant unlimited use forever. It now grants
+/// nothing: today reads as spent, and the install stays metered.
 #[test]
-fn the_sequence_the_installer_prints_stays_metered() {
-    let box_ = Sandbox::new("installer");
-    box_.run(&["--check"]);
-    box_.run(&["--license"]);
-
-    assert!(
-        !grandfathered(&box_.usage()),
-        "checking the backends before the first launch bought a free upgrade",
-    );
+fn deleting_the_counter_buys_nothing() {
+    let box_ = Sandbox::new("deleted");
+    assert_eq!(box_.left_today(), Some(10));
+    std::fs::remove_file(box_.usage()).expect("no counter to remove");
+    assert_eq!(box_.left_today(), Some(0), "deleting the counter bought translations");
 }
 
-/// The rule this all rests on still has to work the way it was meant to: an
-/// install carrying a config from before metering, with no counter beside it,
-/// keeps its unlimited use. Fixing the bug above must not take that away.
+/// Editing the counter by hand breaks its seal, which also reads as spent.
 #[test]
-fn a_genuine_pre_metering_install_keeps_its_unlimited_use() {
-    let box_ = Sandbox::new("legacy");
-    box_.run(&["--license"]);
-    // What such an install looks like: the config it has always had, and no
-    // counter, because the build that wrote the config had none to write.
-    std::fs::remove_file(box_.usage()).expect("no counter to remove");
+fn editing_the_counter_buys_nothing() {
+    let box_ = Sandbox::new("edited");
+    assert_eq!(box_.left_today(), Some(10));
+    let raw = std::fs::read_to_string(box_.usage()).unwrap();
+    let edited = raw.replacen("\"used\": 0", "\"used\": 3", 1);
+    assert_ne!(raw, edited, "the counter's shape changed; this test needs rewriting");
+    std::fs::write(box_.usage(), edited).unwrap();
+    assert_eq!(box_.left_today(), Some(0), "an edited counter was trusted");
 
-    box_.run(&["--license"]);
-    assert!(
-        grandfathered(&box_.usage()),
-        "an install that predates the allowance lost its unlimited use",
-    );
+    // And the old flag that once meant "unlimited" means nothing now.
+    let raw = std::fs::read_to_string(box_.usage()).unwrap();
+    let flagged = raw.replacen("{", "{\n  \"legacy_unlimited\": true,", 1);
+    std::fs::write(box_.usage(), flagged).unwrap();
+    assert_eq!(box_.left_today(), Some(0), "the legacy flag still grants unlimited use");
+}
+
+/// An honest counter, written and read back on the same machine, keeps its
+/// count across launches -- the seal must not cost anyone who left it alone.
+#[test]
+fn an_untouched_counter_is_trusted() {
+    let box_ = Sandbox::new("untouched");
+    assert_eq!(box_.left_today(), Some(10));
+    assert_eq!(box_.left_today(), Some(10));
 }

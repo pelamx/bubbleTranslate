@@ -13,6 +13,16 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**Everyone on the free version gets ten translations a day, and only Pro is
+unlimited.** Copies installed before the daily limit existed used to keep
+unlimited use, but the app could only tell them apart by a file on the
+computer, and deleting or editing that file turned any copy into an unlimited
+one. That no longer works: if the file is deleted or has been changed, the app
+counts that day's ten as used, and a fresh ten arrives at midnight as usual.
+Nothing changes for anyone who left the file alone.
+
 ## 0.2.6 — 2026-09-21
 
 - The app's own interface now speaks English, Turkish and Spanish. Three

@@ -27,13 +27,12 @@ pub(super) fn account(
             licence.entitlement.clone(),
         )
     };
-    let (used, limit, left, grandfathered) = {
+    let (used, limit, left) = {
         let mut quota = licensing.quota.lock().unwrap();
         (
             quota.used_today(),
             quota.limit(&entitlement),
             quota.remaining(&entitlement),
-            quota.is_grandfathered(),
         )
     };
 
@@ -42,52 +41,30 @@ pub(super) fn account(
         None => {
             let cycle = entitlement.cycle;
             ui.label(
-                egui::RichText::new(if grandfathered {
-                    t(
-                        "● Unlimited translations",
-                        "● Sınırsız çeviri",
-                        "● Traducciones ilimitadas",
-                    )
-                    .to_string()
-                } else {
-                    match cycle {
-                        Some(cycle) => format!(
-                            "● {} ({}) — {}",
-                            plan.label(),
-                            cycle.label(),
-                            t(
-                                "unlimited translations",
-                                "sınırsız çeviri",
-                                "traducciones ilimitadas"
-                            ),
+                egui::RichText::new(match cycle {
+                    Some(cycle) => format!(
+                        "● {} ({}) — {}",
+                        plan.label(),
+                        cycle.label(),
+                        t(
+                            "unlimited translations",
+                            "sınırsız çeviri",
+                            "traducciones ilimitadas"
                         ),
-                        None => format!(
-                            "● {} — {}",
-                            plan.label(),
-                            t(
-                                "unlimited translations",
-                                "sınırsız çeviri",
-                                "traducciones ilimitadas"
-                            ),
+                    ),
+                    None => format!(
+                        "● {} — {}",
+                        plan.label(),
+                        t(
+                            "unlimited translations",
+                            "sınırsız çeviri",
+                            "traducciones ilimitadas"
                         ),
-                    }
+                    ),
                 })
                 .size(13.0)
                 .color(OK_GREEN),
             );
-            if grandfathered {
-                ui.label(
-                    egui::RichText::new(t(
-                        "This install predates the free allowance, so the limit does \
-                             not apply to it.",
-                        "Bu kurulum ücretsiz kotadan önceye ait, sınır ona uygulanmaz.",
-                        "Esta instalación es anterior al cupo gratuito, así que el \
-                             límite no se le aplica.",
-                    ))
-                    .size(11.0)
-                    .color(TEXT_MUTED),
-                );
-            }
             ui.label(
                 egui::RichText::new(match i18n::lang() {
                     UiLang::En => format!("{used} translated today"),

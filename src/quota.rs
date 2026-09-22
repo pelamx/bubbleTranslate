@@ -21,13 +21,18 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
-use crate::license::{Entitlement, now};
+use crate::license::{Entitlement, FREE_DAILY_TRANSLATIONS, now};
 
 /// How many recently translated strings stay free to repeat. Enough to cover
 /// re-selecting a phrase while reading around it; small enough that the whole
 /// day's work is not exempt.
 const RECENT_MEMORY: usize = 16;
+
+/// Mixed into the counter's seal. Not a secret -- it is in the binary -- but
+/// it keeps the seal from being a plain hash anyone could recompute by guess.
+const SEAL_SALT: &str = "bubbleTranslate.usage.v1";
 
 /// What to do with a selection that has already been captured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,7 +59,7 @@ impl std::fmt::Display for Verdict {
 
 /// The persisted half. Nothing here is derived from anything the user
 /// selected, which is what keeps this file uninteresting if it is ever read.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Counter {
     /// Days since the epoch, in local time — see [`local_day`]. Missing from
     /// a counter written by the build that metered once per install; a zero
@@ -71,11 +76,11 @@ struct Counter {
     /// When this install first ran a metered build.
     #[serde(default)]
     first_seen: u64,
-    /// Set once, on an install that predates metering: it keeps unlimited use
-    /// forever. Taking something away from people who already have it is the
-    /// one thing this feature cannot undo, so it does not try.
+    /// A hash of the fields above and this machine's id. A counter edited by
+    /// hand, copied from another machine or written by an older build does
+    /// not match it, and is read as a day already spent -- see [`Quota::load`].
     #[serde(default)]
-    legacy_unlimited: bool,
+    seal: String,
 }
 
 impl Default for Counter {
@@ -86,7 +91,7 @@ impl Default for Counter {
             used: 0,
             high_water_day: today,
             first_seen: now(),
-            legacy_unlimited: false,
+            seal: String::new(),
         }
     }
 }
@@ -95,75 +100,89 @@ pub struct Quota {
     counter: Counter,
     /// Hashes of what has been translated today. In memory only, on purpose.
     recent: Vec<u64>,
+    /// This machine's id, read once: the seal is recomputed on every save, and
+    /// on macOS reading the id means running a program.
+    machine: String,
 }
 
 impl Quota {
     /// Loads the counter, creating it on first run.
     ///
-    /// `config_existed` answers the one question that can only be asked once:
-    /// whether this machine was already running bubbleTranslate before metering
-    /// existed. It has to be sampled before [`crate::config::Config::load`],
-    /// which writes the file it is asking about.
+    /// The allowance lives on this machine, so the file is the thing someone
+    /// wanting more of it would edit or delete. Neither is allowed to pay:
     ///
-    /// A counter written by the build that metered once per install has no
-    /// `day`, so it reads as day zero and [`Self::roll`] starts a fresh day
-    /// from it. Someone who had spent their whole one-off trial arrives with
-    /// today's ten in hand, which is the generous reading and the only one
-    /// that does not punish an existing user for upgrading.
+    /// - A counter whose seal does not match -- edited, or copied from another
+    ///   machine -- is kept, but today is counted as spent. Tomorrow starts
+    ///   over as usual.
+    /// - No counter at all, on a machine that already has a config, is a
+    ///   deleted counter rather than a new install, and is treated the same.
+    /// - An unreadable counter, likewise.
+    ///
+    /// Only a machine with neither file is a first run with ten in hand.
+    /// `config_existed` has to be sampled before
+    /// [`crate::config::Config::load`], which writes the file it asks about.
+    ///
+    /// An honest user pays for this at most on the day their machine id
+    /// changes. The legacy flag older builds wrote is ignored: only Pro is
+    /// unlimited.
     pub fn load(config_existed: bool) -> Self {
-        let mut quota = match std::fs::read_to_string(path()).ok() {
-            Some(raw) => match serde_json::from_str::<Counter>(&raw) {
-                Ok(counter) => Self {
-                    counter,
-                    recent: Vec::new(),
-                },
-                Err(err) => {
-                    // A broken counter must never stop the app from starting,
-                    // and must never be read as "unlimited" either.
-                    eprintln!(
-                        "bubbleTranslate: {} is unreadable ({err}); starting a new count",
-                        path().display(),
-                    );
-                    Self::fresh(false)
-                }
-            },
-            // No counter file. Either a genuinely new install, or an existing
-            // one meeting a metered build for the first time — and the config
-            // file is what tells the two apart.
-            None => {
-                let quota = Self::fresh(config_existed);
-                if config_existed {
-                    crate::trace!("quota     existing install; unlimited use preserved");
-                }
-                quota.save();
-                quota
-            }
-        };
-        // First run under a build that has this field: date the install now
-        // rather than leaving it at zero, so it means something later.
-        if quota.counter.first_seen == 0 {
-            quota.counter.first_seen = now();
-            quota.save();
-        }
+        let machine = crate::license::device_id();
+        let raw = std::fs::read_to_string(path()).ok();
+        let mut quota = Self::open(raw.as_deref(), config_existed, machine);
+        quota.save();
         quota.roll();
         quota
     }
 
-    fn fresh(legacy_unlimited: bool) -> Self {
-        Self {
-            counter: Counter {
-                legacy_unlimited,
-                ..Counter::default()
+    /// The decision in [`Self::load`], without the disk.
+    fn open(raw: Option<&str>, config_existed: bool, machine: String) -> Self {
+        let (counter, trusted) = match raw {
+            Some(raw) => match serde_json::from_str::<Counter>(raw) {
+                // No seal at all is a counter from before the seal, taken as
+                // it is once so an upgrade costs nobody a day. Stripping the
+                // seal to get the same treatment buys no more than deleting
+                // both files does, which no local check can prevent.
+                Ok(counter) => {
+                    let trusted =
+                        counter.seal.is_empty() || counter.seal == seal(&counter, &machine);
+                    (counter, trusted)
+                }
+                Err(err) => {
+                    eprintln!(
+                        "bubbleTranslate: {} is unreadable ({err}); today counts as spent",
+                        path().display(),
+                    );
+                    (Counter::default(), false)
+                }
             },
+            None => (Counter::default(), !config_existed),
+        };
+        let mut quota = Self {
+            counter,
             recent: Vec::new(),
+            machine,
+        };
+        if quota.counter.first_seen == 0 {
+            quota.counter.first_seen = now();
         }
+        if !trusted {
+            crate::trace!("quota     counter missing or not sealed here; today counts as spent");
+            quota.spend_today();
+        }
+        quota
+    }
+
+    /// Marks today's allowance as used up, without touching any other day.
+    fn spend_today(&mut self) {
+        let today = local_day();
+        self.counter.day = today;
+        self.counter.high_water_day = self.counter.high_water_day.max(today);
+        self.counter.used = self.counter.used.max(FREE_DAILY_TRANSLATIONS);
+        self.recent.clear();
     }
 
     /// Translations a day, or `None` for unlimited.
     pub fn limit(&self, entitlement: &Entitlement) -> Option<u32> {
-        if self.counter.legacy_unlimited {
-            return None;
-        }
         entitlement.limit
     }
 
@@ -179,10 +198,6 @@ impl Quota {
         self.roll();
         self.limit(entitlement)
             .map(|limit| limit.saturating_sub(self.counter.used))
-    }
-
-    pub fn is_grandfathered(&self) -> bool {
-        self.counter.legacy_unlimited
     }
 
     /// Whether this selection may be translated, and whether it will be charged.
@@ -267,7 +282,11 @@ impl Quota {
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        if let Ok(json) = serde_json::to_string_pretty(&self.counter) {
+        let counter = Counter {
+            seal: seal(&self.counter, &self.machine),
+            ..self.counter.clone()
+        };
+        if let Ok(json) = serde_json::to_string_pretty(&counter) {
             // A failed write costs the user nothing worse than a count that
             // restarts next launch, so it is not worth interrupting them over.
             if let Err(err) = std::fs::write(&path, json) {
@@ -365,6 +384,26 @@ fn local_offset(unix: i64) -> i64 {
     }
 }
 
+/// The seal over a counter's values, for this machine.
+fn seal(counter: &Counter, machine: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(SEAL_SALT.as_bytes());
+    hasher.update(machine.as_bytes());
+    hasher.update(
+        format!(
+            "|{}|{}|{}|{}",
+            counter.day, counter.used, counter.high_water_day, counter.first_seen
+        )
+        .as_bytes(),
+    );
+    hasher
+        .finalize()
+        .iter()
+        .take(16)
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 fn digest(text: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     text.trim().hash(&mut hasher);
@@ -374,7 +413,7 @@ fn digest(text: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::license::{FREE_DAILY_TRANSLATIONS, Plan};
+    use crate::license::Plan;
 
     fn quota(used: u32, day: i64, high_water: i64) -> Quota {
         Quota {
@@ -383,9 +422,10 @@ mod tests {
                 used,
                 high_water_day: high_water,
                 first_seen: 0,
-                legacy_unlimited: false,
+                seal: String::new(),
             },
             recent: Vec::new(),
+            machine: "test-machine".into(),
         }
     }
 
@@ -416,7 +456,10 @@ mod tests {
         }
         assert!(matches!(
             q.verdict("something new", &free()),
-            Verdict::Capped { used: 10, limit: 10 },
+            Verdict::Capped {
+                used: 10,
+                limit: 10
+            },
         ));
     }
 
@@ -444,7 +487,11 @@ mod tests {
         // Yesterday, according to a clock that has been tampered with.
         q.counter.day = today - 3;
         q.roll();
-        assert_eq!(q.used_today(), FREE_DAILY_TRANSLATIONS, "winding back refilled it");
+        assert_eq!(
+            q.used_today(),
+            FREE_DAILY_TRANSLATIONS,
+            "winding back refilled it"
+        );
 
         // And back to the real date, which is still not a new day.
         q.counter.day = today - 3;
@@ -455,25 +502,68 @@ mod tests {
     }
 
     /// A counter written by the build that metered once per install still
-    /// loads. It has no day, so it reads as the distant past and today is a
-    /// fresh day for it: that install's spent trial becomes today's ten.
+    /// loads, and the flag that once meant unlimited use is simply ignored.
     #[test]
-    fn a_one_off_trial_counter_from_an_older_build_becomes_a_fresh_day() {
-        let old = r#"{"used":10,"first_seen":1750000000,"legacy_unlimited":false}"#;
-        let counter: Counter = serde_json::from_str(old).expect("an old counter still parses");
-        assert_eq!(counter.day, 0);
-        let mut q = Quota {
-            counter,
-            recent: Vec::new(),
-        };
-        assert_eq!(q.verdict("anything", &free()), Verdict::Allow);
-        assert_eq!(q.used_today(), 0);
-
-        // And the grandfathering flag survives, which matters far more: it is
-        // the one thing in this file that cannot be reconstructed if lost.
+    fn an_old_counter_still_parses_and_its_legacy_flag_means_nothing() {
         let legacy = r#"{"used":99,"legacy_unlimited":true}"#;
-        let counter: Counter = serde_json::from_str(legacy).unwrap();
-        assert!(counter.legacy_unlimited);
+        let q = Quota::open(Some(legacy), true, "m".into());
+        assert_eq!(q.limit(&free()), Some(FREE_DAILY_TRANSLATIONS));
+    }
+
+    #[test]
+    fn a_sealed_counter_is_trusted_on_the_machine_that_sealed_it() {
+        let mut counter = Counter::default();
+        counter.used = 3;
+        counter.seal = seal(&counter, "m");
+        let raw = serde_json::to_string(&counter).unwrap();
+        let mut q = Quota::open(Some(&raw), true, "m".into());
+        assert_eq!(q.used_today(), 3);
+    }
+
+    #[test]
+    fn an_edited_or_foreign_counter_reads_as_a_spent_day() {
+        let mut counter = Counter::default();
+        counter.used = 3;
+        counter.seal = seal(&counter, "m");
+        let raw = serde_json::to_string(&counter).unwrap();
+        // An old, unsealed counter is taken as it is.
+        let unsealed = r#"{"day":0,"used":3}"#;
+        let mut q = Quota::open(Some(unsealed), true, "m".into());
+        assert_eq!(q.remaining(&free()), Some(FREE_DAILY_TRANSLATIONS));
+        // Another machine's counter.
+        let mut q = Quota::open(Some(&raw), true, "other".into());
+        assert_eq!(q.remaining(&free()), Some(0));
+        // The same counter with its count lowered by hand.
+        let edited = raw.replace("\"used\":3", "\"used\":0");
+        let mut q = Quota::open(Some(&edited), true, "m".into());
+        assert_eq!(q.remaining(&free()), Some(0));
+    }
+
+    #[test]
+    fn a_missing_counter_is_new_only_on_a_new_machine() {
+        let mut fresh = Quota::open(None, false, "m".into());
+        assert_eq!(fresh.remaining(&free()), Some(FREE_DAILY_TRANSLATIONS));
+        let mut deleted = Quota::open(None, true, "m".into());
+        assert_eq!(deleted.remaining(&free()), Some(0));
+    }
+
+    #[test]
+    fn a_spent_day_is_only_today() {
+        let today = local_day();
+        let mut q = quota(0, today - 1, today - 1);
+        q.spend_today();
+        assert_eq!(q.remaining(&free()), Some(0));
+        // Tomorrow starts over as usual.
+        q.counter.day = today - 1;
+        q.counter.high_water_day = today - 1;
+        q.roll();
+        assert_eq!(q.remaining(&free()), Some(FREE_DAILY_TRANSLATIONS));
+    }
+
+    #[test]
+    fn pro_is_unlimited_whatever_the_counter_says() {
+        let q = Quota::open(None, true, "m".into());
+        assert_eq!(q.limit(&pro()), None);
     }
 
     /// Re-reading a sentence is one translation, not two. Without this, the
@@ -504,7 +594,10 @@ mod tests {
         for n in 0..5 {
             assert!(matches!(
                 q.verdict(&format!("try {n}"), &free()),
-                Verdict::Capped { used: 10, limit: 10 },
+                Verdict::Capped {
+                    used: 10,
+                    limit: 10
+                },
             ));
         }
     }
@@ -517,16 +610,10 @@ mod tests {
         assert_eq!(q.remaining(&pro()), None);
     }
 
-    /// Pro is unlimited, and an install that predates metering stays unlimited
-    /// whatever the entitlement says.
+    /// Pro is unlimited however much has been counted.
     #[test]
     fn unlimited_means_unlimited() {
         let mut q = today_quota(9_000);
         assert_eq!(q.verdict("anything", &pro()), Verdict::Allow);
-
-        let mut legacy = today_quota(9_000);
-        legacy.counter.legacy_unlimited = true;
-        assert_eq!(legacy.limit(&free()), None);
-        assert_eq!(legacy.verdict("anything", &free()), Verdict::Allow);
     }
 }
