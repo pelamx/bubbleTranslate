@@ -66,6 +66,18 @@ is caught rather than assumed safe.
 
 ## Releases
 
+**Run the build before publishing it.** `cargo test` passing is not a release
+test: the suite never opens a window, so it cannot see a bubble that comes up
+black, a translation that never arrives, or a tray icon that is not there. The
+binary that is about to be uploaded is the one to start — select text in
+another application, watch the bubble appear, and read the translation in it.
+A release that was only compiled has not been tested, and saying "the tests
+pass" about one is a way of not saying that.
+
+This is not optional and it is not a nicety to raise afterwards: it is 0.2.7
+for Windows, which shipped with a black bubble and no translation because the
+build was uploaded without ever being launched.
+
 **The Windows download is published as a zip, not as a bare `.exe`.** This is
 settled; it does not need asking again. A browser handed an unsigned `.exe`
 says it "isn't commonly downloaded" and throws it away unless the user digs it
