@@ -623,93 +623,119 @@ export default {
   },
 
   async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-    const { pathname } = url;
-    const dev = Boolean(env.DEV_MODE);
-
-    try {
-      // The operator's panel owns everything under /admin, including its own
-      // authentication. It answers null for anything else, so this cannot
-      // shadow a route below it.
-      const admin = await handleAdmin(env, request, url);
-      if (admin) return admin;
-
-      if (request.method === "GET") {
-        // The checkout domain is reviewed as a site in its own right: Paddle
-        // fetches it and looks for a real front page and the three policies.
-        // They are written once, on the marketing site, so this points at
-        // them rather than answering 404 and failing the review.
-        if (pathname === "/") return redirect(SITE + "/");
-        if (pathname === "/terms" || pathname === "/privacy" || pathname === "/refunds") {
-          return redirect(SITE + pathname);
-        }
-        if (pathname === "/buy") return buy(env, request, url);
-        if (pathname === "/account") {
-          return accountPage(pageContext(request, url), null, supportEmail(env));
-        }
-        // /welcome is where Paddle returns the buyer. It polls for the licence
-        // key using the ref in the query string.
-        if (pathname === "/welcome") {
-          const ctx = pageContext(request, url);
-          const ref = url.searchParams.get("ref") ?? "";
-          if (!ref) return redirect(withLang("/buy", ctx.lang));
-          const order = await orderByRef(env, ref);
-          const conversion =
-            env.GOOGLE_ADS_TAG_ID && env.GOOGLE_ADS_PURCHASE_LABEL && order && isCycle(order.cycle)
-              ? {
-                  tagId: env.GOOGLE_ADS_TAG_ID,
-                  sendTo: `${env.GOOGLE_ADS_TAG_ID}/${env.GOOGLE_ADS_PURCHASE_LABEL}`,
-                  value: USD_AMOUNT[order.cycle],
-                }
-              : null;
-          return donePage(ctx, ref, supportEmail(env), conversion);
-        }
-        if (pathname.startsWith("/v1/order/")) {
-          return orderStatus(env, pathname.slice("/v1/order/".length));
-        }
-        if (pathname === "/v1/pubkey" && dev) {
-          return json({ public_key_hex: (await keys(env)).publicHex });
-        }
-        return new Response("Not found.", { status: 404 });
-      }
-
-      if (request.method !== "POST") return refuse("Not found.", 404);
-
-      // Webhooks and browser form posts read their own bodies — one is signed
-      // over its raw bytes, the others are form-encoded — so they are routed
-      // before anything tries to parse the body as JSON.
-      switch (pathname) {
-        case "/webhooks/paddle":
-          return await paddleWebhook(env, request);
-        case "/checkout/paddle":
-          return await checkoutPaddle(env, request);
-        case "/account":
-          return await account(env, request, url);
-        case "/account/portal":
-          return await accountPortal(env, request, url);
-        case "/account/cancel":
-          return await accountCancel(env, request, url);
-      }
-
-      const body = await request.json().catch(() => ({}));
-      switch (pathname) {
-        case "/v1/ping":
-          return await ping(env, body);
-        case "/v1/activate":
-          return await activate(env, body);
-        case "/v1/refresh":
-          return await refresh(env, body);
-        case "/v1/deactivate":
-          return await deactivate(env, body);
-        case "/v1/dev/issue":
-          return dev ? await devIssue(env, body) : refuse("Not found.", 404);
-        default:
-          return refuse("Not found.", 404);
-      }
-    } catch (err) {
-      // Never leak internals into a string the app will show to a user.
-      console.error(err);
-      return refuse("The licence service had a problem. Please try again shortly.", 500);
-    }
+    return withSecurityHeaders(await route(request, env));
   },
 } satisfies ExportedHandler<Env>;
+
+/** Headers every response carries.
+ *
+ *  The account page shows a licence key and has a cancel button, so it must
+ *  not be framed by another site (clickjacking) and must not leak its address
+ *  in a Referer. HSTS because this host is only ever served over HTTPS; a
+ *  first visit over plain HTTP is the one an attacker on the network gets to
+ *  rewrite. Paddle's overlay is an iframe *inside* our page, which
+ *  `frame-ancestors` does not restrict. */
+function withSecurityHeaders(response: Response): Response {
+  const out = new Response(response.body, response);
+  out.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  out.headers.set("X-Content-Type-Options", "nosniff");
+  out.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  if ((out.headers.get("content-type") ?? "").includes("text/html")) {
+    out.headers.set("X-Frame-Options", "DENY");
+    out.headers.set("Content-Security-Policy", "frame-ancestors 'none'");
+  }
+  return out;
+}
+
+async function route(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const { pathname } = url;
+  const dev = Boolean(env.DEV_MODE);
+
+  try {
+    // The operator's panel owns everything under /admin, including its own
+    // authentication. It answers null for anything else, so this cannot
+    // shadow a route below it.
+    const admin = await handleAdmin(env, request, url);
+    if (admin) return admin;
+
+    if (request.method === "GET") {
+      // The checkout domain is reviewed as a site in its own right: Paddle
+      // fetches it and looks for a real front page and the three policies.
+      // They are written once, on the marketing site, so this points at
+      // them rather than answering 404 and failing the review.
+      if (pathname === "/") return redirect(SITE + "/");
+      if (pathname === "/terms" || pathname === "/privacy" || pathname === "/refunds") {
+        return redirect(SITE + pathname);
+      }
+      if (pathname === "/buy") return buy(env, request, url);
+      if (pathname === "/account") {
+        return accountPage(pageContext(request, url), null, supportEmail(env));
+      }
+      // /welcome is where Paddle returns the buyer. It polls for the licence
+      // key using the ref in the query string.
+      if (pathname === "/welcome") {
+        const ctx = pageContext(request, url);
+        const ref = url.searchParams.get("ref") ?? "";
+        // The page writes the ref back into itself, so only the shape
+        // `newOrderRef` mints is let through -- anything else is not an order.
+        if (!/^[0-9a-f]{32}$/.test(ref)) return redirect(withLang("/buy", ctx.lang));
+        const order = await orderByRef(env, ref);
+        const conversion =
+          env.GOOGLE_ADS_TAG_ID && env.GOOGLE_ADS_PURCHASE_LABEL && order && isCycle(order.cycle)
+            ? {
+                tagId: env.GOOGLE_ADS_TAG_ID,
+                sendTo: `${env.GOOGLE_ADS_TAG_ID}/${env.GOOGLE_ADS_PURCHASE_LABEL}`,
+                value: USD_AMOUNT[order.cycle],
+              }
+            : null;
+        return donePage(ctx, ref, supportEmail(env), conversion);
+      }
+      if (pathname.startsWith("/v1/order/")) {
+        return orderStatus(env, pathname.slice("/v1/order/".length));
+      }
+      if (pathname === "/v1/pubkey" && dev) {
+        return json({ public_key_hex: (await keys(env)).publicHex });
+      }
+      return new Response("Not found.", { status: 404 });
+    }
+
+    if (request.method !== "POST") return refuse("Not found.", 404);
+
+    // Webhooks and browser form posts read their own bodies — one is signed
+    // over its raw bytes, the others are form-encoded — so they are routed
+    // before anything tries to parse the body as JSON.
+    switch (pathname) {
+      case "/webhooks/paddle":
+        return await paddleWebhook(env, request);
+      case "/checkout/paddle":
+        return await checkoutPaddle(env, request);
+      case "/account":
+        return await account(env, request, url);
+      case "/account/portal":
+        return await accountPortal(env, request, url);
+      case "/account/cancel":
+        return await accountCancel(env, request, url);
+    }
+
+    const body = await request.json().catch(() => ({}));
+    switch (pathname) {
+      case "/v1/ping":
+        return await ping(env, body);
+      case "/v1/activate":
+        return await activate(env, body);
+      case "/v1/refresh":
+        return await refresh(env, body);
+      case "/v1/deactivate":
+        return await deactivate(env, body);
+      case "/v1/dev/issue":
+        return dev ? await devIssue(env, body) : refuse("Not found.", 404);
+      default:
+        return refuse("Not found.", 404);
+    }
+  } catch (err) {
+    // Never leak internals into a string the app will show to a user.
+    console.error(err);
+    return refuse("The licence service had a problem. Please try again shortly.", 500);
+  }
+}

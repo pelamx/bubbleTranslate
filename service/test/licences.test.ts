@@ -130,3 +130,23 @@ describe("activate / refresh", () => {
     expect((await post("/v1/refresh", { token, device: "m1" })).status).toBe(403);
   });
 });
+
+describe("pages", () => {
+  const get = (path: string) =>
+    worker.fetch(new Request(`https://api.bubbletranslate.app${path}`), env);
+
+  it("sends the welcome page only for a ref shaped like one we minted", async () => {
+    const bad = await get("/welcome?ref=%3Cimg%20src%3Dx%3E");
+    expect(bad.status).toBe(303);
+    const good = await get(`/welcome?ref=${"a".repeat(32)}`);
+    expect(good.status).toBe(200);
+  });
+
+  it("forbids framing and carries HSTS", async () => {
+    const res = await get("/account");
+    expect(res.headers.get("x-frame-options")).toBe("DENY");
+    expect(res.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    expect(res.headers.get("strict-transport-security")).toContain("max-age=");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+});
