@@ -73,6 +73,11 @@ export interface Env {
    *  404 rather than 401, so an unconfigured deployment does not advertise an
    *  admin panel to anyone scanning for one. */
   ADMIN_PASSWORD?: string;
+  /** The operator's own install ids and licence emails, comma-separated, left
+   *  out of the admin panel's counts so they show real users only. Secrets
+   *  rather than vars because the emails are personal. */
+  ADMIN_IGNORE_INSTALLS?: string;
+  ADMIN_IGNORE_EMAILS?: string;
 }
 
 export type Cycle = "monthly" | "yearly";

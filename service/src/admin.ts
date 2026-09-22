@@ -119,6 +119,17 @@ interface Stats {
   total: number;
 }
 
+/** A comma-separated secret as a JSON array, for `json_each(?)` in SQL. */
+function ignoreList(value: string | undefined): string {
+  return JSON.stringify(
+    (value ?? "").split(",").map((v) => v.trim().toLowerCase()).filter(Boolean),
+  );
+}
+
+/** Keeps the operator's own machines and licences out of the counts. */
+const NOT_MINE_INSTALL = `install NOT IN (SELECT value FROM json_each(?9))`;
+const NOT_MINE_LICENCE = `(email IS NULL OR LOWER(email) NOT IN (SELECT value FROM json_each(?9)))`;
+
 interface Usage {
   daily: number;
   weekly: number;
@@ -140,9 +151,9 @@ async function usage(env: Env): Promise<Usage> {
        SUM(CASE WHEN last_seen > ?2 AND plan = 'free' THEN 1 ELSE 0 END) AS free_weekly,
        SUM(CASE WHEN first_seen > ?2 THEN 1 ELSE 0 END) AS new_weekly,
        COUNT(*) AS total
-     FROM installs`,
+     FROM installs WHERE ${NOT_MINE_INSTALL}`,
   )
-    .bind(t - 2 * DAY, t - 8 * DAY, t - 31 * DAY)
+    .bind(t - 2 * DAY, t - 8 * DAY, t - 31 * DAY, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
     .first<Usage>();
   return {
     daily: row?.daily ?? 0,
@@ -168,11 +179,11 @@ async function osBreakdown(
             SUM(CASE WHEN first_seen > ?1 THEN 1 ELSE 0 END) AS fresh,
             SUM(CASE WHEN first_seen > ?2 THEN 1 ELSE 0 END) AS today
        FROM installs
-      WHERE last_seen > ?1 OR first_seen > ?1
+      WHERE (last_seen > ?1 OR first_seen > ?1) AND ${NOT_MINE_INSTALL}
       GROUP BY os
       ORDER BY active DESC, os ASC`,
   )
-    .bind(t - 8 * DAY, t - DAY)
+    .bind(t - 8 * DAY, t - DAY, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
     .all<{ os: string; active: number; fresh: number; today: number }>();
   return results ?? [];
 }
@@ -196,17 +207,17 @@ async function stats(env: Env): Promise<Stats> {
   // has not run out.
   const row = await env.DB.prepare(
     `SELECT
-       SUM(CASE WHEN status != 'refunded' AND expires_at > ?  THEN 1 ELSE 0 END) AS live,
-       SUM(CASE WHEN status != 'refunded' AND expires_at > ?  AND cycle = 'monthly' THEN 1 ELSE 0 END) AS monthly,
-       SUM(CASE WHEN status != 'refunded' AND expires_at > ?  AND cycle = 'yearly'  THEN 1 ELSE 0 END) AS yearly,
-       SUM(CASE WHEN status != 'refunded' AND expires_at > ?  AND provider = 'paddle' THEN 1 ELSE 0 END) AS paddle,
-       SUM(CASE WHEN status  = 'cancelled' AND expires_at > ? THEN 1 ELSE 0 END) AS winding_down,
-       SUM(CASE WHEN status != 'refunded' AND expires_at > ?  AND expires_at < ? THEN 1 ELSE 0 END) AS expiring,
-       SUM(CASE WHEN created_at > ? THEN 1 ELSE 0 END) AS fresh,
+       SUM(CASE WHEN status != 'refunded' AND expires_at > ?1 THEN 1 ELSE 0 END) AS live,
+       SUM(CASE WHEN status != 'refunded' AND expires_at > ?1 AND cycle = 'monthly' THEN 1 ELSE 0 END) AS monthly,
+       SUM(CASE WHEN status != 'refunded' AND expires_at > ?1 AND cycle = 'yearly'  THEN 1 ELSE 0 END) AS yearly,
+       SUM(CASE WHEN status != 'refunded' AND expires_at > ?1 AND provider = 'paddle' THEN 1 ELSE 0 END) AS paddle,
+       SUM(CASE WHEN status  = 'cancelled' AND expires_at > ?1 THEN 1 ELSE 0 END) AS winding_down,
+       SUM(CASE WHEN status != 'refunded' AND expires_at > ?1 AND expires_at < ?2 THEN 1 ELSE 0 END) AS expiring,
+       SUM(CASE WHEN created_at > ?3 THEN 1 ELSE 0 END) AS fresh,
        COUNT(*) AS total
-     FROM licences`,
+     FROM licences WHERE ${NOT_MINE_LICENCE}`,
   )
-    .bind(t, t, t, t, t, t, t + 7 * DAY, t - 30 * DAY)
+    .bind(t, t + 7 * DAY, t - 30 * DAY, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_EMAILS))
     .first<Stats>();
 
   // SUM over an empty table is NULL, not 0.
@@ -461,24 +472,24 @@ async function pulse(env: Env): Promise<Pulse> {
          SUM(CASE WHEN first_seen > ?1 THEN 1 ELSE 0 END) AS today,
          SUM(CASE WHEN first_seen > ?2 AND first_seen <= ?1 THEN 1 ELSE 0 END) AS yesterday,
          SUM(CASE WHEN last_seen  > ?1 THEN 1 ELSE 0 END) AS active
-       FROM installs`,
+       FROM installs WHERE ${NOT_MINE_INSTALL}`,
     )
-      .bind(t - DAY, t - 2 * DAY)
+      .bind(t - DAY, t - 2 * DAY, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
       .first<{ today: number; yesterday: number; active: number }>(),
     env.DB.prepare(
       `SELECT
          SUM(CASE WHEN created_at > ?1 THEN 1 ELSE 0 END) AS today,
          SUM(CASE WHEN created_at > ?2 AND created_at <= ?1 THEN 1 ELSE 0 END) AS yesterday
-       FROM licences`,
+       FROM licences WHERE ${NOT_MINE_LICENCE}`,
     )
-      .bind(t - DAY, t - 2 * DAY)
+      .bind(t - DAY, t - 2 * DAY, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_EMAILS))
       .first<{ today: number; yesterday: number }>(),
     env.DB.prepare(
       `SELECT CAST((?1 - first_seen) / ${DAY} AS INTEGER) AS ago, COUNT(*) AS n
-         FROM installs WHERE first_seen > ?1 - 14 * ${DAY}
+         FROM installs WHERE first_seen > ?1 - 14 * ${DAY} AND ${NOT_MINE_INSTALL}
         GROUP BY ago`,
     )
-      .bind(t)
+      .bind(t, null, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
       .all<{ ago: number; n: number }>(),
   ]);
   const series = new Array<number>(14).fill(0);
