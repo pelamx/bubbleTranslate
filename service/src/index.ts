@@ -37,7 +37,6 @@ import {
   licenceByKey,
   licenceById,
   licenceByProviderRef,
-  markOrderFailed,
   newOrderRef,
   orderByRef,
   refusalFor,
