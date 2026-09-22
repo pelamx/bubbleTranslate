@@ -472,11 +472,10 @@ pub(super) fn find_fallback_fonts() -> Vec<(String, Vec<u8>)> {
             .output()
         {
             let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !path.is_empty() {
-                if let Ok(bytes) = std::fs::read(&path) {
+            if !path.is_empty()
+                && let Ok(bytes) = std::fs::read(&path) {
                     found.push((path, bytes));
                 }
-            }
         }
     }
 

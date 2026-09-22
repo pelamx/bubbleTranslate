@@ -387,13 +387,12 @@ impl BubbleApp {
             popup_open = combo.inner.is_some();
             chosen = picked;
         });
-        if let Some(code) = chosen {
-            if code != cfg.target_lang {
+        if let Some(code) = chosen
+            && code != cfg.target_lang {
                 cfg.target_lang = code;
                 dirty = true;
                 retranslate = true;
             }
-        }
         ui.add_space(8.0);
 
         ui.horizontal(|ui| {

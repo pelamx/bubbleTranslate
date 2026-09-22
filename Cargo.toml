@@ -98,3 +98,9 @@ winresource = "0.1"
 # binary — a dev-dependency's features are not unified into a normal build.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 x11rb = { version = "0.13", features = ["xfixes", "xtest"] }
+
+# Clippy runs in CI with warnings as errors. The one lint turned off: the
+# pointer caches and gesture state are tuples of options by design, and naming
+# each shape would add a type per call site that says less than the tuple does.
+[lints.clippy]
+type_complexity = "allow"

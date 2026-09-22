@@ -2,6 +2,9 @@
 # service's tests, on every push and pull request. Each system has its own
 # platform code, so a change built on one machine is proved on the other two
 # here rather than on release day.
+#
+# Ubuntu is pinned rather than `ubuntu-latest`, so a runner image moving to a
+# new release is a change made here on purpose, not a surprise red build.
 name: test
 
 on:
@@ -14,17 +17,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --locked
       - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets -- -D warnings
 
   service:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: service

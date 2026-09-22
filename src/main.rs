@@ -155,11 +155,10 @@ fn main() -> eframe::Result<()> {
         // read a selection has nothing else to offer anyone who lands in the
         // window instead. Not while starting in the background, which is what
         // a login item does: nobody asked for System Settings at login.
-        if !background {
-            if let Some(fix) = &readiness.fix {
+        if !background
+            && let Some(fix) = &readiness.fix {
                 shell::open_url(fix.url);
             }
-        }
     }
     let warning = (!readiness.ok).then(|| readiness.summary.clone());
 

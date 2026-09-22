@@ -172,8 +172,8 @@ impl Translator {
                     // the user wait on a second sleep.
                     if idx == 0 {
                         std::thread::sleep(Duration::from_millis(500));
-                        if let Ok(body) = self.get_text(url) {
-                            if let Ok((translated, detected)) = parse_google(&body) {
+                        if let Ok(body) = self.get_text(url)
+                            && let Ok((translated, detected)) = parse_google(&body) {
                                 return Ok(Translation {
                                     text: translated,
                                     source_lang: if detected.is_empty() {
@@ -184,7 +184,6 @@ impl Translator {
                                     provider: Provider::Google,
                                 });
                             }
-                        }
                     }
                 }
                 Err(err) => last = err,
@@ -326,11 +325,10 @@ impl Translator {
             "text": [text],
             "target_lang": target_code,
         });
-        if source != "auto" && !source.is_empty() {
-            if let Some(src) = deepl_source(source) {
+        if source != "auto" && !source.is_empty()
+            && let Some(src) = deepl_source(source) {
                 payload["source_lang"] = Value::String(src);
             }
-        }
         let body = payload.to_string();
 
         let response = self
@@ -557,10 +555,12 @@ mod tests {
 
     #[test]
     fn a_failed_provider_hands_over_to_the_next_and_every_reason_comes_back() {
-        let mut cfg = Config::default();
-        cfg.providers = vec![Provider::MyMemory, Provider::DeepL];
-        cfg.deepl_api_key = "abc:fx".into();
-        cfg.target_lang = "fa".into();
+        let cfg = Config {
+            providers: vec![Provider::MyMemory, Provider::DeepL],
+            deepl_api_key: "abc:fx".into(),
+            target_lang: "fa".into(),
+            ..Config::default()
+        };
         let long = "x".repeat(MYMEMORY_MAX_BYTES + 1);
 
         let failures = Translator::new().translate(&long, &cfg).unwrap_err();
@@ -573,9 +573,11 @@ mod tests {
 
     #[test]
     fn deepl_without_a_key_is_not_tried_at_all() {
-        let mut cfg = Config::default();
-        cfg.providers = vec![Provider::DeepL, Provider::MyMemory];
-        cfg.deepl_api_key = "   ".into();
+        let cfg = Config {
+            providers: vec![Provider::DeepL, Provider::MyMemory],
+            deepl_api_key: "   ".into(),
+            ..Config::default()
+        };
         let long = "x".repeat(MYMEMORY_MAX_BYTES + 1);
         let failures = Translator::new().translate(&long, &cfg).unwrap_err();
         assert_eq!(failures.len(), 1);
@@ -584,8 +586,10 @@ mod tests {
 
     #[test]
     fn an_empty_chain_says_so_rather_than_failing_silently() {
-        let mut cfg = Config::default();
-        cfg.providers.clear();
+        let cfg = Config {
+            providers: Vec::new(),
+            ..Config::default()
+        };
         let failures = Translator::new().translate("hello", &cfg).unwrap_err();
         assert_eq!(failures.len(), 1);
         assert!(failures[0].1.to_string().contains("no providers enabled"));
@@ -593,9 +597,11 @@ mod tests {
 
     #[test]
     fn mymemory_refuses_a_same_language_pair_before_asking() {
-        let mut cfg = Config::default();
-        cfg.source_lang = "en".into();
-        cfg.target_lang = "en".into();
+        let cfg = Config {
+            source_lang: "en".into(),
+            target_lang: "en".into(),
+            ..Config::default()
+        };
         let err = Translator::new()
             .translate_with(Provider::MyMemory, "hello", &cfg)
             .unwrap_err();

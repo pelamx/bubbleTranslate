@@ -435,8 +435,10 @@ mod tests {
     #[test]
     fn the_trigger_key_survives_a_round_trip() {
         for key in TriggerKey::ALL {
-            let mut cfg = Config::default();
-            cfg.trigger_key = *key;
+            let cfg = Config {
+                trigger_key: *key,
+                ..Config::default()
+            };
             let back: Config = toml::from_str(&toml::to_string_pretty(&cfg).unwrap()).unwrap();
             assert_eq!(back.trigger_key, *key);
         }
@@ -449,8 +451,10 @@ mod tests {
         let old: Config = toml::from_str("target_lang = \"tr\"\n").unwrap();
         assert_eq!(old.theme, BubbleTheme::Slate);
         for theme in BubbleTheme::ALL {
-            let mut cfg = Config::default();
-            cfg.theme = *theme;
+            let cfg = Config {
+                theme: *theme,
+                ..Config::default()
+            };
             let back: Config = toml::from_str(&toml::to_string_pretty(&cfg).unwrap()).unwrap();
             assert_eq!(back.theme, *theme);
         }

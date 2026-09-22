@@ -373,7 +373,7 @@ impl BubbleApp {
                 return false;
             };
             crate::platform::mark_as_notification(x11.window as u32);
-            return true;
+            true
         }
         #[cfg(target_os = "windows")]
         {

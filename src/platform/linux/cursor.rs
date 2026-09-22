@@ -42,11 +42,10 @@ pub fn screen_size() -> Option<(f64, f64)> {
     static CACHE: Mutex<Option<(Instant, Option<(f64, f64)>)>> = Mutex::new(None);
 
     let mut cache = CACHE.lock().ok()?;
-    if let Some((at, size)) = *cache {
-        if at.elapsed() < TTL {
+    if let Some((at, size)) = *cache
+        && at.elapsed() < TTL {
             return size;
         }
-    }
     let size = match backend() {
         Backend::X11Primary => super::x11::screen_size(),
         _ => compositor_screen_size(),
@@ -102,9 +101,7 @@ fn hyprctl(args: &[&str]) -> Option<std::process::Output> {
 /// scale; logical size is the quotient, and that is the unit `cursorpos`
 /// answers in.
 fn hyprland_monitor() -> Option<MonitorInfo> {
-    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
-        return None;
-    }
+    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE")?;
     let out = hyprctl(&["monitors", "-j"])?;
     if !out.status.success() {
         return None;
@@ -135,11 +132,10 @@ fn hyprland_monitor() -> Option<MonitorInfo> {
         let Some((x, y, info)) = read(monitor) else {
             continue;
         };
-        if let Some((cx, cy)) = cursor {
-            if cx >= x && cx < x + info.width && cy >= y && cy < y + info.height {
+        if let Some((cx, cy)) = cursor
+            && cx >= x && cx < x + info.width && cy >= y && cy < y + info.height {
                 return Some(info);
             }
-        }
         if first.is_none() {
             first = Some(info);
         }
