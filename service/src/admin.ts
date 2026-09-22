@@ -175,7 +175,7 @@ function usersTable(list: UserRow[]): string {
       const mine = u.mine === 1;
       const badge = mine
         ? `<span class="badge you">you</span>`
-        : u.first_seen > t - DAY
+        : u.first_seen >= startOfToday()
           ? `<span class="badge new">new</span>`
           : u.last_seen > t - 2 * DAY
             ? `<span class="badge on">active</span>`
@@ -268,13 +268,13 @@ async function osBreakdown(
     `SELECT COALESCE(os, 'unknown') AS os,
             SUM(CASE WHEN last_seen  > ?1 THEN 1 ELSE 0 END) AS active,
             SUM(CASE WHEN first_seen > ?1 THEN 1 ELSE 0 END) AS fresh,
-            SUM(CASE WHEN first_seen > ?2 THEN 1 ELSE 0 END) AS today
+            SUM(CASE WHEN first_seen >= ?2 THEN 1 ELSE 0 END) AS today
        FROM installs
       WHERE (last_seen > ?1 OR first_seen > ?1) AND ${NOT_MINE_INSTALL}
       GROUP BY os
       ORDER BY active DESC, os ASC`,
   )
-    .bind(t - 8 * DAY, t - DAY, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
+    .bind(t - 8 * DAY, startOfToday(), null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
     .all<{ os: string; active: number; fresh: number; today: number }>();
   return results ?? [];
 }
@@ -548,36 +548,44 @@ interface Pulse {
   active_today: number;
   subs_today: number;
   subs_yesterday: number;
-  /** New installs per day, oldest first; the last entry is the last 24 hours. */
+  /** New installs per day, oldest first; the last entry is today. */
   series: number[];
 }
 
-/** What changed: the last 24 hours against the 24 before them. "Today" is a
- *  rolling day rather than a calendar one, so the comparison is never between
- *  a full yesterday and a morning. */
+/** The operator reads the panel in Turkey, which has been UTC+3 all year
+ *  since 2016, so "today" starts at midnight there. */
+const LOCAL_OFFSET = 3 * 3600;
+
+/** Unix time of the most recent local midnight. */
+function startOfToday(): number {
+  return Math.floor((now() + LOCAL_OFFSET) / DAY) * DAY - LOCAL_OFFSET;
+}
+
+/** What changed: today against yesterday, as calendar days in local time. */
 async function pulse(env: Env): Promise<Pulse> {
-  const t = now();
+  const t = startOfToday();
   const [inst, subs, days] = await Promise.all([
     env.DB.prepare(
       `SELECT
-         SUM(CASE WHEN first_seen > ?1 THEN 1 ELSE 0 END) AS today,
-         SUM(CASE WHEN first_seen > ?2 AND first_seen <= ?1 THEN 1 ELSE 0 END) AS yesterday,
-         SUM(CASE WHEN last_seen  > ?1 THEN 1 ELSE 0 END) AS active
+         SUM(CASE WHEN first_seen >= ?1 THEN 1 ELSE 0 END) AS today,
+         SUM(CASE WHEN first_seen >= ?2 AND first_seen < ?1 THEN 1 ELSE 0 END) AS yesterday,
+         SUM(CASE WHEN last_seen  >= ?1 THEN 1 ELSE 0 END) AS active
        FROM installs WHERE ${NOT_MINE_INSTALL}`,
     )
-      .bind(t - DAY, t - 2 * DAY, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
+      .bind(t, t - DAY, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
       .first<{ today: number; yesterday: number; active: number }>(),
     env.DB.prepare(
       `SELECT
-         SUM(CASE WHEN created_at > ?1 THEN 1 ELSE 0 END) AS today,
-         SUM(CASE WHEN created_at > ?2 AND created_at <= ?1 THEN 1 ELSE 0 END) AS yesterday
+         SUM(CASE WHEN created_at >= ?1 THEN 1 ELSE 0 END) AS today,
+         SUM(CASE WHEN created_at >= ?2 AND created_at < ?1 THEN 1 ELSE 0 END) AS yesterday
        FROM licences WHERE ${NOT_MINE_LICENCE}`,
     )
-      .bind(t - DAY, t - 2 * DAY, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_EMAILS))
+      .bind(t, t - DAY, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_EMAILS))
       .first<{ today: number; yesterday: number }>(),
     env.DB.prepare(
-      `SELECT CAST((?1 - first_seen) / ${DAY} AS INTEGER) AS ago, COUNT(*) AS n
-         FROM installs WHERE first_seen > ?1 - 14 * ${DAY} AND ${NOT_MINE_INSTALL}
+      // Days before today: 0 for anything since midnight, 1 for yesterday.
+      `SELECT CAST((?1 + ${DAY} - 1 - first_seen) / ${DAY} AS INTEGER) AS ago, COUNT(*) AS n
+         FROM installs WHERE first_seen >= ?1 - 13 * ${DAY} AND ${NOT_MINE_INSTALL}
         GROUP BY ago`,
     )
       .bind(t, null, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
@@ -702,7 +710,7 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
   const bars = p.series
     .map((n, i) => {
       const ago = 13 - i;
-      const when = ago === 0 ? "last 24h" : `${ago} days ago`;
+      const when = ago === 0 ? "today" : `${ago} days ago`;
       return `<div style="height:${Math.round((n / peak) * 100)}%" title="${when}: ${n}"></div>`;
     })
     .join("");
@@ -739,15 +747,15 @@ async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<
      }
 
      <section class="card">
-       <p class="label">Last 24 hours</p>
+       <p class="label">Today <span style="text-transform:none;font-weight:400">(Turkey time, vs yesterday)</span></p>
        <div class="grid">
-         <div class="stat"><div class="k">New installs</div><div class="v">${p.installs_today}</div>
+         <div class="stat"><div class="k">New users <span class="muted">(downloaded &amp; opened)</span></div><div class="v">${p.installs_today}</div>
            ${delta(p.installs_today, p.installs_yesterday)}
            <div>${osChips((o) => o.today)}</div></div>
-         <div class="stat"><div class="k">New subscribers</div><div class="v">${p.subs_today}</div>
+         <div class="stat"><div class="k">New paying customers</div><div class="v">${p.subs_today}</div>
            ${delta(p.subs_today, p.subs_yesterday)}</div>
-         <div class="stat"><div class="k">Active installs</div><div class="v">${p.active_today}</div>
-           <div class="sub">opened the app in the last 24h</div></div>
+         <div class="stat"><div class="k">Active users</div><div class="v">${p.active_today}</div>
+           <div class="sub">opened the app today</div></div>
        </div>
      </section>
 
