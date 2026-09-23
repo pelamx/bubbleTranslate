@@ -118,6 +118,25 @@ async function markMine(env: Env, request: Request): Promise<Response> {
   return new Response(null, { status: 303, headers: { location: "/admin#users" } });
 }
 
+/** Marks a licence as the operator's own -- a test purchase -- or takes the
+ *  mark off. Only the counts change: the licence itself is left exactly as it
+ *  was, and still works. */
+async function markMineLicence(env: Env, request: Request): Promise<Response> {
+  if (!sameOrigin(request)) return new Response("Cross-site request refused.", { status: 403 });
+  const form = await request.formData();
+  const id = String(form.get("id") ?? "").trim();
+  if (id) {
+    if (form.get("mine") === "1") {
+      await env.DB.prepare("INSERT OR IGNORE INTO ignored_licences (licence_id, created_at) VALUES (?, ?)")
+        .bind(id, now())
+        .run();
+    } else {
+      await env.DB.prepare("DELETE FROM ignored_licences WHERE licence_id = ?").bind(id).run();
+    }
+  }
+  return new Response(null, { status: 303, headers: { location: "/admin#licences" } });
+}
+
 // -- acting on it ------------------------------------------------------------
 
 /** Creates a licence nobody paid for.
@@ -338,6 +357,7 @@ export async function handleAdmin(
     const action = pathname.slice("/admin/".length);
     if (action === "issue") return issue(env, request);
     if (action === "mine") return markMine(env, request);
+    if (action === "mine-licence") return markMineLicence(env, request);
     if (["extend", "seats", "rotate", "end", "update", "delete"].includes(action)) {
       return act(env, request, action);
     }

@@ -48,6 +48,7 @@ async function salesIn(env: Env, from: number, to: number): Promise<Sales> {
     `SELECT cycle, COUNT(*) AS n
        FROM orders
       WHERE status = 'paid' AND created_at >= ? AND created_at < ?
+        AND (licence_id IS NULL OR licence_id NOT IN (SELECT licence_id FROM ignored_licences))
       GROUP BY cycle`,
   )
     .bind(from, to)
@@ -70,6 +71,7 @@ export async function gather(env: Env, now: number): Promise<Metrics> {
     `SELECT cycle, COUNT(*) AS n
        FROM licences
       WHERE status = 'active' AND expires_at > ? AND provider = 'paddle'
+        AND id NOT IN (SELECT licence_id FROM ignored_licences)
       GROUP BY cycle`,
   )
     .bind(now)

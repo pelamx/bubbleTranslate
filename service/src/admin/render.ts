@@ -187,7 +187,7 @@ export function rowsTable(rows: Row[]): string {
     .map(
       (r) => `
       <tr>
-        <td><code>${escapeHtml(r.id)}</code></td>
+        <td><code>${escapeHtml(r.id)}</code>${r.mine ? ` <span class="badge you">you</span>` : ""}</td>
         <td>${escapeHtml(r.email ?? "—")}</td>
         <td>${escapeHtml(r.cycle)}${
           isPaddle(r) && r.provider_ref
@@ -200,6 +200,11 @@ export function rowsTable(rows: Row[]): string {
         )}</span></td>
         <td class="num">${r.seats}/${r.seat_limit}</td>
         <td>
+          <form class="inline" method="post" action="/admin/mine-licence">
+            <input type="hidden" name="id" value="${escapeHtml(r.id)}">
+            <input type="hidden" name="mine" value="${r.mine ? "0" : "1"}">
+            <button class="quiet" type="submit">${r.mine ? "Not me" : "This is me"}</button>
+          </form>
           <form class="inline" method="post" action="/admin/extend">
             <input type="hidden" name="id" value="${escapeHtml(r.id)}">
             <input type="hidden" name="days" value="30">
@@ -563,7 +568,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
 
      ${failureTable}
 
-     <details class="card"${query ? " open" : ""}>
+     <details class="card" id="licences"${query ? " open" : ""}>
        <summary>Licences${query ? ` — results for “${escapeHtml(query)}”` : ""}</summary>
        <div class="body">
          <form method="get" action="/admin" class="row">
@@ -574,6 +579,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
            </div>
            <button type="submit">Search</button>
          </form>
+         <p class="muted">Press <b>This is me</b> on your own test purchases: they stay
+           listed, tagged <b>you</b>, but are never counted as a customer or a sale.</p>
          ${licenceGroup(rows.filter(isPaddle), true, !!query)}
          ${licenceGroup(rows.filter((r) => !isPaddle(r)), false, !!query)}
        </div>

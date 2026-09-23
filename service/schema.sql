@@ -163,3 +163,10 @@ CREATE TABLE IF NOT EXISTS ignored_installs (
   install     TEXT PRIMARY KEY,
   created_at  INTEGER NOT NULL
 );
+
+-- Licences the operator marked as their own -- a test purchase, most of all.
+-- Still listed and still working, but never counted as a customer or a sale.
+CREATE TABLE IF NOT EXISTS ignored_licences (
+  licence_id  TEXT PRIMARY KEY,
+  created_at  INTEGER NOT NULL
+);

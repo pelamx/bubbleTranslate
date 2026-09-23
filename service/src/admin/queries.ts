@@ -26,7 +26,8 @@ export function ignoreList(value: string | undefined): string {
 /** Keeps the operator's own machines and licences out of the counts. */
 export const NOT_MINE_INSTALL = `install NOT IN (SELECT value FROM json_each(?9))
   AND install NOT IN (SELECT install FROM ignored_installs)`;
-export const NOT_MINE_LICENCE = `(email IS NULL OR LOWER(email) NOT IN (SELECT value FROM json_each(?9)))`;
+export const NOT_MINE_LICENCE = `(email IS NULL OR LOWER(email) NOT IN (SELECT value FROM json_each(?9)))
+  AND id NOT IN (SELECT licence_id FROM ignored_licences)`;
 
 export const PLATFORMS = ["windows", "linux", "macos"] as const;
 
@@ -247,6 +248,7 @@ export async function licenceOs(env: Env): Promise<LicenceOsRow[]> {
        FROM licences l LEFT JOIN seats s ON s.licence_id = l.id
       WHERE l.provider = 'paddle'
         AND (l.email IS NULL OR LOWER(l.email) NOT IN (SELECT value FROM json_each(?9)))
+        AND l.id NOT IN (SELECT licence_id FROM ignored_licences)
       GROUP BY COALESCE(s.os, 'unknown')`,
   )
     .bind(t, startOfToday(), null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_EMAILS))
@@ -305,13 +307,16 @@ export async function stats(env: Env): Promise<Stats> {
 export interface Row extends Licence {
   created_at: number;
   seats: number;
+  /** 1 when the operator marked it as their own. */
+  mine: number;
 }
 
 export const SELECT_ROWS = `
   SELECT l.id, l.plan, l.cycle, l.translation_limit, l.status, l.seat_limit,
          l.expires_at, l.renews_at, l.email, l.provider, l.provider_ref,
          l.created_at,
-         (SELECT COUNT(*) FROM seats s WHERE s.licence_id = l.id) AS seats
+         (SELECT COUNT(*) FROM seats s WHERE s.licence_id = l.id) AS seats,
+         EXISTS (SELECT 1 FROM ignored_licences i WHERE i.licence_id = l.id) AS mine
     FROM licences l`;
 
 /** Finds licences by whatever the operator pasted into the box.
