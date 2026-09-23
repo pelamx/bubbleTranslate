@@ -1,6 +1,6 @@
 // What the panel draws: the dashboard page and its tables.
 
-import { type Env, supportEmail } from "../env";
+import { type Env, USD_AMOUNT, supportEmail } from "../env";
 import { DEFAULT_SEATS, isLive } from "../licences";
 import { escapeHtml, page } from "../pages";
 import { now } from "../tokens";
@@ -13,6 +13,17 @@ import {
   OsRow,
   PLATFORMS,
   Row,
+  type AdminLogRow,
+  type Downloads,
+  type EndingRow,
+  type Revenue,
+  type WebhookRow,
+  adminLog,
+  endingSoon,
+  proShare,
+  renews,
+  revenue,
+  webhookEvents,
   UserRow,
   compareVersions,
   downloads,
@@ -75,6 +86,15 @@ export function usersTable(list: UserRow[]): string {
     ${body}
   </table></div>`;
 }
+/** An `onclick` asking the operator to confirm, naming the licence and its
+ *  owner so a slip of the mouse onto the neighbouring row is caught. The
+ *  message goes through JSON for the script and escapeHtml for the attribute,
+ *  since an email address can hold a quote. */
+function confirmFor(r: Row, what: string): string {
+  const who = `${r.id}${r.email ? ` (${r.email})` : ""}`;
+  return `onclick="return confirm(${escapeHtml(JSON.stringify(`${what}\n\n${who}`))})"`;
+}
+
 export function relativeDays(unix: number): string {
   const days = Math.round((unix - now()) / DAY);
   if (days < 0) return `${-days}d ago`;
@@ -149,12 +169,12 @@ export function editPanel(r: Row): string {
         <input id="e-lim-${escapeHtml(r.id)}" type="number" name="translation_limit" min="0"
                value="${r.translation_limit ?? ""}">
       </div>
-      <button type="submit">Save</button>
+      <button type="submit" ${confirmFor(r, "Save these changes?")}>Save</button>
     </form>
     <form method="post" action="/admin/delete" class="row">
       <input type="hidden" name="id" value="${escapeHtml(r.id)}">
       <button class="danger" type="submit"
-        onclick="return confirm('Delete ${escapeHtml(r.id)} and its devices for good? The key stops working and nothing here can bring it back.')">Delete this licence</button>
+        ${confirmFor(r, "Delete this licence and its devices for good? The key stops working and nothing here can bring it back.")}>Delete this licence</button>
     </form>
     <p class="muted">
       Blank translations means unlimited, which is what a paid licence is.
@@ -210,17 +230,17 @@ export function rowsTable(rows: Row[]): string {
           <form class="inline" method="post" action="/admin/extend">
             <input type="hidden" name="id" value="${escapeHtml(r.id)}">
             <input type="hidden" name="days" value="30">
-            <button class="quiet" type="submit">+30d</button>
+            <button class="quiet" type="submit" ${confirmFor(r, "Add 30 days to this licence?")}>+30d</button>
           </form>
           <form class="inline" method="post" action="/admin/seats">
             <input type="hidden" name="id" value="${escapeHtml(r.id)}">
             <button class="quiet" type="submit"
-              onclick="return confirm('Free all devices on ${escapeHtml(r.id)}?')">Free seats</button>
+              ${confirmFor(r, "Free all devices on this licence?")}>Free seats</button>
           </form>
           <form class="inline" method="post" action="/admin/rotate">
             <input type="hidden" name="id" value="${escapeHtml(r.id)}">
             <button class="quiet" type="submit"
-              onclick="return confirm('Issue a new key? The old one stops working immediately.')">New key</button>
+              ${confirmFor(r, "Issue a new key? The old one stops working immediately.")}>New key</button>
           </form>
           ${
             isLive(r) && r.status !== "cancelled"
@@ -230,9 +250,9 @@ export function rowsTable(rows: Row[]): string {
                    ${
                      isPaddle(r)
                        ? `<button class="quiet" type="submit"
-                     onclick="return confirm('Mark refunded? This ends Pro immediately. It does not move any money -- refund in Paddle.')">Refund</button>`
+                     ${confirmFor(r, "Mark refunded? This ends Pro immediately. It does not move any money -- refund in Paddle.")}>Refund</button>`
                        : `<button class="quiet" type="submit"
-                     onclick="return confirm('Revoke this key? This ends Pro immediately.')">Revoke</button>`
+                     ${confirmFor(r, "Revoke this key? This ends Pro immediately.")}>Revoke</button>`
                    }
                  </form>`
               : ""
@@ -368,6 +388,9 @@ export const ADMIN_STYLE = `
   details.card[open] > summary::before { content: "▾ "; }
   details.card > .body { padding: 0 20px 18px; }
   details.card.bad > summary { color: var(--red); }
+  details.card.warnbox > summary { color: var(--orange); }
+  a code { text-decoration: none; }
+  .topbar a.pill { text-decoration: none; }
   table { font-size: 13px; }
   th, td { border-bottom: 1px solid var(--border); padding: 8px 10px; }
   th { color: var(--muted); font-size: 11.5px; font-weight: 600; }
@@ -393,6 +416,134 @@ export const ADMIN_STYLE = `
   .foot { font-size: 12.5px; }
 `;
 
+const usd = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
+
+/** Recurring revenue, what is set to renew, and six months of new against
+ *  lost. List prices in USD, as the weekly report counts them. */
+export function revenueCard(m: Revenue, share: { pro: number; active: number }): string {
+  const rows = m.months
+    .map(
+      (r) => `<tr><td>${escapeHtml(r.month)}</td>
+        <td class="num">${r.new_monthly}</td><td class="num">${r.new_yearly}</td>
+        <td class="num">${usd(r.new_monthly * USD_AMOUNT.monthly + r.new_yearly * USD_AMOUNT.yearly)}</td>
+        <td class="num">${r.cancelled || `<span class="muted">0</span>`}</td>
+        <td class="num">${r.refunded || `<span class="muted">0</span>`}</td></tr>`,
+    )
+    .join("");
+  return `<section class="card" id="revenue">
+    <p class="label">Revenue <span style="text-transform:none;font-weight:400">(list prices, USD)</span></p>
+    <div class="grid">
+      <div class="stat"><div class="k">Monthly recurring</div><div class="v">${usd(m.mrr)}</div>
+        <div class="sub">${m.renewing_monthly} monthly · ${m.renewing_yearly} yearly set to renew</div></div>
+      <div class="stat"><div class="k">Yearly run rate</div><div class="v">${usd(m.mrr * 12)}</div>
+        <div class="sub">monthly recurring × 12</div></div>
+      <div class="stat"><div class="k">On Pro this week</div><div class="v">${
+        share.active ? `${Math.round((share.pro / share.active) * 100)}%` : "—"
+      }</div><div class="sub">${share.pro} of ${share.active} active installs</div></div>
+    </div>
+    <div class="scroll" style="margin-top:16px"><table>
+      <tr><th>Month</th><th class="num">New monthly</th><th class="num">New yearly</th>
+          <th class="num">New sales</th><th class="num">Cancelled</th><th class="num">Refunded</th></tr>
+      ${rows}
+    </table></div>
+    <p class="muted foot">Renewals are not counted as new sales. Paddle charges each buyer in their
+      own currency with tax added, so what it pays out differs from these figures.</p>
+  </section>`;
+}
+
+/** Live licences whose term runs out within 30 days, with whether Paddle is
+ *  going to renew each one — the list to act on before they lapse. */
+export function endingCard(list: EndingRow[]): string {
+  const label = { yes: `<span class="ok">renews</span>`, no: `<span class="warn">won't renew</span>`,
+    unknown: `<span class="muted">unknown</span>` };
+  const lapsing = list.filter((r) => renews(r) !== "yes").length;
+  const body = list
+    .map(
+      (r) => `<tr${r.mine ? ' class="mine"' : ""}>
+        <td><a href="/admin?q=${encodeURIComponent(r.id)}#licences"><code>${escapeHtml(r.id)}</code></a>${
+          r.mine ? ` <span class="badge you">you</span>` : ""
+        }</td>
+        <td>${escapeHtml(r.email ?? "—")}</td>
+        <td><span class="badge ${isPaddle(r) ? "paddle" : "manual"}">${isPaddle(r) ? "Paddle" : "Manual"}</span> ${escapeHtml(r.cycle)}</td>
+        <td>${escapeHtml(date(r.expires_at))} <span class="muted">${escapeHtml(relativeDays(r.expires_at))}</span></td>
+        <td>${label[renews(r)]}</td></tr>`,
+    )
+    .join("");
+  return `<details class="card${lapsing ? " warnbox" : ""}" id="ending">
+    <summary>Ending in the next 30 days (${list.length}${lapsing ? ` · ${lapsing} won't renew` : ""})</summary>
+    <div class="body">${
+      list.length
+        ? `<div class="scroll"><table><tr><th>Licence</th><th>Email</th><th>Kind</th><th>Ends</th><th>Renews?</th></tr>${body}</table></div>
+           <p class="muted foot"><b>Unknown</b>: no webhook has described its subscription yet, so Paddle's plans for it are not known here.</p>`
+        : `<p class="muted">Nothing ends in the next 30 days.</p>`
+    }</div>
+  </details>`;
+}
+
+/** The latest Paddle deliveries. Open, and red, when any in the last week
+ *  was refused, unsigned or failed — the cases where a payment can go missing. */
+export function webhookCard(hooks: { rows: WebhookRow[]; bad: number }): string {
+  const cls: Record<string, string> = { handled: "ok", ignored: "muted" };
+  const body = hooks.rows
+    .map(
+      (w) => `<tr><td title="${escapeHtml(new Date(w.at * 1000).toISOString())}">${ago(w.at)}</td>
+        <td>${escapeHtml(w.event_type ?? "—")}</td>
+        <td>${w.entity_id ? `<code>${escapeHtml(w.entity_id)}</code>` : "—"}</td>
+        <td class="${cls[w.outcome] ?? "err"}">${escapeHtml(w.outcome)}</td>
+        <td class="muted">${escapeHtml(w.detail ?? "")}</td></tr>`,
+    )
+    .join("");
+  return `<details class="card${hooks.bad ? " bad" : ""}" id="webhooks"${hooks.bad ? " open" : ""}>
+    <summary>Paddle webhooks${hooks.bad ? ` — ${hooks.bad} failed in the last 7 days` : ""}</summary>
+    <div class="body">${
+      hooks.rows.length
+        ? `<div class="scroll"><table><tr><th>When</th><th>Event</th><th>Paddle id</th><th>Outcome</th><th>Detail</th></tr>${body}</table></div>
+           <p class="muted foot"><b>Ignored</b> is normal: Paddle sends events nothing here needs.
+             <b>Refused</b>, <b>bad signature</b> and <b>error</b> are not — Paddle retries those, and a
+             run of them means a payment is not reaching a licence.</p>`
+        : `<p class="muted">No deliveries recorded yet.</p>`
+    }</div>
+  </details>`;
+}
+
+/** What the operator did here, newest first. */
+export function historyCard(log: AdminLogRow[]): string {
+  const body = log
+    .map(
+      (e) => `<tr><td title="${escapeHtml(new Date(e.at * 1000).toISOString())}">${ago(e.at)}</td>
+        <td>${escapeHtml(e.action)}</td>
+        <td>${e.licence_id ? `<a href="/admin?q=${encodeURIComponent(e.licence_id)}#licences"><code>${escapeHtml(e.licence_id)}</code></a>` : "—"}</td>
+        <td class="muted">${escapeHtml(e.detail ?? "")}</td></tr>`,
+    )
+    .join("");
+  return `<details class="card" id="history">
+    <summary>Your actions (${log.length} latest)</summary>
+    <div class="body">${
+      log.length
+        ? `<div class="scroll"><table><tr><th>When</th><th>Action</th><th>Licence</th><th>What changed</th></tr>${body}</table></div>`
+        : `<p class="muted">Nothing done from this panel yet.</p>`
+    }</div>
+  </details>`;
+}
+
+/** Downloads of each release, per platform, newest first. */
+export function releasesTable(dl: Downloads | null): string {
+  if (!dl) return `<p class="muted">GitHub could not be reached just now.</p>`;
+  if (!dl.releases.length) return `<p class="muted">No releases yet.</p>`;
+  const cell = (n: number) => `<td class="num">${n || `<span class="muted">—</span>`}</td>`;
+  return `<div class="scroll"><table>
+    <tr><th>Release</th><th>Published</th>${PLATFORMS.map((os) => `<th class="num">${osLabel(os)}</th>`).join("")}<th class="num">Total</th></tr>
+    ${dl.releases
+      .slice(0, 10)
+      .map(
+        (r) => `<tr><td>${escapeHtml(r.tag)}</td><td class="muted">${escapeHtml(r.published)}</td>
+          ${PLATFORMS.map((os) => cell(r[os])).join("")}
+          <td class="num"><b>${r.windows + r.linux + r.macos}</b></td></tr>`,
+      )
+      .join("")}
+  </table></div>`;
+}
+
 /** "▲ +4 (dün 8)" — today against yesterday, coloured by direction. */
 export function delta(today: number, yesterday: number): string {
   const d = today - yesterday;
@@ -402,7 +553,7 @@ export function delta(today: number, yesterday: number): string {
 }
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, licOs, rows, failures, people, hl, vers, dl, pub] = await Promise.all([
+  const [s, u, p, byOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -415,7 +566,13 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     versions(env),
     downloads(env),
     published(),
+    adminLog(env),
+    webhookEvents(env),
+    endingSoon(env),
+    revenue(env),
+    proShare(env),
   ]);
+  const dl = downloadsNow?.total ?? null;
 
   const h = (os: string) =>
     hl.find((x) => x.os === os) ?? { os, total: 0, day_base: 0, day_back: 0, week_base: 0, week_back: 0, lost: 0 };
@@ -459,6 +616,22 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
         <td class="num"><b>${all}</b></td></tr>`;
     })
     .join("");
+  // How far each platform has updated: the share of this month's installs on
+  // the version it is offered now, and how many are on 0.2.7 or older — the
+  // copies that read the update notice from the old address.
+  const onPlatform = (os: string) => vers.filter((v) => v.os === os).reduce((a, v) => a + v.n, 0);
+  const onLatest = (os: string) =>
+    vers.filter((v) => v.os === os && v.app === pub?.[os]).reduce((a, v) => a + v.n, 0);
+  const onOld = (os: string) =>
+    vers.filter((v) => v.os === os && /^\d+\.\d+\.\d+$/.test(v.app) && compareVersions(v.app, "0.2.7") >= 0)
+      .reduce((a, v) => a + v.n, 0);
+  const adoptionRows = `<tr class="total"><td>On latest</td>${PLATFORMS.map(
+    (os) => `<td class="num">${pub?.[os] ? ratio(onLatest(os), onPlatform(os)) : `<span class="muted">—</span>`}</td>`,
+  ).join("")}<td></td></tr>
+    <tr><td>0.2.7 or older</td>${PLATFORMS.map(
+      (os) => `<td class="num">${onOld(os) ? `<span class="warn">${onOld(os)}</span>` : `<span class="muted">0</span>`}</td>`,
+    ).join("")}<td class="num">${PLATFORMS.reduce((a, os) => a + onOld(os), 0)}</td></tr>`;
+
   const real = people.filter((x) => !x.mine).length;
   const own = people.length - real;
 
@@ -505,6 +678,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     "Admin — bubbleTranslate",
     `<div class="topbar">
        <h1>bubbleTranslate admin</h1><span class="spacer"></span>
+       <a class="pill" href="/admin/export.csv?what=licences">Licences CSV</a>
+       <a class="pill" href="/admin/export.csv?what=customers">Customers CSV</a>
        <span class="pill${prod ? " prod" : ""}">${escapeHtml(env.PADDLE_ENV ?? "sandbox")}</span>
      </div>
      ${notice.message ? `<p class="ok">${escapeHtml(notice.message)}</p>` : ""}
@@ -552,6 +727,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
        <div class="bars-axis"><span>14 days ago</span><span>today</span></div>
      </section>
 
+     ${revenueCard(money, share)}
+
      <section class="card">
        <p class="label">Growth &amp; health</p>
        <div class="scroll"><table>
@@ -579,7 +756,11 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
              }</th>`,
          ).join("")}<th class="num">Total</th></tr>
          ${versionRows || `<tr><td colspan="5" class="muted">No installs this month.</td></tr>`}
+         ${versionRows ? adoptionRows : ""}
        </table></div>
+
+       <p class="label" style="margin-top:22px">Downloads per release</p>
+       ${releasesTable(downloadsNow)}
      </section>
 
      <section class="card" id="users">
@@ -589,7 +770,9 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
        ${usersTable(people)}
      </section>
 
+     ${webhookCard(hooks)}
      ${failureTable}
+     ${endingCard(ending)}
 
      <details class="card" id="licences"${query ? " open" : ""}>
        <summary>Licences${query ? ` — results for “${escapeHtml(query)}”` : ""}</summary>
@@ -644,6 +827,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
          </form>
        </div>
      </details>
+
+     ${historyCard(log)}
 
      <p class="muted foot">
        Refunds and cancellations should normally be done in Paddle — its

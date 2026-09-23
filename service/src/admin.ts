@@ -100,6 +100,18 @@ function sameOrigin(request: Request): boolean {
   }
 }
 
+/** Records what the operator just did, for the panel's history. Written
+ *  after the change itself, so a failed change leaves no line claiming it
+ *  happened; and never allowed to fail the change it describes. */
+async function audit(env: Env, action: string, licenceId: string | null, detail: string) {
+  try {
+    await env.DB.prepare("INSERT INTO admin_log (at, action, licence_id, detail) VALUES (?, ?, ?, ?)")
+      .bind(now(), action, licenceId, detail)
+      .run();
+  } catch (err) {
+    console.error("could not write the admin log", err);
+  }
+}
 
 /** Marks an install as the operator's own, or takes the mark off. */
 async function markMine(env: Env, request: Request): Promise<Response> {
@@ -133,6 +145,7 @@ async function markMineLicence(env: Env, request: Request): Promise<Response> {
     } else {
       await env.DB.prepare("DELETE FROM ignored_licences WHERE licence_id = ?").bind(id).run();
     }
+    await audit(env, "mine", id, form.get("mine") === "1" ? "marked as mine" : "unmarked as mine");
   }
   return new Response(null, { status: 303, headers: { location: "/admin#licences" } });
 }
@@ -178,6 +191,7 @@ async function issue(env: Env, request: Request): Promise<Response> {
     termSeconds: days === null ? undefined : days * DAY,
   });
 
+  await audit(env, "issue", id, `${cycle}, ${seats} devices, ends ${date(expiresAt)}${email ? `, ${email}` : ""}`);
   return dashboard(env, id, {
     key,
     message: `Issued ${id} — ${cycle}, ${seats} device${seats === 1 ? "" : "s"}, ends ${date(expiresAt)}.`,
@@ -208,6 +222,7 @@ async function act(env: Env, request: Request, action: string): Promise<Response
       await env.DB.prepare("UPDATE licences SET expires_at = ?, renews_at = ? WHERE id = ?")
         .bind(expiresAt, date(expiresAt), licence.id)
         .run();
+      await audit(env, "extend", licence.id, `+${days} days: ${date(licence.expires_at)} → ${date(expiresAt)}`);
       return dashboard(env, id, {
         message: `Extended by ${days} days — now ends ${date(expiresAt)}.`,
       });
@@ -217,6 +232,7 @@ async function act(env: Env, request: Request, action: string): Promise<Response
       const { meta } = await env.DB.prepare("DELETE FROM seats WHERE licence_id = ?")
         .bind(licence.id)
         .run();
+      await audit(env, "free seats", licence.id, `freed ${meta?.changes ?? 0} devices`);
       return dashboard(env, id, {
         message: `Freed ${meta?.changes ?? 0} device slots. The customer can activate again.`,
       });
@@ -224,6 +240,7 @@ async function act(env: Env, request: Request, action: string): Promise<Response
 
     case "rotate": {
       const key = await rotateKey(env, licence);
+      await audit(env, "new key", licence.id, "old key disabled");
       return dashboard(env, id, {
         key,
         message:
@@ -272,6 +289,20 @@ async function act(env: Env, request: Request, action: string): Promise<Response
         .bind(email, cycle, status, seatLimit, expiresAt, date(expiresAt), limit, licence.id)
         .run();
 
+      // Only what actually changed, old → new, so the history reads as a
+      // list of decisions rather than a dump of the form.
+      const changes = [
+        ["email", licence.email ?? "—", email ?? "—"],
+        ["cycle", licence.cycle, cycle],
+        ["status", licence.status, status],
+        ["devices", String(licence.seat_limit), String(seatLimit)],
+        ["ends", date(licence.expires_at), date(expiresAt)],
+        ["translations", String(licence.translation_limit ?? "unlimited"), String(limit ?? "unlimited")],
+      ]
+        .filter(([, from, to]) => from !== to)
+        .map(([field, from, to]) => `${field} ${from} → ${to}`);
+      await audit(env, "edit", licence.id, changes.join(", ") || "saved without changes");
+
       return dashboard(env, id, { message: `Saved. Ends ${date(expiresAt)}.` });
     }
 
@@ -302,6 +333,12 @@ async function act(env: Env, request: Request, action: string): Promise<Response
         env.DB.prepare("DELETE FROM licences WHERE id = ?").bind(licence.id),
       ]);
       const freed = batch[0]?.meta?.changes ?? 0;
+      await audit(
+        env,
+        "delete",
+        licence.id,
+        `${licence.provider} ${licence.cycle}${licence.email ? `, ${licence.email}` : ""}, ${freed} devices`,
+      );
 
       // Back to the unfiltered list: searching for the id just deleted would
       // render "Nothing matched", which reads like a failure.
@@ -316,6 +353,7 @@ async function act(env: Env, request: Request, action: string): Promise<Response
         return dashboard(env, id, { error: "Unknown status." });
       }
       await endLicence(env, licence, status);
+      await audit(env, status === "refunded" ? (licence.provider === "paddle" ? "refund" : "revoke") : "cancel", licence.id, `was ${licence.status}, paid to ${date(licence.expires_at)}`);
       return dashboard(env, id, {
         message:
           status === "refunded"
@@ -327,6 +365,74 @@ async function act(env: Env, request: Request, action: string): Promise<Response
     default:
       return new Response("Not found.", { status: 404 });
   }
+}
+
+// -- taking it away ----------------------------------------------------------
+
+/** One CSV cell. Quoted always, and a value that a spreadsheet would read as
+ *  a formula — an email address someone chose to start with `=` — is
+ *  prefixed with a quote so it stays text. */
+function cell(value: unknown): string {
+  let text = value === null || value === undefined ? "" : String(value);
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+const csvRows = (header: string[], rows: Record<string, unknown>[]) =>
+  [header, ...rows.map((r) => header.map((h) => r[h]))]
+    .map((line) => line.map(cell).join(","))
+    .join("\r\n") + "\r\n";
+
+/** Every licence, or every Paddle customer, as a spreadsheet — for the
+ *  accountant, or a copy kept somewhere other than this database. Keys are
+ *  not in it: the database only holds their hashes, and those are left out
+ *  too. Dates are UTC days. */
+async function exportCsv(env: Env, what: string): Promise<Response> {
+  let body: string;
+  if (what === "licences") {
+    const { results } = await env.DB.prepare(
+      `SELECT l.id, l.email, l.provider, l.provider_ref, l.plan, l.cycle, l.status, l.seat_limit,
+              (SELECT COUNT(*) FROM seats s WHERE s.licence_id = l.id) AS devices,
+              l.translation_limit, l.created_at, l.expires_at,
+              EXISTS (SELECT 1 FROM ignored_licences i WHERE i.licence_id = l.id) AS mine
+         FROM licences l ORDER BY l.created_at`,
+    ).all<Record<string, unknown>>();
+    const rows = (results ?? []).map((r) => ({
+      ...r,
+      created: date(Number(r.created_at)),
+      ends: date(Number(r.expires_at)),
+      mine: r.mine ? "yes" : "",
+    }));
+    body = csvRows(
+      ["id", "email", "provider", "provider_ref", "plan", "cycle", "status", "seat_limit", "devices",
+        "translation_limit", "created", "ends", "mine"],
+      rows,
+    );
+  } else if (what === "customers") {
+    const { results } = await env.DB.prepare(
+      `SELECT c.customer_id, c.email, c.status AS customer_status, s.subscription_id,
+              s.status AS subscription_status, s.price_id, s.next_billed_at,
+              s.scheduled_change_action, c.created_at
+         FROM paddle_customers c
+         LEFT JOIN paddle_subscriptions s ON s.customer_id = c.customer_id
+        ORDER BY c.created_at`,
+    ).all<Record<string, unknown>>();
+    const rows = (results ?? []).map((r) => ({ ...r, first_seen: date(Number(r.created_at)) }));
+    body = csvRows(
+      ["customer_id", "email", "customer_status", "subscription_id", "subscription_status", "price_id",
+        "next_billed_at", "scheduled_change_action", "first_seen"],
+      rows,
+    );
+  } else {
+    return new Response("Not found.", { status: 404 });
+  }
+  return new Response(body, {
+    headers: {
+      "content-type": "text/csv; charset=utf-8",
+      "content-disposition": `attachment; filename="bubbletranslate-${what}-${date(now())}.csv"`,
+      "cache-control": "no-store",
+    },
+  });
 }
 
 // -- the entry point ---------------------------------------------------------
@@ -349,6 +455,9 @@ export async function handleAdmin(
 
   if (request.method === "GET" && pathname === "/admin/report") {
     return reportPage(env);
+  }
+  if (request.method === "GET" && pathname === "/admin/export.csv") {
+    return exportCsv(env, url.searchParams.get("what") ?? "");
   }
   if (request.method === "GET" && pathname === "/admin") {
     return dashboard(env, url.searchParams.get("q") ?? "");

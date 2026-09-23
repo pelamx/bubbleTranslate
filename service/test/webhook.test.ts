@@ -194,3 +194,32 @@ describe("POST /webhooks/paddle", () => {
     expect((await licenceByProviderRef(env, "paddle", "sub_1"))!.status).toBe("active");
   });
 });
+
+describe("the webhook log", () => {
+  const logged = async () =>
+    (await env.DB.prepare("SELECT event_type, event_id, outcome, detail FROM webhook_events ORDER BY id").all<any>())
+      .results;
+
+  it("records each delivery and what became of it, without the payload", async () => {
+    await deliver({ ...completed(null, "sub_unknown"), event_id: "evt_1" });
+    await deliver({ event_type: "business.updated", event_id: "evt_2", data: {} });
+    await deliver(completed(null, "sub_x"), { header: "ts=1;h1=00" });
+    await deliver(completed(null, "sub_x"), { ip: "8.8.8.8" });
+    expect(await logged()).toEqual([
+      { event_type: "transaction.completed", event_id: "evt_1", outcome: "ignored", detail: "no ref" },
+      { event_type: "business.updated", event_id: "evt_2", outcome: "ignored", detail: "business.updated" },
+      { event_type: null, event_id: null, outcome: "bad signature", detail: null },
+      { event_type: null, event_id: null, outcome: "refused", detail: "8.8.8.8" },
+    ]);
+    const row = await env.DB.prepare("SELECT * FROM webhook_events").first<any>();
+    expect(JSON.stringify(row)).not.toContain("buyer@example.com");
+  });
+
+  it("marks a delivery that fulfilled an order as handled", async () => {
+    await order("ref-log");
+    await deliver(completed("ref-log", "sub_log"));
+    expect(await logged()).toEqual([
+      { event_type: "transaction.completed", event_id: null, outcome: "handled", detail: null },
+    ]);
+  });
+});

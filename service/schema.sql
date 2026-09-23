@@ -170,3 +170,33 @@ CREATE TABLE IF NOT EXISTS ignored_licences (
   licence_id  TEXT PRIMARY KEY,
   created_at  INTEGER NOT NULL
 );
+
+-- What the operator did from the admin panel, one row per action. Answers
+-- "why does this licence have 5 devices?" months later. Holds the licence id
+-- and a one-line description of the change, never a key.
+CREATE TABLE IF NOT EXISTS admin_log (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  at          INTEGER NOT NULL,
+  action      TEXT NOT NULL,
+  licence_id  TEXT,
+  detail      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS admin_log_by_licence ON admin_log (licence_id);
+
+-- Every delivery to the Paddle webhook and what became of it, so a payment
+-- that was refused or ignored shows up on the panel rather than only in a
+-- log nobody reads. The event type, Paddle's ids and the outcome -- never the
+-- payload, which carries the customer's details. Kept for 90 days.
+CREATE TABLE IF NOT EXISTS webhook_events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  at          INTEGER NOT NULL,
+  event_type  TEXT,
+  event_id    TEXT,
+  entity_id   TEXT,
+  -- handled | ignored | refused | bad signature | error
+  outcome     TEXT NOT NULL,
+  detail      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS webhook_events_by_at ON webhook_events (at);

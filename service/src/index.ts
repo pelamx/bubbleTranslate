@@ -47,6 +47,7 @@ import { pushConversions, type ClickIds } from "./ads";
 import { sendWeeklyReport } from "./report";
 import {
   type CancelFailure,
+  type Verified,
   cancelSubscription,
   customerEmail,
   cycleFromItems,
@@ -355,12 +356,74 @@ async function paddleWebhook(env: Env, request: Request): Promise<Response> {
   // signature below is what proves the payload is theirs. A refusal here is
   // not 2xx, so Paddle retries -- which is the right outcome if the address
   // check is ever wrong.
-  if (!(await fromPaddle(request))) return refuse("Forbidden.", 403);
+  if (!(await fromPaddle(request))) {
+    await logWebhook(env, { outcome: "refused", detail: request.headers.get("CF-Connecting-IP") ?? "" });
+    return refuse("Forbidden.", 403);
+  }
 
   const raw = await request.text();
   const event = await verifyWebhook(env, raw, request.headers.get("Paddle-Signature"));
-  if (!event) return refuse("Bad signature.", 401);
+  if (!event) {
+    await logWebhook(env, { outcome: "bad signature" });
+    return refuse("Bad signature.", 401);
+  }
 
+  const entity = event.data?.id ? String(event.data.id) : null;
+  const logged = { eventType: event.eventType, eventId: event.eventId, entity };
+  let response: Response;
+  try {
+    response = await handlePaddleEvent(env, event);
+  } catch (err) {
+    await logWebhook(env, { ...logged, outcome: "error", detail: String(err) });
+    throw err;
+  }
+  // Every handler answers `{ ok, ignored? }`; the reason it gives for
+  // ignoring is exactly what the panel should say.
+  const body: any = await response.clone().json().catch(() => ({}));
+  await logWebhook(env, {
+    ...logged,
+    outcome: body?.ignored !== undefined ? "ignored" : "handled",
+    detail: body?.ignored !== undefined ? String(body.ignored) : null,
+  });
+  return response;
+}
+
+/** Writes one delivery to `webhook_events` for the admin panel. Never fails
+ *  the delivery: the log is a convenience, and a webhook answered with an
+ *  error because its log line could not be written would be retried for a
+ *  payment that was already handled. */
+async function logWebhook(
+  env: Env,
+  entry: {
+    outcome: string;
+    eventType?: string;
+    eventId?: string | null;
+    entity?: string | null;
+    detail?: string | null;
+  },
+): Promise<void> {
+  try {
+    const t = now();
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO webhook_events (at, event_type, event_id, entity_id, outcome, detail)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        t,
+        entry.eventType ?? null,
+        entry.eventId ?? null,
+        entry.entity ?? null,
+        entry.outcome,
+        entry.detail ? entry.detail.slice(0, 200) : null,
+      ),
+      env.DB.prepare("DELETE FROM webhook_events WHERE at < ?").bind(t - 90 * 86_400),
+    ]);
+  } catch (err) {
+    console.error("could not log a webhook delivery", err);
+  }
+}
+
+async function handlePaddleEvent(env: Env, event: Verified): Promise<Response> {
   const data = event.data ?? {};
   // Paddle's own idea of when this happened. Deliveries are at-least-once and
   // unordered, so every mirror write is guarded by it: an old payload arriving

@@ -5,6 +5,8 @@
 -- Local development only. Never run against the production database: it
 -- deletes every licence, and licences cannot be reconstructed from the
 -- processors -- only the payments can.
+DROP TABLE IF EXISTS admin_log;
+DROP TABLE IF EXISTS webhook_events;
 DROP TABLE IF EXISTS installs;
 DROP TABLE IF EXISTS orders;
 DROP TABLE IF EXISTS seats;

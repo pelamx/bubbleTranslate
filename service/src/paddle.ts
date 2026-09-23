@@ -21,6 +21,8 @@ const MAX_SKEW = 300;
 
 export interface Verified {
   eventType: string;
+  /** Paddle's id for this event (`evt_…`), the same across retries. */
+  eventId: string | null;
   /** When Paddle says the event happened, RFC 3339. Not when it arrived:
    *  deliveries are unordered, so this is the only thing that can say which
    *  of two payloads for the same entity is the later one. */
@@ -140,6 +142,7 @@ export async function verifyWebhook(
     const event = JSON.parse(raw);
     return {
       eventType: String(event?.event_type ?? ""),
+      eventId: event?.event_id ? String(event.event_id) : null,
       occurredAt: event?.occurred_at ? String(event.occurred_at) : null,
       data: event?.data ?? {},
     };

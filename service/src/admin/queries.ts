@@ -1,6 +1,6 @@
 // What the panel reads: counts, installs, versions, downloads and licences.
 
-import { type Env } from "../env";
+import { type Env, USD_AMOUNT } from "../env";
 import { type Licence } from "../licences";
 import { now, sha256Hex } from "../tokens";
 import { DAY, PAGE_SIZE, startOfToday } from "./shared";
@@ -110,11 +110,27 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-/** Every release asset's download count on GitHub, summed per OS. Cached for
- *  fifteen minutes: the API allows sixty unauthenticated calls an hour, and a
- *  Worker's outbound address is shared. Null when GitHub cannot be reached,
- *  so the panel says so rather than showing zeros. */
-export async function downloads(env: Env): Promise<Record<string, number> | null> {
+/** One release's downloads, per OS. */
+export interface ReleaseRow {
+  tag: string;
+  published: string;
+  windows: number;
+  linux: number;
+  macos: number;
+}
+
+export interface Downloads {
+  /** Every release file ever, summed per OS. */
+  total: Record<string, number>;
+  /** Newest release first. */
+  releases: ReleaseRow[];
+}
+
+/** Every release asset's download count on GitHub, per OS, in total and per
+ *  release. Cached for fifteen minutes: the API allows sixty unauthenticated
+ *  calls an hour, and a Worker's outbound address is shared. Null when GitHub
+ *  cannot be reached, so the panel says so rather than showing zeros. */
+export async function downloads(env: Env): Promise<Downloads | null> {
   const url = "https://api.github.com/repos/bubbleTranslate/downloads/releases?per_page=100";
   const cache = caches.default;
   const key = new Request(url);
@@ -140,17 +156,32 @@ export async function downloads(env: Env): Promise<Record<string, number> | null
       return null;
     }
   }
-  const releases = (await res.json()) as { assets: { name: string; download_count: number }[] }[];
-  const out: Record<string, number> = { windows: 0, linux: 0, macos: 0 };
+  const releases = (await res.json()) as {
+    tag_name: string;
+    published_at: string | null;
+    assets: { name: string; download_count: number }[];
+  }[];
+  const total: Record<string, number> = { windows: 0, linux: 0, macos: 0 };
+  const rows: ReleaseRow[] = [];
   for (const r of releases) {
+    const row: ReleaseRow = {
+      tag: r.tag_name,
+      published: (r.published_at ?? "").slice(0, 10),
+      windows: 0,
+      linux: 0,
+      macos: 0,
+    };
     for (const a of r.assets) {
       const name = a.name.toLowerCase();
-      if (name.endsWith(".zip") || name.endsWith(".exe")) out.windows += a.download_count;
-      else if (name.endsWith(".dmg")) out.macos += a.download_count;
-      else if (name.includes("linux")) out.linux += a.download_count;
+      if (name.endsWith(".zip") || name.endsWith(".exe")) row.windows += a.download_count;
+      else if (name.endsWith(".dmg")) row.macos += a.download_count;
+      else if (name.includes("linux")) row.linux += a.download_count;
     }
+    for (const os of PLATFORMS) total[os] += row[os];
+    rows.push(row);
   }
-  return out;
+  rows.sort((a, b) => compareVersions(a.tag.replace(/^v/, ""), b.tag.replace(/^v/, "")));
+  return { total, releases: rows };
 }
 
 /** The version each platform is offered right now, as `latest.json` in the
@@ -427,4 +458,192 @@ export async function recentFailures(env: Env) {
       created_at: number;
     }>();
   return results ?? [];
+}
+
+// -- history -----------------------------------------------------------------
+
+export interface AdminLogRow {
+  at: number;
+  action: string;
+  licence_id: string | null;
+  detail: string | null;
+}
+
+/** The operator's own actions, newest first. */
+export async function adminLog(env: Env, limit = 30): Promise<AdminLogRow[]> {
+  const { results } = await env.DB.prepare(
+    "SELECT at, action, licence_id, detail FROM admin_log ORDER BY id DESC LIMIT ?",
+  )
+    .bind(limit)
+    .all<AdminLogRow>();
+  return results ?? [];
+}
+
+export interface WebhookRow {
+  at: number;
+  event_type: string | null;
+  event_id: string | null;
+  entity_id: string | null;
+  outcome: string;
+  detail: string | null;
+}
+
+/** The latest deliveries from Paddle, and how many of the last week's went
+ *  wrong -- refused, unsigned or failing. Ignored is not wrong: Paddle sends
+ *  events nothing here needs. */
+export async function webhookEvents(env: Env): Promise<{ rows: WebhookRow[]; bad: number }> {
+  const [list, bad] = await Promise.all([
+    env.DB.prepare(
+      `SELECT at, event_type, event_id, entity_id, outcome, detail
+         FROM webhook_events ORDER BY id DESC LIMIT 30`,
+    ).all<WebhookRow>(),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM webhook_events
+        WHERE at > ? AND outcome IN ('refused', 'bad signature', 'error')`,
+    )
+      .bind(now() - 7 * DAY)
+      .first<{ n: number }>(),
+  ]);
+  return { rows: list.results ?? [], bad: bad?.n ?? 0 };
+}
+
+// -- money -------------------------------------------------------------------
+
+export interface EndingRow extends Row {
+  /** Paddle's status for the subscription behind it, if a webhook said. */
+  sub_status: string | null;
+  scheduled_change_action: string | null;
+}
+
+/** Live licences whose term ends in the next 30 days, soonest first, each with
+ *  what the mirror knows about whether Paddle will renew it. */
+export async function endingSoon(env: Env): Promise<EndingRow[]> {
+  const t = now();
+  const { results } = await env.DB.prepare(
+    `SELECT l.id, l.plan, l.cycle, l.translation_limit, l.status, l.seat_limit,
+            l.expires_at, l.renews_at, l.email, l.provider, l.provider_ref, l.created_at,
+            (SELECT COUNT(*) FROM seats s WHERE s.licence_id = l.id) AS seats,
+            EXISTS (SELECT 1 FROM ignored_licences i WHERE i.licence_id = l.id) AS mine,
+            ps.status AS sub_status, ps.scheduled_change_action
+       FROM licences l
+       LEFT JOIN paddle_subscriptions ps ON ps.subscription_id = l.provider_ref
+      WHERE l.status != 'refunded' AND l.expires_at > ?1 AND l.expires_at < ?1 + 30 * ${DAY}
+      ORDER BY l.expires_at
+      LIMIT 100`,
+  )
+    .bind(t)
+    .all<EndingRow>();
+  return results ?? [];
+}
+
+/** Whether a licence ending soon is going to be renewed: yes for a Paddle
+ *  subscription that is active with nothing scheduled, no for one cancelled
+ *  or issued by hand, and unknown when no webhook has described it. */
+export function renews(r: EndingRow): "yes" | "no" | "unknown" {
+  if (r.status === "cancelled" || r.provider !== "paddle") return "no";
+  if (!r.sub_status) return "unknown";
+  if (r.sub_status === "canceled" || r.scheduled_change_action === "cancel") return "no";
+  return r.sub_status === "active" || r.sub_status === "trialing" ? "yes" : "unknown";
+}
+
+export interface MonthRow {
+  month: string;
+  new_monthly: number;
+  new_yearly: number;
+  cancelled: number;
+  refunded: number;
+}
+
+export interface Revenue {
+  /** Monthly recurring revenue at list price, from subscriptions set to renew. */
+  mrr: number;
+  renewing_monthly: number;
+  renewing_yearly: number;
+  /** Newest month first, the last six. */
+  months: MonthRow[];
+}
+
+/** Paid licences as money, at list price in USD -- the same figures and the
+ *  same MRR rule as the weekly report. What Paddle actually collected differs
+ *  by currency and tax; this is what the product charges, not what it banked. */
+export async function revenue(env: Env): Promise<Revenue> {
+  const t = now();
+  const mine = ignoreList(env.ADMIN_IGNORE_EMAILS);
+  // Six calendar months back, as UTC "YYYY-MM" labels.
+  const d = new Date(t * 1000);
+  const labels = Array.from({ length: 6 }, (_, i) =>
+    new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - i, 1)).toISOString().slice(0, 7),
+  );
+  const since = Math.floor(Date.parse(`${labels[5]}-01T00:00:00Z`) / 1000);
+
+  const [renewing, fresh, cancelled, refunded] = await Promise.all([
+    env.DB.prepare(
+      `SELECT cycle, COUNT(*) AS n FROM licences
+        WHERE provider = 'paddle' AND status = 'active' AND expires_at > ?1 AND ${NOT_MINE_LICENCE}
+        GROUP BY cycle`,
+    )
+      .bind(t, null, null, null, null, null, null, null, mine)
+      .all<{ cycle: string; n: number }>(),
+    env.DB.prepare(
+      `SELECT strftime('%Y-%m', created_at, 'unixepoch') AS month, cycle, COUNT(*) AS n
+         FROM licences
+        WHERE provider = 'paddle' AND created_at >= ?1 AND ${NOT_MINE_LICENCE}
+        GROUP BY month, cycle`,
+    )
+      .bind(since, null, null, null, null, null, null, null, mine)
+      .all<{ month: string; cycle: string; n: number }>(),
+    // When a subscription was cancelled is when the mirror last heard it was:
+    // the licence row keeps no date for it.
+    env.DB.prepare(
+      `SELECT strftime('%Y-%m', ps.updated_at, 'unixepoch') AS month, COUNT(*) AS n
+         FROM paddle_subscriptions ps JOIN licences l ON l.provider_ref = ps.subscription_id
+        WHERE ps.status = 'canceled' AND ps.updated_at >= ?1
+          AND (l.email IS NULL OR LOWER(l.email) NOT IN (SELECT value FROM json_each(?9)))
+          AND l.id NOT IN (SELECT licence_id FROM ignored_licences)
+        GROUP BY month`,
+    )
+      .bind(since, null, null, null, null, null, null, null, mine)
+      .all<{ month: string; n: number }>(),
+    // A refund cuts the term to the moment it happened, so its end is its date.
+    env.DB.prepare(
+      `SELECT strftime('%Y-%m', expires_at, 'unixepoch') AS month, COUNT(*) AS n
+         FROM licences
+        WHERE provider = 'paddle' AND status = 'refunded' AND expires_at >= ?1 AND ${NOT_MINE_LICENCE}
+        GROUP BY month`,
+    )
+      .bind(since, null, null, null, null, null, null, null, mine)
+      .all<{ month: string; n: number }>(),
+  ]);
+
+  const count = (cycle: string) =>
+    (renewing.results ?? []).filter((r) => r.cycle === cycle).reduce((a, r) => a + r.n, 0);
+  const renewing_monthly = count("monthly");
+  const renewing_yearly = count("yearly");
+
+  const months = labels.map((month) => ({
+    month,
+    new_monthly: (fresh.results ?? []).find((r) => r.month === month && r.cycle === "monthly")?.n ?? 0,
+    new_yearly: (fresh.results ?? []).find((r) => r.month === month && r.cycle === "yearly")?.n ?? 0,
+    cancelled: (cancelled.results ?? []).find((r) => r.month === month)?.n ?? 0,
+    refunded: (refunded.results ?? []).find((r) => r.month === month)?.n ?? 0,
+  }));
+
+  return {
+    mrr: renewing_monthly * USD_AMOUNT.monthly + renewing_yearly * (USD_AMOUNT.yearly / 12),
+    renewing_monthly,
+    renewing_yearly,
+    months,
+  };
+}
+
+/** How many of this week's active installs run Pro -- the conversion the
+ *  ping can show without keeping anything more than it already does. */
+export async function proShare(env: Env): Promise<{ pro: number; active: number }> {
+  const row = await env.DB.prepare(
+    `SELECT SUM(CASE WHEN plan = 'pro' THEN 1 ELSE 0 END) AS pro, COUNT(*) AS active
+       FROM installs WHERE last_seen > ?1 AND ${NOT_MINE_INSTALL}`,
+  )
+    .bind(now() - 8 * DAY, null, null, null, null, null, null, null, await mineInstalls(env))
+    .first<{ pro: number | null; active: number }>();
+  return { pro: row?.pro ?? 0, active: row?.active ?? 0 };
 }
