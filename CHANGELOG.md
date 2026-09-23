@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.2.9 — 2026-09-23
 
 **A Bluetooth mouse keeps working after the laptop sleeps. (Linux)** A
 wireless mouse that reconnected after sleep, or was switched off and on, went
@@ -22,6 +22,12 @@ translated, so it looked fine, but pages like Google Drive's PDF preview, which
 wait for the mouse button to come up, never produced a bubble. A mouse or
 keyboard that connects while the app is running is now picked up within a
 couple of seconds.
+
+**Tapping on the trackpad now works in Google Drive's PDF preview. (Linux)**
+With tap-to-click on, double-tapping a word, or tap-and-dragging over a
+sentence, while holding the trigger key brought up no bubble there. Only a
+physical press of the pad worked. Taps now work the same as clicks, so you can
+pick out a single word the way you would with a mouse.
 
 **Copies of 0.2.7 and older say when an update is out again.** When the
 downloads moved to their new home, the file those versions check for updates

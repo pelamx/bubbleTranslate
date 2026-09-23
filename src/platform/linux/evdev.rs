@@ -60,6 +60,100 @@ mod keycode {
     /// Not a modifier: read only by [`super::start_pointer`], from devices
     /// that have no keyboard at all.
     pub const BTN_LEFT: u16 = 272;
+    /// A finger on a touchpad, and how many: read to recognise a tap, which
+    /// is a click the kernel never reports as one.
+    pub const BTN_TOUCH: u16 = 330;
+    pub const BTN_TOOL_DOUBLETAP: u16 = 333;
+    pub const BTN_TOOL_TRIPLETAP: u16 = 334;
+    pub const BTN_TOOL_QUADTAP: u16 = 335;
+    pub const BTN_TOOL_QUINTTAP: u16 = 328;
+}
+
+/// A touch shorter than this is a tap. libinput, which turns taps into
+/// clicks above the kernel, uses 180 ms; a little slack covers a slow finger.
+const TAP_MAX: std::time::Duration = std::time::Duration::from_millis(220);
+
+/// How soon after a tap a second touch continues the gesture: libinput reads
+/// it as a double tap if it is short, and as tap-and-drag if it is not.
+const TAP_FOLLOW: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// What a touchpad contact means as a button.
+#[derive(Debug, PartialEq, Eq)]
+enum Tap {
+    None,
+    /// A whole click at once: a tap on its own.
+    Click,
+    /// The button goes down and stays down: a touch that continues a tap,
+    /// which is either the second half of a double tap or a tap-and-drag.
+    Press,
+    Release,
+}
+
+/// Turns touchpad contacts into the clicks they become on screen.
+///
+/// With tap-to-click on, taps are synthesized by libinput and never appear in
+/// `/dev/input` as a button, so a double tap selecting a word, or a
+/// tap-and-drag sweeping a sentence, would be invisible here while the same
+/// gestures on a mouse are not. The touches are read instead:
+///
+///   * a short one-finger touch is a click;
+///   * a touch starting soon after a tap holds the button down until the
+///     finger lifts — the double tap's second click, or the drag.
+///
+/// Two- and three-finger taps are right and middle clicks, and a touch that
+/// pressed the pad down produced a real button event already; neither is
+/// reported again.
+#[derive(Default)]
+struct Taps {
+    since: Option<std::time::Instant>,
+    /// More than one finger, or a physical press, during this touch.
+    disqualified: bool,
+    /// When the last tap ended, for telling a continuation from a new touch.
+    last_tap: Option<std::time::Instant>,
+    /// This touch is holding the button down.
+    holding: bool,
+}
+
+impl Taps {
+    fn feed(&mut self, code: u16, down: bool) -> Tap {
+        match code {
+            keycode::BTN_TOUCH if down => {
+                self.since = Some(std::time::Instant::now());
+                self.disqualified = false;
+                self.holding = self
+                    .last_tap
+                    .take()
+                    .is_some_and(|at| at.elapsed() <= TAP_FOLLOW);
+                if self.holding { Tap::Press } else { Tap::None }
+            }
+            keycode::BTN_TOUCH => {
+                let short = self.since.take().is_some_and(|at| at.elapsed() <= TAP_MAX);
+                if self.holding {
+                    // Always let go of a button this touch pressed, whatever
+                    // happened during it, or it would read as held for good.
+                    self.holding = false;
+                    return Tap::Release;
+                }
+                if short && !self.disqualified {
+                    self.last_tap = Some(std::time::Instant::now());
+                    Tap::Click
+                } else {
+                    Tap::None
+                }
+            }
+            keycode::BTN_TOOL_DOUBLETAP
+            | keycode::BTN_TOOL_TRIPLETAP
+            | keycode::BTN_TOOL_QUADTAP
+            | keycode::BTN_TOOL_QUINTTAP
+            | keycode::BTN_LEFT
+                if down =>
+            {
+                self.disqualified = true;
+                Tap::None
+            }
+            _ => Tap::None,
+        }
+    }
 }
 
 /// The bit a keycode sets, or `None` for every key that is not a modifier —
@@ -293,7 +387,7 @@ struct InputEvent {
 ///
 /// The same restraint as the keyboard: one button, and nothing about where
 /// the pointer went. Tap-to-click on a touchpad is synthesized above the
-/// kernel and never appears here; a physical click does.
+/// kernel, so taps are recognised from the touch itself; see [`Taps`].
 pub fn start_pointer(on_left: impl Fn(bool) + Send + 'static) -> Result<(), String> {
     let devices = pointers();
     if devices.is_empty() {
@@ -302,9 +396,19 @@ pub fn start_pointer(on_left: impl Fn(bool) + Send + 'static) -> Result<(), Stri
     std::thread::Builder::new()
         .name("pointer-button".into())
         .spawn(move || {
+            let mut taps = Taps::default();
             read_loop(devices, "pointer", pointers, |_| {}, |code, down| {
                 if code == keycode::BTN_LEFT {
                     on_left(down);
+                }
+                match taps.feed(code, down) {
+                    Tap::Click => {
+                        on_left(true);
+                        on_left(false);
+                    }
+                    Tap::Press => on_left(true),
+                    Tap::Release => on_left(false),
+                    Tap::None => {}
                 }
             })
         })
@@ -489,6 +593,57 @@ mod tests {
         }
         assert_eq!(bit(keycode::LEFTSHIFT), bit(keycode::RIGHTSHIFT));
         assert_eq!(bit(keycode::LEFTMETA), wanted_bit(TriggerKey::Super));
+    }
+
+    #[test]
+    fn a_short_one_finger_touch_is_a_click() {
+        let mut taps = Taps::default();
+        assert_eq!(taps.feed(keycode::BTN_TOUCH, true), Tap::None);
+        assert_eq!(taps.feed(keycode::BTN_TOUCH, false), Tap::Click);
+    }
+
+    #[test]
+    fn a_touch_right_after_a_tap_holds_the_button_until_it_lifts() {
+        // A double tap, and a tap-and-drag: both are this sequence, the drag
+        // only with a longer second touch.
+        let mut taps = Taps::default();
+        taps.feed(keycode::BTN_TOUCH, true);
+        assert_eq!(taps.feed(keycode::BTN_TOUCH, false), Tap::Click);
+        assert_eq!(taps.feed(keycode::BTN_TOUCH, true), Tap::Press);
+        taps.since = Some(std::time::Instant::now() - TAP_MAX * 5);
+        assert_eq!(taps.feed(keycode::BTN_TOUCH, false), Tap::Release);
+        // The gesture is over; the next touch starts afresh.
+        assert_eq!(taps.feed(keycode::BTN_TOUCH, true), Tap::None);
+    }
+
+    #[test]
+    fn a_touch_long_after_a_tap_is_a_new_gesture() {
+        let mut taps = Taps::default();
+        taps.feed(keycode::BTN_TOUCH, true);
+        taps.feed(keycode::BTN_TOUCH, false);
+        taps.last_tap = Some(std::time::Instant::now() - TAP_FOLLOW * 2);
+        assert_eq!(taps.feed(keycode::BTN_TOUCH, true), Tap::None);
+    }
+
+    #[test]
+    fn two_fingers_or_a_press_are_not_a_tap() {
+        let mut taps = Taps::default();
+        taps.feed(keycode::BTN_TOUCH, true);
+        taps.feed(keycode::BTN_TOOL_DOUBLETAP, true);
+        assert_eq!(taps.feed(keycode::BTN_TOUCH, false), Tap::None);
+
+        taps.feed(keycode::BTN_TOUCH, true);
+        taps.feed(keycode::BTN_LEFT, true);
+        taps.feed(keycode::BTN_LEFT, false);
+        assert_eq!(taps.feed(keycode::BTN_TOUCH, false), Tap::None, "a press already clicked");
+    }
+
+    #[test]
+    fn a_long_touch_is_a_move_not_a_tap() {
+        let mut taps = Taps::default();
+        taps.feed(keycode::BTN_TOUCH, true);
+        taps.since = Some(std::time::Instant::now() - TAP_MAX * 2);
+        assert_eq!(taps.feed(keycode::BTN_TOUCH, false), Tap::None);
     }
 
     #[test]
