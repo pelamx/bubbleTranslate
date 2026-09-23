@@ -13,6 +13,14 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**Copies of 0.2.7 and older say when an update is out again.** When the
+downloads moved to their new home, the file those versions check for updates
+went with them, and they quietly stopped noticing new versions. It is back
+where they look, so the "a new version is available" notice appears again and
+leads to the current download.
+
 ## 0.2.8 — 2026-09-23
 
 **Text in Google Drive's PDF preview translates even when a screenshot is on

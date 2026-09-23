@@ -93,6 +93,13 @@ where every release asset and `latest.json` are published. An installed copy
 reads `latest.json` from it on startup, so anything that takes it offline or
 renames it stops the update notice for every copy already out there.
 
+Copies of 0.2.7 and older read it from the old address instead —
+`latest.json` at the root of **this** repository. That file is a copy kept by
+`.github/workflows/mirror-manifest.yml`, which follows the downloads
+repository every 15 minutes. Never edit it by hand and never delete it: it
+only works while this repository is public, and without it those copies are
+never told about an update.
+
 One script per platform, each rewriting only its own line of `latest.json` —
 fetched from the downloads repository, patched and put back through the API,
 so a release on one machine leaves the other two platforms alone:

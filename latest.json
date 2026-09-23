@@ -1,0 +1,14 @@
+{
+  "linux": {
+    "version": "0.2.8",
+    "url": "https://github.com/bubbleTranslate/downloads/releases/download/v0.2.8/bubbleTranslate-linux-x86_64"
+  },
+  "macos": {
+    "version": "0.2.7",
+    "url": "https://github.com/bubbleTranslate/downloads/releases/download/v0.2.7/bubbleTranslate.dmg"
+  },
+  "windows": {
+    "version": "0.2.8",
+    "url": "https://github.com/bubbleTranslate/downloads/releases/download/v0.2.8/bubbleTranslate-windows-x64.zip"
+  }
+}
