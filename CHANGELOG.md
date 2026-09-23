@@ -13,6 +13,17 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**The Windows download goes back to 0.2.6 for now. (Windows)** People updating
+were seeing the bubble appear and work, and then a black one drop on top of it
+a moment later and cover the translation they were reading. Until that is
+understood and fixed, the download button and the update notice both hand out
+0.2.6, which nobody has reported this on. If it is happening to you right now,
+closing every copy of bubbleTranslate that is running — or simply restarting
+the computer — clears it, because what draws the black bubble appears to be a
+second copy left running behind the first.
+
 ## 0.2.8 — 2026-09-23
 
 **Text in Google Drive's PDF preview translates even when a screenshot is on
