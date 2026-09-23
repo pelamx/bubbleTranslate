@@ -432,7 +432,10 @@ fn header(ui: &mut egui::Ui, state: &MainState, cfg: &mut Config, dirty: &mut bo
                             let r = response.rect;
                             let y = r.bottom() - 3.0;
                             ui.painter().line_segment(
-                                [egui::pos2(r.center().x - 7.0, y), egui::pos2(r.center().x + 7.0, y)],
+                                [
+                                    egui::pos2(r.center().x - 7.0, y),
+                                    egui::pos2(r.center().x + 7.0, y),
+                                ],
                                 egui::Stroke::new(2.0, egui::Color32::from_rgb(79, 140, 255)),
                             );
                         }
@@ -650,7 +653,6 @@ fn translate_box(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
         }
     }
 }
-
 
 fn recent(ui: &mut egui::Ui, state: &MainState) {
     for entry in state.recent.iter().take(10) {

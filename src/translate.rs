@@ -173,17 +173,18 @@ impl Translator {
                     if idx == 0 {
                         std::thread::sleep(Duration::from_millis(500));
                         if let Ok(body) = self.get_text(url)
-                            && let Ok((translated, detected)) = parse_google(&body) {
-                                return Ok(Translation {
-                                    text: translated,
-                                    source_lang: if detected.is_empty() {
-                                        sl.to_string()
-                                    } else {
-                                        detected
-                                    },
-                                    provider: Provider::Google,
-                                });
-                            }
+                            && let Ok((translated, detected)) = parse_google(&body)
+                        {
+                            return Ok(Translation {
+                                text: translated,
+                                source_lang: if detected.is_empty() {
+                                    sl.to_string()
+                                } else {
+                                    detected
+                                },
+                                provider: Provider::Google,
+                            });
+                        }
                     }
                 }
                 Err(err) => last = err,
@@ -325,10 +326,12 @@ impl Translator {
             "text": [text],
             "target_lang": target_code,
         });
-        if source != "auto" && !source.is_empty()
-            && let Some(src) = deepl_source(source) {
-                payload["source_lang"] = Value::String(src);
-            }
+        if source != "auto"
+            && !source.is_empty()
+            && let Some(src) = deepl_source(source)
+        {
+            payload["source_lang"] = Value::String(src);
+        }
         let body = payload.to_string();
 
         let response = self
@@ -566,9 +569,18 @@ mod tests {
         let failures = Translator::new().translate(&long, &cfg).unwrap_err();
         let order: Vec<Provider> = failures.iter().map(|(p, _)| *p).collect();
         assert_eq!(order, vec![Provider::MyMemory, Provider::DeepL]);
-        assert!(failures.iter().all(|(_, e)| matches!(e, TranslateError::Unavailable(_))));
+        assert!(
+            failures
+                .iter()
+                .all(|(_, e)| matches!(e, TranslateError::Unavailable(_)))
+        );
         assert!(failures[0].1.to_string().contains("MyMemory accepts 500"));
-        assert!(failures[1].1.to_string().contains("no target language 'fa'"));
+        assert!(
+            failures[1]
+                .1
+                .to_string()
+                .contains("no target language 'fa'")
+        );
     }
 
     #[test]
@@ -617,7 +629,13 @@ mod tests {
 
     #[test]
     fn google_answers_that_are_not_a_translation_are_rejected() {
-        for body in ["not json", "{}", "[]", r#"[[["   ","x"]],null,"tr"]"#, r#"{"sentences":[]}"#] {
+        for body in [
+            "not json",
+            "{}",
+            "[]",
+            r#"[[["   ","x"]],null,"tr"]"#,
+            r#"{"sentences":[]}"#,
+        ] {
             assert!(
                 matches!(parse_google(body), Err(TranslateError::BadResponse(_))),
                 "{body} should be refused"
@@ -643,7 +661,10 @@ mod tests {
 
     #[test]
     fn html_entities_are_decoded_once_and_ampersand_last() {
-        assert_eq!(decode_html_entities("&quot;a&quot; &amp; b&#39;s"), "\"a\" & b's");
+        assert_eq!(
+            decode_html_entities("&quot;a&quot; &amp; b&#39;s"),
+            "\"a\" & b's"
+        );
         // `&amp;lt;` is a literal "&lt;" in the source text, not a "<".
         assert_eq!(decode_html_entities("&amp;lt;"), "&lt;");
     }

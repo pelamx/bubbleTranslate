@@ -53,6 +53,16 @@ impl BubbleApp {
                                 "Çevriliyor (kopyalama ile)…",
                                 "Traduciendo (vía copia)…",
                             ),
+                            // Said plainly, because this is the one source
+                            // that can misread: it guessed the letters off
+                            // the pixels rather than being handed them, and
+                            // somebody comparing the bubble with the screen
+                            // should know which of the two happened.
+                            CaptureSource::Ocr => t(
+                                "Translating (read from screen)…",
+                                "Çevriliyor (ekrandan okundu)…",
+                                "Traduciendo (leído de la pantalla)…",
+                            ),
                         })
                         .size(13.5)
                         .color(pal().text_secondary),
@@ -388,11 +398,12 @@ impl BubbleApp {
             chosen = picked;
         });
         if let Some(code) = chosen
-            && code != cfg.target_lang {
-                cfg.target_lang = code;
-                dirty = true;
-                retranslate = true;
-            }
+            && code != cfg.target_lang
+        {
+            cfg.target_lang = code;
+            dirty = true;
+            retranslate = true;
+        }
         ui.add_space(8.0);
 
         ui.horizontal(|ui| {

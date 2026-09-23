@@ -93,8 +93,14 @@ fn points_per_pixel(at: (f64, f64), monitor_points: Option<egui::Vec2>) -> f64 {
     f64::from(points.x) / pixels.0
 }
 
-/// The size in physical pixels of the monitor containing a point.
-fn monitor_size(at: (f64, f64)) -> Option<(f64, f64)> {
+/// The monitor containing a point, in physical pixels on the virtual desktop.
+///
+/// The whole rectangle rather than only its size, because where a monitor
+/// *is* matters as much as how big it is once there is more than one of them:
+/// a second display above or left of the primary has negative coordinates,
+/// and an edge test against a bare width would put the bubble on the wrong
+/// screen.
+fn monitor_rect(at: (f64, f64)) -> Option<RECT> {
     let point = POINT {
         x: at.0 as i32,
         y: at.1 as i32,
@@ -104,15 +110,19 @@ fn monitor_size(at: (f64, f64)) -> Option<(f64, f64)> {
         cbSize: std::mem::size_of::<MONITORINFO>() as u32,
         ..Default::default()
     };
-    if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
-        return None;
-    }
+    unsafe { GetMonitorInfoW(monitor, &mut info) }
+        .as_bool()
+        .then_some(info.rcMonitor)
+}
+
+/// The size in physical pixels of the monitor containing a point.
+fn monitor_size(at: (f64, f64)) -> Option<(f64, f64)> {
     let RECT {
         left,
         top,
         right,
         bottom,
-    } = info.rcMonitor;
+    } = monitor_rect(at)?;
     Some(((right - left) as f64, (bottom - top) as f64))
 }
 
@@ -134,6 +144,99 @@ pub fn pointer_over(rect: egui::Rect, monitor_points: Option<egui::Vec2>) -> Opt
     let at = cursor_position()?;
     let (x, y) = to_points(at, monitor_points);
     Some(rect.contains(egui::pos2(x as f32, y as f32)))
+}
+
+/// Reads text out of a rectangle the user draws on the screen.
+///
+/// The whole gesture, start to finish: the dimmed screen goes up, the user
+/// drags, and what was under the rectangle comes back as text. `None` when
+/// they cancelled, when the rectangle held nothing readable, or when no
+/// recognition language is installed — all three are "nothing happened", and
+/// none of them is worth a bubble saying so.
+pub fn read_screen_region() -> Option<crate::platform::ScreenRead> {
+    // Asked before the screen dims rather than after the rectangle is drawn.
+    // A machine with no recognition language installed can never answer, and
+    // dimming the desktop, taking the pointer and making the user draw a
+    // rectangle before admitting that is a worse way to say nothing happened.
+    crate::trace!("region    asked to read the screen");
+
+    if !ocr::available() {
+        crate::trace!(
+            "ocr       no recognition language installed; installed: {:?}",
+            ocr::languages()
+        );
+        return None;
+    }
+
+    let region = overlay::select_region()?;
+    let text = ocr::recognize(region)?;
+
+    // Whitespace is what a rectangle drawn over a photograph comes back as.
+    if text.trim().is_empty() {
+        crate::trace!("ocr       nothing readable in the region");
+        return None;
+    }
+
+    Some(crate::platform::ScreenRead {
+        capture: crate::platform::Capture {
+            text,
+            via: crate::platform::CaptureSource::Ocr,
+        },
+        at: bubble_anchor(region),
+    })
+}
+
+/// Registers the callback for Ctrl+Shift+E.
+pub fn on_screen_region_request(ask: impl Fn() + Send + 'static) {
+    monitor::on_region_request(ask);
+}
+
+/// How far below the region the bubble sits, in physical pixels.
+const REGION_GAP: f64 = 12.0;
+
+/// How much room under the region counts as enough to put the bubble there,
+/// in physical pixels.
+///
+/// The bubble's smallest useful height is 60 of the toolkit's points, and a
+/// display at 200% makes that 120 pixels — so this is that worst case rather
+/// than a measurement. Being wrong here is cosmetic: the bubble lands a
+/// little high or a little low, never off the screen, because the toolkit
+/// clamps it to the display in either case.
+const REGION_MIN_ROOM: f64 = 120.0;
+
+/// How far inside the region the bubble sits when it has to go on top of it.
+const REGION_INSET: f64 = 16.0;
+
+/// Where the bubble goes for a region that was just read.
+///
+/// Outside it, underneath, so the rectangle the user drew stays visible next
+/// to the translation of it — which is the whole point when what was read is
+/// a picture and they want to compare the two.
+///
+/// A region tall enough to leave no room underneath is one that fills the
+/// screen, and there is nowhere outside it left to go. Then the bubble goes
+/// *on* it, inset from the corner so it sits inside rather than straddling
+/// the edge. Covering part of what was read is the lesser loss: the reading
+/// has already happened.
+fn bubble_anchor(region: ocr::Region) -> Option<(f64, f64)> {
+    let below = (
+        f64::from(region.x),
+        f64::from(region.y) + f64::from(region.height) + REGION_GAP,
+    );
+
+    let Some(monitor) = monitor_rect((f64::from(region.x), f64::from(region.y))) else {
+        return Some(below);
+    };
+
+    if below.1 + REGION_MIN_ROOM <= f64::from(monitor.bottom) {
+        return Some(below);
+    }
+
+    crate::trace!("bubble    no room under the region; placing it on top");
+    Some((
+        f64::from(region.x) + REGION_INSET,
+        f64::from(region.y) + REGION_INSET,
+    ))
 }
 
 /// The zoom that makes the app's text match the rest of the desktop.

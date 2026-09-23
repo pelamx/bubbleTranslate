@@ -381,7 +381,8 @@ pub(super) const LINE_HEIGHT_RATIO: f32 = 1.45;
 /// across several Noto families and put them wherever they like, so the list is
 /// longer and there is a search behind it — see [`find_fallback_fonts`].
 #[cfg(target_os = "macos")]
-pub(super) const FALLBACK_FONTS: &[&str] = &["/System/Library/Fonts/Supplemental/Arial Unicode.ttf"];
+pub(super) const FALLBACK_FONTS: &[&str] =
+    &["/System/Library/Fonts/Supplemental/Arial Unicode.ttf"];
 
 #[cfg(target_os = "linux")]
 pub(super) const FALLBACK_FONTS: &[&str] = &[
@@ -473,9 +474,10 @@ pub(super) fn find_fallback_fonts() -> Vec<(String, Vec<u8>)> {
         {
             let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if !path.is_empty()
-                && let Ok(bytes) = std::fs::read(&path) {
-                    found.push((path, bytes));
-                }
+                && let Ok(bytes) = std::fs::read(&path)
+            {
+                found.push((path, bytes));
+            }
         }
     }
 

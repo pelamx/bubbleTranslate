@@ -13,6 +13,24 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**Translate text that cannot be selected, by drawing a box around it.
+(Windows)** Press Ctrl+Shift+E, drag a rectangle over anything on the screen,
+and what is inside it is read and translated. A screenshot somebody sent you,
+a still from a video, a scanned page, a game, a remote desktop — until now
+those were the one thing bubbleTranslate could not help with at all. There is
+text right there on the screen, but nothing to select, so there was nothing
+to ask any application for. Escape, or the right mouse button, cancels
+without translating.
+
+The reading happens on your own computer and the picture is never sent
+anywhere, not even to us. Which languages can be read depends on what
+Windows has installed: it has to recognise the language you are translating
+*from*, so pointing it at a language your Windows was never set up for gives
+confident nonsense rather than an error. Windows Settings, under Time &
+language, is where those are added.
+
 ## 0.2.9 — 2026-09-23
 
 **A Bluetooth mouse keeps working after the laptop sleeps. (Linux)** A

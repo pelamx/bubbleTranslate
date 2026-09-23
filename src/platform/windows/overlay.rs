@@ -5,15 +5,26 @@
 //! comes back to full brightness. Let go and that is the region; press Escape
 //! or the right button and nothing happened.
 //!
-//! **How the hole is made.** The window is one black sheet over the whole
-//! virtual desktop, and the bright part is not drawn — it is cut out with
-//! [`SetWindowRgn`], exactly as the bubble's corners are in
+//! **How the hole is made.** The window is one translucent sheet over the
+//! whole virtual desktop, and the bright part is not drawn — it is cut out
+//! with [`SetWindowRgn`], exactly as the bubble's corners are in
 //! [`super::shape_bubble`]. Inside the cut the window does not exist: the
 //! pixels underneath are the real ones, at full brightness, with no alpha
 //! blending to wash them out. That matters here more than it looks, because
 //! those are the pixels that are about to be read — dimming them and
 //! undimming them in software would hand the OCR engine a slightly different
 //! image than the one on screen.
+//!
+//! **And why the selection is shown twice.** The cut alone was not enough.
+//! A window region hole reveals what is beneath it only if the desktop
+//! composites those pixels back, and on a virtual GPU it does not reliably:
+//! the sheet was solid grey, the rectangle was being drawn correctly —
+//! `CombineRgn` and `SetWindowRgn` both reported success — and there was
+//! still nothing on screen to show where it was. So the sheet is translucent
+//! rather than opaque, and [`procedure`] paints a frame around the selection
+//! in the part of the window that survives the cut. Either one alone answers
+//! "where am I selecting"; together they answer it on machines where the
+//! other does not.
 //!
 //! **Why a raw window and not a second egui viewport.** This is one black
 //! rectangle and one cut-out; it needs no renderer, and after what a frameless
@@ -26,27 +37,23 @@
 //! deliberate: it is a modal gesture, nothing else should happen while it is
 //! up, and the caller is a worker rather than the UI thread.
 //!
-//! Nothing calls this yet, for the same reason as [`super::ocr`]: what starts
-//! the gesture is still to be settled. The allow comes off with the first
-//! caller.
-#![allow(dead_code)]
 
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 
-use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    CombineRgn, CreateRectRgn, CreateSolidBrush, DeleteObject, HGDIOBJ, HRGN, RGN_DIFF,
-    SetWindowRgn, UpdateWindow,
+    BeginPaint, CombineRgn, CreateRectRgn, CreateSolidBrush, DeleteObject, EndPaint, FillRect,
+    HGDIOBJ, HRGN, InvalidateRect, PAINTSTRUCT, RGN_DIFF, SetWindowRgn, UpdateWindow,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE};
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-    GetMessageW, GetSystemMetrics, IDC_CROSS, LoadCursorW, MSG, PostQuitMessage, RegisterClassW,
-    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_SHOW,
-    SetForegroundWindow, ShowWindow, TranslateMessage, WM_CHAR, WM_DESTROY, WM_KEYDOWN,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_RBUTTONDOWN, WNDCLASSW, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_POPUP,
+    GetMessageW, GetSystemMetrics, IDC_CROSS, LWA_ALPHA, LoadCursorW, MSG, PostQuitMessage,
+    RegisterClassW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+    SW_SHOW, SetForegroundWindow, SetLayeredWindowAttributes, ShowWindow, TranslateMessage,
+    WM_CHAR, WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT,
+    WM_RBUTTONDOWN, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
@@ -73,7 +80,7 @@ fn pack(x: i32, y: i32) -> isize {
 }
 
 fn unpack(packed: isize) -> Option<(i32, i32)> {
-    (packed != NONE).then(|| ((packed >> 32) as i32, (packed & 0xffff_ffff) as u32 as i32))
+    (packed != NONE).then_some(((packed >> 32) as i32, (packed & 0xffff_ffff) as u32 as i32))
 }
 
 /// The whole virtual desktop, in physical pixels.
@@ -121,11 +128,19 @@ pub fn select_region() -> Option<Region> {
         return None;
     }
 
+    crate::trace!("overlay   putting the sheet up over {width}x{height} at ({x}, {y})");
+
     // SAFETY: the window is destroyed before this returns on every path, and
     // the class is registered once — a second registration fails harmlessly
     // and the existing class is used.
     let window = unsafe {
-        let instance = GetModuleHandleW(None).ok()?;
+        let instance = match GetModuleHandleW(None) {
+            Ok(instance) => instance,
+            Err(error) => {
+                crate::trace!("overlay   no module handle ({error})");
+                return None;
+            }
+        };
         let class = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(procedure),
@@ -133,7 +148,7 @@ pub fn select_region() -> Option<Region> {
             // The crosshair is the whole affordance: it is what says the click
             // about to happen means "corner of a rectangle" rather than
             // whatever the window underneath would have done with it.
-            hCursor: LoadCursorW(None, IDC_CROSS).ok()?,
+            hCursor: LoadCursorW(None, IDC_CROSS).unwrap_or_default(),
             // The sheet itself: the whole window is this colour, and the cut
             // in [`reshape`] is what lets the screen back through.
             hbrBackground: CreateSolidBrush(DIM),
@@ -142,11 +157,21 @@ pub fn select_region() -> Option<Region> {
         };
         RegisterClassW(&class);
 
-        CreateWindowExW(
+        match CreateWindowExW(
             // Topmost so it covers what is being read, and a tool window so
             // it never appears in the taskbar or in Alt+Tab. It is up for a
             // second and a half.
-            WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+            //
+            // Layered as well, so the sheet is translucent rather than solid:
+            // the user has to be able to see what they are aiming at while
+            // they aim at it. The cut-out still goes to full brightness on
+            // top of that — two ways of showing the same thing, which is
+            // deliberate. A window region hole reveals the pixels underneath
+            // only if the desktop composites them back, and on the virtual
+            // GPU this is developed against it does not always; the
+            // translucency and the frame below are what make the selection
+            // visible when it does not.
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED,
             CLASS,
             PCWSTR::null(),
             WS_POPUP,
@@ -158,8 +183,13 @@ pub fn select_region() -> Option<Region> {
             None,
             Some(instance.into()),
             None,
-        )
-        .ok()?
+        ) {
+            Ok(window) => window,
+            Err(error) => {
+                crate::trace!("overlay   the window would not be created ({error})");
+                return None;
+            }
+        }
     };
 
     // SAFETY: the window exists until it is destroyed below. Capture is taken
@@ -167,6 +197,7 @@ pub fn select_region() -> Option<Region> {
     // window that would otherwise take the button — still reports its moves
     // here.
     unsafe {
+        let _ = SetLayeredWindowAttributes(window, COLORREF(0), SHEET_ALPHA, LWA_ALPHA);
         let _ = ShowWindow(window, SW_SHOW);
         let _ = SetForegroundWindow(window);
         let _ = UpdateWindow(window);
@@ -256,6 +287,10 @@ fn reshape(window: HWND) {
             let _ = DeleteObject(HGDIOBJ(whole.0));
         }
         let _ = DeleteObject(HGDIOBJ(hole.0));
+
+        // The cut moves the hole; this is what redraws the frame around its
+        // new position and erases it from the old one.
+        let _ = InvalidateRect(Some(window), None, true);
     }
 }
 
@@ -263,6 +298,23 @@ fn reshape(window: HWND) {
 /// dark enough to say "the bright part is the part that counts" and light
 /// enough to still read the screen through it while choosing.
 const DIM: COLORREF = COLORREF(0x0020_2020);
+
+/// How opaque the sheet is, out of 255.
+///
+/// Enough to read the screen through while aiming, and enough that the
+/// selection is obviously not dimmed. The whole gesture lasts a second, so
+/// this is a signpost rather than something anyone looks at.
+const SHEET_ALPHA: u8 = 140;
+
+/// The frame drawn around the selection, in `0x00bbggrr`.
+///
+/// The one thing on the overlay with a colour of its own, because it is the
+/// only thing that says *where* the rectangle is. It is drawn just outside
+/// the cut, so it survives the hole being cut out from under it.
+const FRAME: COLORREF = COLORREF(0x00ff_c84a);
+
+/// How thick that frame is, in pixels.
+const FRAME_WIDTH: i32 = 3;
 
 const CLASS: PCWSTR = w!("bubbleTranslateRegionOverlay");
 
@@ -318,6 +370,70 @@ extern "system" fn procedure(
         WM_KEYDOWN if wparam.0 as u16 == VK_ESCAPE.0 => {
             CANCELLED.store(true, Ordering::SeqCst);
             FINISHED.store(true, Ordering::SeqCst);
+            LRESULT(0)
+        }
+        // The frame around the selection, and the only thing on the sheet
+        // with a colour of its own.
+        //
+        // Drawn just *outside* the rectangle, in the part of the window that
+        // survives the cut, so it is visible whether or not the cut reveals
+        // anything. On a machine where the hole works it outlines bright
+        // pixels; on one where it does not it is still the answer to "where
+        // am I selecting".
+        WM_PAINT => {
+            let mut paint = PAINTSTRUCT::default();
+            // SAFETY: paired with `EndPaint` below on every path.
+            let dc = unsafe { BeginPaint(window, &mut paint) };
+
+            if let (Some(anchor), Some(current)) = (
+                unpack(ANCHOR.load(Ordering::SeqCst)),
+                unpack(CURRENT.load(Ordering::SeqCst)),
+            ) {
+                let region = between(anchor, current);
+                if region.width > 0 && region.height > 0 {
+                    let (origin_x, origin_y, _, _) = virtual_screen();
+                    let (left, top) = (region.x - origin_x, region.y - origin_y);
+                    let (right, bottom) = (left + region.width, top + region.height);
+                    let edge = FRAME_WIDTH;
+
+                    // SAFETY: the brush is deleted before the handler returns.
+                    unsafe {
+                        let brush = CreateSolidBrush(FRAME);
+                        for side in [
+                            RECT {
+                                left: left - edge,
+                                top: top - edge,
+                                right: right + edge,
+                                bottom: top,
+                            },
+                            RECT {
+                                left: left - edge,
+                                top: bottom,
+                                right: right + edge,
+                                bottom: bottom + edge,
+                            },
+                            RECT {
+                                left: left - edge,
+                                top,
+                                right: left,
+                                bottom,
+                            },
+                            RECT {
+                                left: right,
+                                top,
+                                right: right + edge,
+                                bottom,
+                            },
+                        ] {
+                            FillRect(dc, &side, brush);
+                        }
+                        let _ = DeleteObject(HGDIOBJ(brush.0));
+                    }
+                }
+            }
+
+            // SAFETY: matches the `BeginPaint` above.
+            let _ = unsafe { EndPaint(window, &paint) };
             LRESULT(0)
         }
         // Swallowed so the overlay never beeps: a key pressed on a window

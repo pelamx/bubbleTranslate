@@ -45,6 +45,13 @@ pub enum Request {
     /// to get a translator that never interrupts, and a hotkey that went quiet
     /// with it would leave no way to ask at all.
     Hotkey(Trigger),
+    /// The user asked to read a rectangle of the screen rather than a
+    /// selection.
+    ///
+    /// Carries no anchor and no clipboard mark, unlike the other two: there
+    /// has been no gesture yet. The rectangle is drawn *while* this is being
+    /// handled, and where the bubble goes is decided from it afterwards.
+    ScreenRegion,
     /// The user changed the target language; redo the last selection.
     Retranslate,
     /// Text typed into the main window's translate box. Deliberately separate
@@ -283,7 +290,7 @@ fn run(
         // two decisions below: the auto-translate switch does not apply to a
         // request, and neither does the repeat window — pressing the key twice
         // on the same words means "again", not "the same gesture twice".
-        let asked_for = matches!(request, Request::Hotkey(_));
+        let asked_for = matches!(request, Request::Hotkey(_) | Request::ScreenRegion);
 
         // The last element is whether the allowance applies. Re-reading the
         // same selection in another language is the same translation, so
@@ -342,6 +349,34 @@ fn run(
                     continue;
                 }
                 (text, trigger.at, capture.via, true)
+            }
+            Request::ScreenRegion => {
+                // The overlay is modal and blocks here until the user has
+                // drawn a rectangle or given up. That is the right thread for
+                // it — this one already waits on captures and providers, and
+                // the UI thread must stay free to keep drawing the bubble.
+                let Some(read) = crate::platform::read_screen_region() else {
+                    continue;
+                };
+                let text = read.capture.text;
+                let chars = text.chars().count();
+                crate::trace!(
+                    "capture   via={:?} chars={chars} text={:?}",
+                    read.capture.via,
+                    truncate_for_log(&text),
+                );
+                // The same bounds a selection gets. A rectangle dragged over
+                // a whole page of text is as much a mistake as selecting one,
+                // and costs more to translate.
+                if chars < cfg.min_chars || chars > cfg.max_chars {
+                    crate::trace!(
+                        "skip      {chars} chars outside [{}, {}]",
+                        cfg.min_chars,
+                        cfg.max_chars,
+                    );
+                    continue;
+                }
+                (text, read.at, read.capture.via, true)
             }
         };
 

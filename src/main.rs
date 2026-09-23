@@ -281,6 +281,17 @@ fn main() -> eframe::Result<()> {
                 }
             }
 
+            // Ctrl+Shift+E: read a rectangle of the screen instead of a
+            // selection. Registered the same way everywhere; on a platform
+            // that has no such gesture yet the callback is simply never
+            // called, so nothing here needs to know which platform it is.
+            {
+                let requests = engine.sender();
+                crate::platform::on_screen_region_request(move || {
+                    let _ = requests.send(Request::ScreenRegion);
+                });
+            }
+
             let requests = engine.sender();
             if let Err(err) = monitor::spawn(move |trigger| {
                 // Nothing here may block. This runs inside the event tap

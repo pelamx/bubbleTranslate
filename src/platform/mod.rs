@@ -48,6 +48,12 @@ pub enum CaptureSource {
     /// Read the desktop's primary selection, which selecting text fills in by
     /// itself. Nothing is synthesized and nothing the user owns is touched.
     PrimarySelection,
+    /// Read off the screen itself, out of a rectangle the user drew.
+    ///
+    /// The one source that never asked an application anything, and so the
+    /// only one that works on a picture, a video frame or a remote desktop —
+    /// and the only one that can be wrong about what it read.
+    Ocr,
 }
 
 #[derive(Debug, Clone)]
@@ -132,6 +138,38 @@ pub fn preferred_zoom(_native_pixels_per_point: f32) -> Option<f32> {
     None
 }
 
+/// Text read off the screen, and where to put the bubble that says it.
+#[derive(Debug, Clone)]
+pub struct ScreenRead {
+    pub capture: Capture,
+    /// Where to anchor the bubble, in the same space a [`Trigger`] anchor is
+    /// given in.
+    ///
+    /// Chosen against the region rather than the pointer, because the pointer
+    /// finished the drag somewhere arbitrary — at the far corner of whatever
+    /// was being read, which is the one place the bubble must not cover.
+    pub at: Option<(f64, f64)>,
+}
+
+/// Reads text out of a rectangle the user draws on the screen.
+///
+/// `None` everywhere but Windows so far, and `None` there too when the drag
+/// was cancelled or held no text. A platform without it is not broken and
+/// says nothing: the key that asks for this simply does nothing, exactly as
+/// it did before there was a key.
+#[cfg(not(target_os = "windows"))]
+pub fn read_screen_region() -> Option<ScreenRead> {
+    None
+}
+
+/// Asks to be told when the user presses the key that reads the screen.
+///
+/// Nothing anywhere but Windows yet. The callback is simply never called,
+/// which is what keeps [`crate::engine`] free of a platform test: it sends
+/// the request the same way everywhere and nowhere else has to know.
+#[cfg(not(target_os = "windows"))]
+pub fn on_screen_region_request(_ask: impl Fn() + Send + 'static) {}
+
 /// Cuts the bubble's window to the shape of the card painted inside it.
 ///
 /// Nothing to do wherever the bubble's window is transparent, which is
@@ -165,8 +203,9 @@ pub use linux::{
 
 #[cfg(target_os = "windows")]
 pub use windows::{
-    cursor_position, frame_offset, keep_on_all_workspaces, mark_as_notification, pointer_over,
-    preferred_zoom, shape_bubble, to_points,
+    cursor_position, frame_offset, keep_on_all_workspaces, mark_as_notification,
+    on_screen_region_request, pointer_over, preferred_zoom, read_screen_region, shape_bubble,
+    to_points,
 };
 
 /// Whether selections can actually be watched here, and what to tell the user

@@ -104,7 +104,6 @@ fn trigger_key() -> TriggerKey {
     }
 }
 
-
 /// Never blocked here, so there is nothing to explain.
 pub fn trigger_key_blocked() -> Option<String> {
     None

@@ -28,12 +28,6 @@
 //! their screen. What it cannot do is recognise a language whose pack is not
 //! installed: see [`languages`].
 //!
-//! Nothing calls this yet: what picks the region — a hotkey, a drag over a
-//! dimmed screen, an item in the tray menu — is the half that has to match
-//! what the macOS build already does, and until the two agree this module is
-//! the engine with no ignition. Hence the allow; it comes off with the first
-//! caller.
-#![allow(dead_code)]
 
 use windows::Graphics::Imaging::{BitmapPixelFormat, SoftwareBitmap};
 use windows::Media::Ocr::OcrEngine;
@@ -110,7 +104,13 @@ pub fn recognize(region: Region) -> Option<String> {
     let engine = match OcrEngine::TryCreateFromUserProfileLanguages() {
         Ok(engine) => engine,
         Err(error) => {
-            crate::trace!("ocr       no engine for the user's languages ({error})");
+            // The installed list comes with the failure, because that is the
+            // question the failure raises: it is not that OCR is missing, it
+            // is that the language the user reads in was never installed.
+            crate::trace!(
+                "ocr       no engine for the user's languages ({error}); installed: {:?}",
+                languages()
+            );
             return None;
         }
     };

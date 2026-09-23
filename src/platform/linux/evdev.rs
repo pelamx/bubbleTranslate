@@ -204,12 +204,12 @@ pub fn available() -> bool {
 /// back to the settle window, exactly as it does without this reader at all.
 pub fn ensure_pointer_started() {
     static ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    ONCE.get_or_init(|| {
-        match start_pointer(|down| BUTTON_DOWN.store(down, Ordering::Relaxed)) {
+    ONCE.get_or_init(
+        || match start_pointer(|down| BUTTON_DOWN.store(down, Ordering::Relaxed)) {
             Ok(()) => POINTER_RUNNING.store(true, Ordering::Relaxed),
             Err(reason) => crate::trace!("evdev: not reading the mouse button — {reason}"),
-        }
-    });
+        },
+    );
 }
 
 /// Whether the left mouse button is being read, so its state can be trusted.
@@ -273,26 +273,32 @@ pub fn start() -> Result<(), String> {
             // "no idea" (fail-open) instead of "not held" (every gated
             // selection silently dropped) for the life of the process.
             RUNNING.store(true, Ordering::Relaxed);
-            read_loop(devices, "keyboard", keyboards, |present| {
-                // With no keyboard attached the answer is "no idea", not "not
-                // held" -- the gate fails open rather than dropping every
-                // selection until one is plugged back in.
-                RUNNING.store(present, Ordering::Relaxed);
-                if !present {
-                    HELD.store(0, Ordering::Relaxed);
-                }
-            }, |code, down| {
-                // Everything that is not a modifier leaves no trace: no
-                // branch below stores it.
-                let Some(bit) = bit(code) else {
-                    return;
-                };
-                if down {
-                    HELD.fetch_or(bit, Ordering::Relaxed);
-                } else {
-                    HELD.fetch_and(!bit, Ordering::Relaxed);
-                }
-            });
+            read_loop(
+                devices,
+                "keyboard",
+                keyboards,
+                |present| {
+                    // With no keyboard attached the answer is "no idea", not "not
+                    // held" -- the gate fails open rather than dropping every
+                    // selection until one is plugged back in.
+                    RUNNING.store(present, Ordering::Relaxed);
+                    if !present {
+                        HELD.store(0, Ordering::Relaxed);
+                    }
+                },
+                |code, down| {
+                    // Everything that is not a modifier leaves no trace: no
+                    // branch below stores it.
+                    let Some(bit) = bit(code) else {
+                        return;
+                    };
+                    if down {
+                        HELD.fetch_or(bit, Ordering::Relaxed);
+                    } else {
+                        HELD.fetch_and(!bit, Ordering::Relaxed);
+                    }
+                },
+            );
             // The reader itself stopped; "no idea" again, not "not held".
             RUNNING.store(false, Ordering::Relaxed);
             HELD.store(0, Ordering::Relaxed);
@@ -397,20 +403,26 @@ pub fn start_pointer(on_left: impl Fn(bool) + Send + 'static) -> Result<(), Stri
         .name("pointer-button".into())
         .spawn(move || {
             let mut taps = Taps::default();
-            read_loop(devices, "pointer", pointers, |_| {}, |code, down| {
-                if code == keycode::BTN_LEFT {
-                    on_left(down);
-                }
-                match taps.feed(code, down) {
-                    Tap::Click => {
-                        on_left(true);
-                        on_left(false);
+            read_loop(
+                devices,
+                "pointer",
+                pointers,
+                |_| {},
+                |code, down| {
+                    if code == keycode::BTN_LEFT {
+                        on_left(down);
                     }
-                    Tap::Press => on_left(true),
-                    Tap::Release => on_left(false),
-                    Tap::None => {}
-                }
-            })
+                    match taps.feed(code, down) {
+                        Tap::Click => {
+                            on_left(true);
+                            on_left(false);
+                        }
+                        Tap::Press => on_left(true),
+                        Tap::Release => on_left(false),
+                        Tap::None => {}
+                    }
+                },
+            )
         })
         .map_err(|err| format!("could not start the pointer reader: {err}"))?;
     crate::trace!("evdev: watching the left mouse button");
@@ -453,9 +465,9 @@ fn read_loop(
     let mut ids: Vec<Option<(u64, u64)>> = Vec::new();
 
     let adopt = |found: Vec<std::fs::File>,
-                     files: &mut Vec<std::fs::File>,
-                     fds: &mut Vec<libc::pollfd>,
-                     ids: &mut Vec<Option<(u64, u64)>>| {
+                 files: &mut Vec<std::fs::File>,
+                 fds: &mut Vec<libc::pollfd>,
+                 ids: &mut Vec<Option<(u64, u64)>>| {
         for file in found {
             let id = identity(&file);
             if id.is_some() && ids.contains(&id) {
@@ -499,7 +511,11 @@ fn read_loop(
         // passed; poll writes only into `revents`. With no devices at all it
         // is simply a sleep until the next rescan.
         let ready = unsafe {
-            libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, RESCAN.as_millis() as i32)
+            libc::poll(
+                fds.as_mut_ptr(),
+                fds.len() as libc::nfds_t,
+                RESCAN.as_millis() as i32,
+            )
         };
         if ready < 0 {
             let err = std::io::Error::last_os_error();
@@ -544,8 +560,7 @@ fn read_loop(
                         // turn — these fds are non-blocking precisely so
                         // this returns instead of parking on whichever
                         // device spoke last.
-                        std::io::ErrorKind::WouldBlock
-                        | std::io::ErrorKind::Interrupted => break,
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted => break,
                         _ => {
                             crate::trace!("evdev: read failed ({err}); dropping the device");
                             gone.push(index);
@@ -559,7 +574,10 @@ fn read_loop(
                 if event.kind != EV_KEY {
                     continue;
                 }
-                on_key(event.code, event.value == PRESSED || event.value == REPEATED);
+                on_key(
+                    event.code,
+                    event.value == PRESSED || event.value == REPEATED,
+                );
             }
         }
 
@@ -635,7 +653,11 @@ mod tests {
         taps.feed(keycode::BTN_TOUCH, true);
         taps.feed(keycode::BTN_LEFT, true);
         taps.feed(keycode::BTN_LEFT, false);
-        assert_eq!(taps.feed(keycode::BTN_TOUCH, false), Tap::None, "a press already clicked");
+        assert_eq!(
+            taps.feed(keycode::BTN_TOUCH, false),
+            Tap::None,
+            "a press already clicked"
+        );
     }
 
     #[test]

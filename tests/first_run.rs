@@ -57,8 +57,14 @@ impl Sandbox {
         if report.contains("allowance unlimited") {
             return None;
         }
-        let line = report.lines().find(|l| l.starts_with("used")).expect("no `used` line");
-        let left = line.split(", ").nth(1).expect("no `left` in the `used` line");
+        let line = report
+            .lines()
+            .find(|l| l.starts_with("used"))
+            .expect("no `used` line");
+        let left = line
+            .split(", ")
+            .nth(1)
+            .expect("no `left` in the `used` line");
         Some(left.split_whitespace().next().unwrap().parse().unwrap())
     }
 
@@ -89,7 +95,10 @@ fn a_new_install_starts_with_ten() {
         let box_ = Sandbox::new(name);
         box_.run(&args);
         assert!(box_.config().exists(), "`{name}` did not write a config");
-        assert!(box_.usage().exists(), "`{name}` wrote a config with no counter");
+        assert!(
+            box_.usage().exists(),
+            "`{name}` wrote a config with no counter"
+        );
         // `--translate` may have spent one if the network was there.
         let left = box_.left_today().expect("a new install is unlimited");
         assert!(left >= 9, "`{name}` left a new install with {left}");
@@ -103,7 +112,11 @@ fn deleting_the_counter_buys_nothing() {
     let box_ = Sandbox::new("deleted");
     assert_eq!(box_.left_today(), Some(10));
     std::fs::remove_file(box_.usage()).expect("no counter to remove");
-    assert_eq!(box_.left_today(), Some(0), "deleting the counter bought translations");
+    assert_eq!(
+        box_.left_today(),
+        Some(0),
+        "deleting the counter bought translations"
+    );
 }
 
 /// Editing the counter by hand breaks its seal, which also reads as spent.
@@ -113,7 +126,10 @@ fn editing_the_counter_buys_nothing() {
     assert_eq!(box_.left_today(), Some(10));
     let raw = std::fs::read_to_string(box_.usage()).unwrap();
     let edited = raw.replacen("\"used\": 0", "\"used\": 3", 1);
-    assert_ne!(raw, edited, "the counter's shape changed; this test needs rewriting");
+    assert_ne!(
+        raw, edited,
+        "the counter's shape changed; this test needs rewriting"
+    );
     std::fs::write(box_.usage(), edited).unwrap();
     assert_eq!(box_.left_today(), Some(0), "an edited counter was trusted");
 
@@ -121,7 +137,11 @@ fn editing_the_counter_buys_nothing() {
     let raw = std::fs::read_to_string(box_.usage()).unwrap();
     let flagged = raw.replacen("{", "{\n  \"legacy_unlimited\": true,", 1);
     std::fs::write(box_.usage(), flagged).unwrap();
-    assert_eq!(box_.left_today(), Some(0), "the legacy flag still grants unlimited use");
+    assert_eq!(
+        box_.left_today(),
+        Some(0),
+        "the legacy flag still grants unlimited use"
+    );
 }
 
 /// An honest counter, written and read back on the same machine, keeps its

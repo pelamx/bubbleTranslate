@@ -27,8 +27,9 @@ use std::time::{Duration, Instant};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::UI::HiDpi::GetDpiForSystem;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, GetDoubleClickTime, VIRTUAL_KEY, VK_A, VK_C, VK_CONTROL, VK_DOWN, VK_END,
-    VK_HOME, VK_LEFT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_UP,
+    GetAsyncKeyState, GetDoubleClickTime, VIRTUAL_KEY, VK_A, VK_C, VK_CONTROL, VK_DOWN, VK_E,
+    VK_END, VK_HOME, VK_LEFT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RIGHT, VK_RWIN, VK_SHIFT,
+    VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetCursorPos, GetMessageW, HHOOK, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT,
@@ -84,6 +85,23 @@ static CLIPBOARD_BEFORE_COPY: AtomicIsize = AtomicIsize::new(0);
 static ON_TRIGGER: OnceLock<Mutex<TriggerSink>> = OnceLock::new();
 
 type TriggerSink = Box<dyn Fn(Trigger) + Send>;
+
+/// Told when Ctrl+Shift+E is pressed; see [`keyboard_hook`].
+///
+/// Separate from [`ON_TRIGGER`] rather than folded into it, because the two
+/// say different things: a trigger carries a finished selection gesture, and
+/// this carries nothing at all — the user asked to draw a rectangle, and
+/// where it will be is not known until they have drawn it.
+static ON_REGION: OnceLock<Mutex<Box<dyn Fn() + Send>>> = OnceLock::new();
+
+/// Registers the callback for the read-the-screen key.
+///
+/// Best effort and silent if called twice: the hook is installed once for the
+/// life of the process, and a second registration would be a bug rather than
+/// something to recover from.
+pub fn on_region_request(ask: impl Fn() + Send + 'static) {
+    let _ = ON_REGION.set(Mutex::new(Box::new(ask)));
+}
 
 /// The press that a drag is being measured from, and what the clipboard looked
 /// like when it began. `None` between gestures.
@@ -360,6 +378,27 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
     }
 
     let key = VIRTUAL_KEY(event.vkCode as u16);
+
+    // Ctrl+Shift+E: read a rectangle of the screen instead of a selection.
+    //
+    // Swallowed rather than passed on — both halves of the press, so the
+    // application underneath sees neither. That is what a hotkey is, and
+    // letting it through as well would fire whatever Ctrl+Shift+E means in
+    // the window being read at the same moment as the overlay comes up.
+    if key == VK_E && held(VK_CONTROL) && held(VK_SHIFT) {
+        if wparam.0 as u32 == WM_KEYDOWN {
+            crate::trace!("key-down  ctrl+shift+e -> READ SCREEN");
+            match ON_REGION.get() {
+                Some(ask) => match ask.lock() {
+                    Ok(ask) => ask(),
+                    Err(_) => crate::trace!("region    the callback lock was poisoned"),
+                },
+                None => crate::trace!("region    nobody registered for the key"),
+            }
+        }
+        return LRESULT(1);
+    }
+
     match wparam.0 as u32 {
         WM_KEYDOWN if key == VK_C && held(VK_CONTROL) => {
             // Sampled before the application has seen the copy, so that what

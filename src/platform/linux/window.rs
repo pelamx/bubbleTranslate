@@ -100,9 +100,10 @@ fn hyprland_pin() -> bool {
         return true;
     }
     if let Some(last) = state.last
-        && last.elapsed() < RETRY_INTERVAL {
-            return false;
-        }
+        && last.elapsed() < RETRY_INTERVAL
+    {
+        return false;
+    }
     state.last = Some(Instant::now());
 
     match pin_via_hyprctl() {

@@ -853,7 +853,10 @@ mod tests {
     fn the_placeholder_key_is_not_a_key() {
         for placeholder in ["0".repeat(64), "0".repeat(32), String::new()] {
             assert!(
-                matches!(parse_service_key(&placeholder), Err(VerifyError::NoServiceKey)),
+                matches!(
+                    parse_service_key(&placeholder),
+                    Err(VerifyError::NoServiceKey)
+                ),
                 "{placeholder:?} was treated as a key",
             );
         }
@@ -926,8 +929,14 @@ mod tests {
             iat: 0,
             exp: 0,
         };
-        assert_eq!(with(Some("monthly")).entitlement().cycle, Some(Cycle::Monthly));
-        assert_eq!(with(Some("yearly")).entitlement().cycle, Some(Cycle::Yearly));
+        assert_eq!(
+            with(Some("monthly")).entitlement().cycle,
+            Some(Cycle::Monthly)
+        );
+        assert_eq!(
+            with(Some("yearly")).entitlement().cycle,
+            Some(Cycle::Yearly)
+        );
 
         for odd in [None, Some(""), Some("Quarterly"), Some("weekly")] {
             let entitlement = with(odd).entitlement();

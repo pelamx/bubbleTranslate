@@ -215,13 +215,10 @@ pub fn pointer_over(
     // The lock is never held across the query: `cursor::position()` may
     // shell out to the compositor, and holding the mutex while it does would
     // turn one wedged query into a mutex every later caller waits on.
-    let cached = CACHE
-        .lock()
-        .ok()
-        .and_then(|cache| match *cache {
-            Some((at, position)) if at.elapsed() < REFRESH => Some(position),
-            _ => None,
-        });
+    let cached = CACHE.lock().ok().and_then(|cache| match *cache {
+        Some((at, position)) if at.elapsed() < REFRESH => Some(position),
+        _ => None,
+    });
     let fresh = match cached {
         Some(position) => position,
         None => {

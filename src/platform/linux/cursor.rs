@@ -43,9 +43,10 @@ pub fn screen_size() -> Option<(f64, f64)> {
 
     let mut cache = CACHE.lock().ok()?;
     if let Some((at, size)) = *cache
-        && at.elapsed() < TTL {
-            return size;
-        }
+        && at.elapsed() < TTL
+    {
+        return size;
+    }
     let size = match backend() {
         Backend::X11Primary => super::x11::screen_size(),
         _ => compositor_screen_size(),
@@ -133,9 +134,13 @@ fn hyprland_monitor() -> Option<MonitorInfo> {
             continue;
         };
         if let Some((cx, cy)) = cursor
-            && cx >= x && cx < x + info.width && cy >= y && cy < y + info.height {
-                return Some(info);
-            }
+            && cx >= x
+            && cx < x + info.width
+            && cy >= y
+            && cy < y + info.height
+        {
+            return Some(info);
+        }
         if first.is_none() {
             first = Some(info);
         }

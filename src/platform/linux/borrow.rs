@@ -57,7 +57,14 @@ const MULTI_CLICK: Duration = Duration::from_millis(400);
 
 /// The window classes a copy may be sent to, as lowercase substrings.
 const BROWSERS: [&str; 9] = [
-    "chrome", "chromium", "brave", "microsoft-edge", "vivaldi", "helium", "firefox", "zen",
+    "chrome",
+    "chromium",
+    "brave",
+    "microsoft-edge",
+    "vivaldi",
+    "helium",
+    "firefox",
+    "zen",
     "librewolf",
 ];
 
@@ -196,10 +203,22 @@ mod tests {
 
     #[test]
     fn only_browsers_are_sent_a_copy() {
-        for class in ["google-chrome", "chromium", "brave-browser", "firefox", "zen"] {
+        for class in [
+            "google-chrome",
+            "chromium",
+            "brave-browser",
+            "firefox",
+            "zen",
+        ] {
             assert!(is_browser(class), "{class}");
         }
-        for class in ["alacritty", "com.mitchellh.ghostty", "code", "kitty", "foot"] {
+        for class in [
+            "alacritty",
+            "com.mitchellh.ghostty",
+            "code",
+            "kitty",
+            "foot",
+        ] {
             assert!(!is_browser(class), "{class}");
         }
     }

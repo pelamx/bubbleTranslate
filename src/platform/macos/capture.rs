@@ -20,7 +20,7 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use core_foundation::base::{CFRelease, CFTypeRef, CFTypeID, TCFType};
+use core_foundation::base::{CFRelease, CFTypeID, CFTypeRef, TCFType};
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::string::{CFString, CFStringRef};
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, EventField};

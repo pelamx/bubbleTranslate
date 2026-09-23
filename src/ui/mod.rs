@@ -44,8 +44,8 @@ const READINESS_POLL: Duration = Duration::from_millis(750);
 mod draw;
 mod theme;
 
-pub use theme::{TRANSPARENT_BUBBLE, pal};
 use theme::*;
+pub use theme::{TRANSPARENT_BUBBLE, pal};
 
 enum State {
     Hidden,

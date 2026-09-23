@@ -263,7 +263,9 @@ fn clipboard_selection() -> Option<String> {
     // or a file list there replaced what the user had just the same, and
     // `copied` says nothing about that. This only restores text; a clobbered
     // image or file list is not preserved either way.
-    if clipboard_sequence() != before && let Some(previous) = previous {
+    if clipboard_sequence() != before
+        && let Some(previous) = previous
+    {
         write_clipboard_string(&previous);
     }
 

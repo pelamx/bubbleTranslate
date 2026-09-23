@@ -24,13 +24,14 @@ pub(super) fn languages(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Conf
                 }
             });
         if let Some(code) = picked
-            && code != cfg.target_lang {
-                cfg.target_lang = code;
-                dirty = true;
-                // Apply the change to the text already captured, so the bubble
-                // updates without needing a fresh selection.
-                let _ = state.requests.send(Request::Retranslate);
-            }
+            && code != cfg.target_lang
+        {
+            cfg.target_lang = code;
+            dirty = true;
+            // Apply the change to the text already captured, so the bubble
+            // updates without needing a fresh selection.
+            let _ = state.requests.send(Request::Retranslate);
+        }
     });
 
     ui.add_space(8.0);
@@ -75,10 +76,11 @@ pub(super) fn languages(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Conf
                 }
             });
         if let Some(code) = picked
-            && code != cfg.source_lang {
-                cfg.source_lang = code;
-                dirty = true;
-            }
+            && code != cfg.source_lang
+        {
+            cfg.source_lang = code;
+            dirty = true;
+        }
     });
 
     dirty

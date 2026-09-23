@@ -238,7 +238,11 @@ fn save_all(
         }
         saved.push((mime.clone(), bytes));
     }
-    if saved.is_empty() { Err(()) } else { Ok(Some(saved)) }
+    if saved.is_empty() {
+        Err(())
+    } else {
+        Ok(Some(saved))
+    }
 }
 
 fn serve_clipboard(contents: Saved) -> Result<(), String> {

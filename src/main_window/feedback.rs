@@ -255,7 +255,6 @@ pub(super) fn send_feedback(ctx: &egui::Context, message: &str, via: FeedbackVia
     mail.note.to_string()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
