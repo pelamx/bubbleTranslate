@@ -179,7 +179,15 @@ pub fn start() -> Result<(), String> {
             // "no idea" (fail-open) instead of "not held" (every gated
             // selection silently dropped) for the life of the process.
             RUNNING.store(true, Ordering::Relaxed);
-            read_loop(devices, "keyboard", |code, down| {
+            read_loop(devices, "keyboard", keyboards, |present| {
+                // With no keyboard attached the answer is "no idea", not "not
+                // held" -- the gate fails open rather than dropping every
+                // selection until one is plugged back in.
+                RUNNING.store(present, Ordering::Relaxed);
+                if !present {
+                    HELD.store(0, Ordering::Relaxed);
+                }
+            }, |code, down| {
                 // Everything that is not a modifier leaves no trace: no
                 // branch below stores it.
                 let Some(bit) = bit(code) else {
@@ -191,7 +199,7 @@ pub fn start() -> Result<(), String> {
                     HELD.fetch_and(!bit, Ordering::Relaxed);
                 }
             });
-            // The last device went away; "no idea" again, not "not held".
+            // The reader itself stopped; "no idea" again, not "not held".
             RUNNING.store(false, Ordering::Relaxed);
             HELD.store(0, Ordering::Relaxed);
         })
@@ -228,7 +236,6 @@ fn devices(wanted: impl Fn(RawFd) -> bool) -> Vec<std::fs::File> {
             continue;
         };
         if wanted(file.as_raw_fd()) {
-            crate::trace!("evdev: reading {}", path.display());
             found.push(file);
         }
     }
@@ -295,7 +302,7 @@ pub fn start_pointer(on_left: impl Fn(bool) + Send + 'static) -> Result<(), Stri
     std::thread::Builder::new()
         .name("pointer-button".into())
         .spawn(move || {
-            read_loop(devices, "pointer", |code, down| {
+            read_loop(devices, "pointer", pointers, |_| {}, |code, down| {
                 if code == keycode::BTN_LEFT {
                     on_left(down);
                 }
@@ -306,22 +313,61 @@ pub fn start_pointer(on_left: impl Fn(bool) + Send + 'static) -> Result<(), Stri
     Ok(())
 }
 
-/// Reads key events from `devices` until none are left, handing each one to
-/// `on_key` as a code and whether it is down. Autorepeat counts as down.
-fn read_loop(devices: Vec<std::fs::File>, what: &str, mut on_key: impl FnMut(u16, bool)) {
+/// How often the readers look for devices that were not there before.
+///
+/// A Bluetooth mouse that reconnects after the laptop sleeps comes back as a
+/// new event node, and the old one is gone for good; without a rescan the
+/// reader goes deaf to that mouse until the app is restarted. Opening a
+/// couple of dozen nodes every few seconds costs nothing measurable.
+const RESCAN: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Which device an open file is, so a rescan can tell a node already being
+/// read from a new one that happens to reuse its name.
+fn identity(file: &std::fs::File) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    file.metadata().ok().map(|m| (m.dev(), m.ino()))
+}
+
+/// Reads key events from `devices`, and from any that `rescan` finds later,
+/// handing each one to `on_key` as a code and whether it is down. Autorepeat
+/// counts as down. `on_present` is told whenever the set goes from empty to
+/// not, or back.
+fn read_loop(
+    devices: Vec<std::fs::File>,
+    what: &str,
+    rescan: fn() -> Vec<std::fs::File>,
+    mut on_present: impl FnMut(bool),
+    mut on_key: impl FnMut(u16, bool),
+) {
     const EV_KEY: u16 = 1;
     /// A key that is down, or one being auto-repeated; 0 is a release.
     const PRESSED: i32 = 1;
     const REPEATED: i32 = 2;
 
-    let mut fds: Vec<libc::pollfd> = devices
-        .iter()
-        .map(|file| libc::pollfd {
-            fd: file.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        })
-        .collect();
+    let mut files: Vec<std::fs::File> = Vec::new();
+    let mut fds: Vec<libc::pollfd> = Vec::new();
+    let mut ids: Vec<Option<(u64, u64)>> = Vec::new();
+
+    let adopt = |found: Vec<std::fs::File>,
+                     files: &mut Vec<std::fs::File>,
+                     fds: &mut Vec<libc::pollfd>,
+                     ids: &mut Vec<Option<(u64, u64)>>| {
+        for file in found {
+            let id = identity(&file);
+            if id.is_some() && ids.contains(&id) {
+                continue; // already reading it; this copy is simply closed
+            }
+            crate::trace!("evdev: reading {what} device {}", file.as_raw_fd());
+            fds.push(libc::pollfd {
+                fd: file.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            });
+            ids.push(id);
+            files.push(file);
+        }
+    };
+    adopt(devices, &mut files, &mut fds, &mut ids);
 
     let mut event = InputEvent {
         _time: libc::timeval {
@@ -333,11 +379,24 @@ fn read_loop(devices: Vec<std::fs::File>, what: &str, mut on_key: impl FnMut(u16
         value: 0,
     };
     let size = std::mem::size_of::<InputEvent>();
+    let mut last_scan = std::time::Instant::now();
 
     loop {
+        if last_scan.elapsed() >= RESCAN {
+            last_scan = std::time::Instant::now();
+            let was_empty = files.is_empty();
+            adopt(rescan(), &mut files, &mut fds, &mut ids);
+            if was_empty && !files.is_empty() {
+                on_present(true);
+            }
+        }
+
         // SAFETY: the slice is live for the call and its length is what is
-        // passed; poll writes only into `revents`.
-        let ready = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, -1) };
+        // passed; poll writes only into `revents`. With no devices at all it
+        // is simply a sleep until the next rescan.
+        let ready = unsafe {
+            libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, RESCAN.as_millis() as i32)
+        };
         if ready < 0 {
             let err = std::io::Error::last_os_error();
             if err.kind() == std::io::ErrorKind::Interrupted {
@@ -349,10 +408,13 @@ fn read_loop(devices: Vec<std::fs::File>, what: &str, mut on_key: impl FnMut(u16
             crate::trace!("evdev: poll failed ({err}); stopping the {what} reader");
             return;
         }
+        if ready == 0 {
+            continue;
+        }
 
         // Devices that reported an error, hangup or invalid fd — an unplug
         // reports POLLHUP without POLLIN, so skipping them and re-polling
-        // would spin hot forever. They are collected and dropped after the
+        // would spin hot forever. They are collected and closed after the
         // pass, which is also what keeps poll from returning immediately
         // ever after.
         let mut gone: Vec<usize> = Vec::new();
@@ -398,12 +460,17 @@ fn read_loop(devices: Vec<std::fs::File>, what: &str, mut on_key: impl FnMut(u16
         }
 
         if !gone.is_empty() {
+            gone.dedup();
             for index in gone.into_iter().rev() {
                 fds.remove(index);
+                ids.remove(index);
+                // Dropping the file closes the node, so a device that comes
+                // back is opened fresh rather than leaking the old handle.
+                files.remove(index);
             }
-            if fds.is_empty() {
-                crate::trace!("evdev: no {what} devices left; stopping the reader");
-                return;
+            if files.is_empty() {
+                crate::trace!("evdev: no {what} devices left; waiting for one to appear");
+                on_present(false);
             }
         }
     }

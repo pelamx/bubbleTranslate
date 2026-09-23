@@ -15,6 +15,14 @@ days before the others.
 
 ## Unreleased
 
+**A Bluetooth mouse keeps working after the laptop sleeps. (Linux)** A
+wireless mouse that reconnected after sleep, or was switched off and on, went
+unnoticed until bubbleTranslate was restarted. Ordinary selections still
+translated, so it looked fine, but pages like Google Drive's PDF preview, which
+wait for the mouse button to come up, never produced a bubble. A mouse or
+keyboard that connects while the app is running is now picked up within a
+couple of seconds.
+
 **Copies of 0.2.7 and older say when an update is out again.** When the
 downloads moved to their new home, the file those versions check for updates
 went with them, and they quietly stopped noticing new versions. It is back
