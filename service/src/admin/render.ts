@@ -445,16 +445,16 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     .map((app) => {
       const n = (os: string) => vers.filter((v) => v.app === app && v.os === os).reduce((a, v) => a + v.n, 0);
       const all = vers.filter((v) => v.app === app).reduce((a, v) => a + v.n, 0);
-      const current = PLATFORMS.filter((os) => pub?.[os] === app);
-      const badge = current.length
-        ? ` <span class="badge on">latest${
-            current.length < PLATFORMS.length ? ` · ${current.map(osLabel).join(", ")}` : ""
-          }</span>`
-        : "";
-      return `<tr><td>${escapeHtml(app)}${badge}</td>
+      // No "latest" on the row itself: a version can be current on one
+      // platform and behind on another, and a row-wide label reads as if it
+      // were about the users in it. The cell says it, per platform.
+      return `<tr><td>${escapeHtml(app)}</td>
         ${PLATFORMS.map((os) => {
           const count = n(os) || `<span class="muted">0</span>`;
-          return `<td class="num">${pub?.[os] === app ? `<b class="ok">${count}</b>` : count}</td>`;
+          // Marked only where somebody is on it; an empty cell needs no label.
+          return pub?.[os] === app && n(os) > 0
+            ? `<td class="num" title="The latest ${escapeHtml(osLabel(os))} version"><b class="ok">${count}</b> <span class="badge on">latest</span></td>`
+            : `<td class="num">${count}</td>`;
         }).join("")}
         <td class="num"><b>${all}</b></td></tr>`;
     })
