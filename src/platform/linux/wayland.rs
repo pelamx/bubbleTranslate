@@ -138,22 +138,43 @@ pub fn watch(on_change: impl FnMut(String, bool) + Send + 'static) -> Result<(),
 /// The thread ends when the compositor cancels the source, which is exactly
 /// when the text stops being the clipboard's contents.
 pub fn set_clipboard(text: String) {
+    let bytes = text.into_bytes();
+    restore_clipboard(
+        TEXT_MIMES
+            .iter()
+            .map(|mime| (mime.to_string(), bytes.clone()))
+            .collect(),
+    );
+}
+
+/// Claims the clipboard with exactly the formats it held before, so a
+/// clipboard holding an image — or rich text beside plain — comes back as it
+/// was rather than flattened to text.
+pub fn restore_clipboard(contents: Saved) {
     std::thread::Builder::new()
         .name("wayland-clipboard".into())
         .spawn(move || {
-            if let Err(err) = serve_clipboard(text) {
+            if let Err(err) = serve_clipboard(contents) {
                 crate::trace!("clipboard: {err}");
             }
         })
         .ok();
 }
 
+/// A clipboard as its owner offered it: every MIME type, with its bytes.
+pub type Saved = Vec<(String, Vec<u8>)>;
+
+/// The most a saved clipboard may weigh. A screenshot is a few megabytes;
+/// past this it is kept in memory for nothing, and the copy is not made.
+const SAVE_LIMIT: usize = 64 * 1024 * 1024;
+
 /// What the clipboard holds right now, read on a connection of its own.
 ///
-/// `Ok(None)` is an empty clipboard. `Err` is one that holds something that
-/// is not text — an image, a file — or could not be read: either way it
-/// cannot be put back, so the caller must not replace it.
-pub fn read_clipboard() -> Result<Option<String>, ()> {
+/// Every format it offers is read, so that it can be put back whole — an image
+/// as well as text. `Ok(None)` is an empty clipboard. `Err` is one that could
+/// not be read, or is too large to hold: either way it cannot be put back, so
+/// the caller must not replace it.
+pub fn read_clipboard() -> Result<Option<Saved>, ()> {
     let conn = Connection::connect_to_env().map_err(|_| ())?;
     let mut reader = ClipboardReader {
         globals: Globals::default(),
@@ -182,15 +203,9 @@ pub fn read_clipboard() -> Result<Option<String>, ()> {
         None | Some(None) => Ok(None),
         Some(Some(offer)) => {
             let mimes = reader.offers.remove(&offer.id()).unwrap_or_default();
-            let text = if TEXT_MIMES.iter().any(|m| mimes.iter().any(|x| x == m)) {
-                receive(&conn, &offer, &mimes).map(Some).ok_or(())
-            } else if mimes.is_empty() {
-                Ok(None)
-            } else {
-                Err(())
-            };
+            let saved = save_all(&conn, &offer, &mimes);
             offer.destroy();
-            text
+            saved
         }
     };
     device.destroy();
@@ -198,11 +213,39 @@ pub fn read_clipboard() -> Result<Option<String>, ()> {
     result
 }
 
-fn serve_clipboard(text: String) -> Result<(), String> {
+/// Reads every format an offer advertises. Formats the owner will not hand
+/// over are left out; a clipboard that yields none of them is not put back.
+fn save_all(
+    conn: &Connection,
+    offer: &ZwlrDataControlOfferV1,
+    mimes: &[String],
+) -> Result<Option<Saved>, ()> {
+    if mimes.is_empty() {
+        return Ok(None);
+    }
+    let mut saved = Saved::new();
+    let mut total = 0;
+    for mime in mimes {
+        if saved.iter().any(|(m, _)| m == mime) {
+            continue;
+        }
+        let Some(bytes) = receive_bytes(conn, offer, mime) else {
+            continue;
+        };
+        total += bytes.len();
+        if total > SAVE_LIMIT {
+            return Err(());
+        }
+        saved.push((mime.clone(), bytes));
+    }
+    if saved.is_empty() { Err(()) } else { Ok(Some(saved)) }
+}
+
+fn serve_clipboard(contents: Saved) -> Result<(), String> {
     let conn = Connection::connect_to_env().map_err(|err| err.to_string())?;
     let mut server = ClipboardSource {
         globals: Globals::default(),
-        text,
+        contents,
         cancelled: false,
     };
 
@@ -218,8 +261,8 @@ fn serve_clipboard(text: String) -> Result<(), String> {
 
     let device = manager.get_data_device(&seat, &qh, ());
     let source = manager.create_data_source(&qh, ());
-    for mime in TEXT_MIMES {
-        source.offer(mime.to_string());
+    for (mime, _) in &server.contents {
+        source.offer(mime.clone());
     }
     device.set_selection(Some(&source));
 
@@ -420,7 +463,7 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for Watcher {
                         (state.on_change)(text, true);
                     }
                     if let Some(saved) = saved {
-                        set_clipboard(saved);
+                        restore_clipboard(saved);
                     }
                     return;
                 }
@@ -473,7 +516,11 @@ fn receive(conn: &Connection, offer: &ZwlrDataControlOfferV1, mimes: &[String]) 
     let mime = TEXT_MIMES
         .iter()
         .find(|wanted| mimes.iter().any(|m| m == *wanted))?;
+    String::from_utf8(receive_bytes(conn, offer, mime)?).ok()
+}
 
+/// Pulls one format out of an offer, as the owner wrote it.
+fn receive_bytes(conn: &Connection, offer: &ZwlrDataControlOfferV1, mime: &str) -> Option<Vec<u8>> {
     let (mut reader, writer) = std::io::pipe().ok()?;
     offer.receive(mime.to_string(), writer.as_fd());
     conn.flush().ok()?;
@@ -504,7 +551,7 @@ fn receive(conn: &Connection, offer: &ZwlrDataControlOfferV1, mimes: &[String]) 
             Ok(n) => buf.extend_from_slice(&chunk[..n]),
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                 if std::time::Instant::now() >= deadline {
-                    crate::trace!("wayland: the selection owner never wrote the text");
+                    crate::trace!("wayland: the selection owner never wrote {mime}");
                     return None;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(5));
@@ -512,14 +559,14 @@ fn receive(conn: &Connection, offer: &ZwlrDataControlOfferV1, mimes: &[String]) 
             Err(_) => return None,
         }
     }
-    String::from_utf8(buf).ok()
+    Some(buf)
 }
 
 // -- owning the clipboard --------------------------------------------------
 
 struct ClipboardSource {
     globals: Globals,
-    text: String,
+    contents: Saved,
     cancelled: bool,
 }
 
@@ -567,11 +614,13 @@ impl Dispatch<ZwlrDataControlSourceV1, ()> for ClipboardSource {
         _: &QueueHandle<Self>,
     ) {
         match event {
-            zwlr_data_control_source_v1::Event::Send { fd, .. } => {
-                // A paste is in progress somewhere. Any MIME type we get asked
-                // for is one we offered, and they are all this same text.
+            zwlr_data_control_source_v1::Event::Send { mime_type, fd } => {
+                // A paste is in progress somewhere, asking for one of the
+                // types we offered.
                 let mut file = std::fs::File::from(fd);
-                let _ = std::io::Write::write_all(&mut file, state.text.as_bytes());
+                if let Some((_, bytes)) = state.contents.iter().find(|(m, _)| *m == mime_type) {
+                    let _ = std::io::Write::write_all(&mut file, bytes);
+                }
             }
             zwlr_data_control_source_v1::Event::Cancelled => {
                 // Someone else copied something; the text is no longer the

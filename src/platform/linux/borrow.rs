@@ -18,8 +18,9 @@
 //!   * only in a browser: Ctrl+C in a terminal interrupts what is running;
 //!   * only when the page published nothing, so every ordinary selection
 //!     still goes the ordinary way and nothing is copied at all;
-//!   * never over a clipboard holding something that is not text, which could
-//!     not be restored.
+//!   * never over a clipboard that could not be read back whole — every
+//!     format it holds, an image as much as text — and so could not be
+//!     restored.
 //!
 //! Hyprland only, because it is the compositor that will both say which
 //! window is focused and send a chord with an exact modifier mask.
@@ -62,8 +63,9 @@ const BROWSERS: [&str; 9] = [
 
 struct Pending {
     until: Instant,
-    /// The clipboard to put back; `None` when it was empty.
-    saved: Option<String>,
+    /// The clipboard to put back, every format of it; `None` when it was
+    /// empty.
+    saved: Option<wayland::Saved>,
 }
 
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
@@ -143,7 +145,7 @@ fn consider(generation: u64, from: Option<(f64, f64)>, multi_click: bool) {
         return;
     }
     let Ok(saved) = wayland::read_clipboard() else {
-        crate::trace!("borrow    clipboard holds something that is not text; leaving it");
+        crate::trace!("borrow    the clipboard could not be saved; leaving it");
         return;
     };
     *PENDING.lock().unwrap() = Some(Pending {
@@ -164,7 +166,7 @@ fn is_browser(class: &str) -> bool {
 
 /// Claims the copy in flight, if there is one, returning the clipboard to
 /// restore once its text has been read.
-pub(super) fn take_pending() -> Option<Option<String>> {
+pub(super) fn take_pending() -> Option<Option<wayland::Saved>> {
     let pending = PENDING.lock().unwrap().take()?;
     if Instant::now() > pending.until {
         return None;
