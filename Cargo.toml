@@ -64,7 +64,10 @@ ksni = { version = "0.3.6", default-features = false, features = [
 # input hooks for noticing one, the notification area for the tray icon, and a
 # named pipe for the second copy of the binary to reach the first.
 [target.'cfg(target_os = "windows")'.dependencies]
-eframe = "0.35.0"
+# Direct3D rather than OpenGL — see the renderer chosen in `main`. The default
+# feature set is kept so the glow backend is still compiled in and can be
+# switched back to without a dependency change.
+eframe = { version = "0.35.0", features = ["wgpu"] }
 raw-window-handle = "0.6"
 windows = { version = "0.62", features = [
     "Win32_Foundation",

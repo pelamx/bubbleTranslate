@@ -13,17 +13,6 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
-
-**The Windows download goes back to 0.2.6 for now. (Windows)** People updating
-were seeing the bubble appear and work, and then a black one drop on top of it
-a moment later and cover the translation they were reading. Until that is
-understood and fixed, the download button and the update notice both hand out
-0.2.6, which nobody has reported this on. If it is happening to you right now,
-closing every copy of bubbleTranslate that is running — or simply restarting
-the computer — clears it, because what draws the black bubble appears to be a
-second copy left running behind the first.
-
 ## 0.2.8 — 2026-09-23
 
 **Text in Google Drive's PDF preview translates even when a screenshot is on
@@ -33,15 +22,21 @@ what was there. It used to refuse whenever the clipboard held an image, and the
 bubble never appeared. Now it saves whatever the clipboard holds, images
 included, and restores it exactly.
 
-**The bubble is no longer a black rectangle. (Windows)** On some machines —
-virtual machines and remote desktops especially — every translation came up as
-an empty black box: the text had been fetched and there was simply nothing
-readable on screen. The bubble has no title bar and no border, and asking for a
-window that way turns out to be what some graphics drivers decline to draw at
-all. It now asks for an ordinary window, which is always drawn, and trims the
-frame off itself, so it looks exactly as it did before on the machines where it
-already worked. This was not new in 0.2.7; it needed a Windows machine of the
-wrong kind to show up.
+**The bubble draws on every machine now, rather than coming up as a black box.
+(Windows)** On some machines — virtual machines, remote desktops, and PCs whose
+graphics driver was never properly installed — every translation appeared as an
+empty black rectangle: the text had been fetched and there was simply nothing
+readable on screen. On the worst of them the app stopped responding and could
+not be closed either, so the next launch started as a second copy and dropped
+its own black bubble on top of the first.
+
+The cause was how the app asked to be drawn. It used OpenGL, which is the part
+of a graphics driver most likely to be missing or half-finished on exactly
+those machines. It now draws the way Windows draws the desktop itself, and
+falls back to software rendering where there is no graphics card worth the
+name. On machines where the bubble already worked it looks exactly as it did.
+This was not new in 0.2.7; it needed a Windows machine of the wrong kind to
+show up.
 
 **The downloads have moved, and this version knows where.** They are published
 from their own place now rather than from the same page as the source code, so

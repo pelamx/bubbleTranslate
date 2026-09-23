@@ -187,6 +187,20 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport,
+        // Direct3D on Windows, OpenGL everywhere else.
+        //
+        // The toolkit draws through OpenGL by default, and on a machine whose
+        // graphics card is a virtual one — a VMware or Hyper-V guest, a remote
+        // desktop — the driver's OpenGL is the part most likely to be missing
+        // or broken. What that looks like is not an error: the window comes up
+        // and is never painted, so the bubble is a black rectangle, and the
+        // thread waiting on the driver hangs hard enough that the process
+        // cannot be killed and keeps the single-copy lock, after which every
+        // later launch starts as a second copy with its own bubble. Direct3D
+        // is the interface those drivers implement first and test most, and it
+        // is what the desktop itself is already being drawn with.
+        #[cfg(target_os = "windows")]
+        renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
 
