@@ -19,6 +19,7 @@ import {
   health,
   ignoreList,
   licenceOs,
+  mineInstalls,
   osBreakdown,
   osLabel,
   ratio,
@@ -275,7 +276,7 @@ export async function pulse(env: Env): Promise<Pulse> {
          SUM(CASE WHEN last_seen  >= ?1 THEN 1 ELSE 0 END) AS active
        FROM installs WHERE ${NOT_MINE_INSTALL}`,
     )
-      .bind(t, t - DAY, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
+      .bind(t, t - DAY, null, null, null, null, null, null, await mineInstalls(env))
       .first<{ today: number; yesterday: number; active: number }>(),
     env.DB.prepare(
       `SELECT
@@ -291,7 +292,7 @@ export async function pulse(env: Env): Promise<Pulse> {
          FROM installs WHERE first_seen >= ?1 - 13 * ${DAY} AND ${NOT_MINE_INSTALL}
         GROUP BY ago`,
     )
-      .bind(t, null, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
+      .bind(t, null, null, null, null, null, null, null, await mineInstalls(env))
       .all<{ ago: number; n: number }>(),
   ]);
   const series = new Array<number>(14).fill(0);

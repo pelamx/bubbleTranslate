@@ -23,6 +23,29 @@ export function ignoreList(value: string | undefined): string {
   );
 }
 
+/** Must match `INSTALL_SALT` in the client's `src/license.rs`. */
+const INSTALL_SALT = "bubbleTranslate/install/v1";
+
+/** The installs to leave out of every count, as a JSON array for `?9`: the
+ *  ones named in `ADMIN_IGNORE_INSTALLS`, plus every machine a licence marked
+ *  "This is me" was activated on.
+ *
+ *  A seat stores the device id and the ping sends a different hash of it, on
+ *  purpose, so the two cannot be joined for a customer. The join is made here
+ *  only for the operator's own licences, where there is nobody's privacy to
+ *  keep: the app derives its install id as the first 16 bytes of
+ *  SHA-256(INSTALL_SALT + device), and so does this. */
+export async function mineInstalls(env: Env): Promise<string> {
+  const listed: string[] = JSON.parse(ignoreList(env.ADMIN_IGNORE_INSTALLS));
+  const { results } = await env.DB.prepare(
+    "SELECT DISTINCT device FROM seats WHERE licence_id IN (SELECT licence_id FROM ignored_licences)",
+  ).all<{ device: string }>();
+  const derived = await Promise.all(
+    (results ?? []).map(async (r) => (await sha256Hex(INSTALL_SALT + r.device)).slice(0, 32)),
+  );
+  return JSON.stringify([...new Set([...listed, ...derived])]);
+}
+
 /** Keeps the operator's own machines and licences out of the counts. */
 export const NOT_MINE_INSTALL = `install NOT IN (SELECT value FROM json_each(?9))
   AND install NOT IN (SELECT install FROM ignored_installs)`;
@@ -59,7 +82,7 @@ export async function health(env: Env): Promise<HealthRow[]> {
        FROM installs WHERE ${NOT_MINE_INSTALL}
       GROUP BY COALESCE(os, 'unknown')`,
   )
-    .bind(t, null, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
+    .bind(t, null, null, null, null, null, null, null, await mineInstalls(env))
     .all<HealthRow>();
   return results ?? [];
 }
@@ -71,7 +94,7 @@ export async function versions(env: Env): Promise<{ app: string; os: string; n: 
        FROM installs WHERE last_seen > ?1 AND ${NOT_MINE_INSTALL}
       GROUP BY app, os`,
   )
-    .bind(now() - 30 * DAY, null, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
+    .bind(now() - 30 * DAY, null, null, null, null, null, null, null, await mineInstalls(env))
     .all<{ app: string; os: string; n: number }>();
   return results ?? [];
 }
@@ -159,7 +182,7 @@ export async function users(env: Env): Promise<UserRow[]> {
       ORDER BY first_seen DESC
       LIMIT 300`,
   )
-    .bind(now() - 30 * DAY, null, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
+    .bind(now() - 30 * DAY, null, null, null, null, null, null, null, await mineInstalls(env))
     .all<UserRow>();
   return results ?? [];
 }
@@ -188,7 +211,7 @@ export async function usage(env: Env): Promise<Usage> {
        COUNT(*) AS total
      FROM installs WHERE ${NOT_MINE_INSTALL}`,
   )
-    .bind(t - 2 * DAY, t - 8 * DAY, t - 31 * DAY, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
+    .bind(t - 2 * DAY, t - 8 * DAY, t - 31 * DAY, null, null, null, null, null, await mineInstalls(env))
     .first<Usage>();
   return {
     daily: row?.daily ?? 0,
@@ -223,7 +246,7 @@ export async function osBreakdown(env: Env): Promise<OsRow[]> {
       WHERE ${NOT_MINE_INSTALL}
       GROUP BY os`,
   )
-    .bind(now() - 8 * DAY, startOfToday(), null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_INSTALLS))
+    .bind(now() - 8 * DAY, startOfToday(), null, null, null, null, null, null, await mineInstalls(env))
     .all<OsRow>();
   return results ?? [];
 }

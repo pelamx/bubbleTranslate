@@ -12,6 +12,7 @@
 // opening a dashboard.
 
 import { Env, USD_AMOUNT } from "./env";
+import { NOT_MINE_INSTALL, mineInstalls } from "./admin/queries";
 
 const WEEK = 7 * 86_400;
 
@@ -92,9 +93,9 @@ export async function gather(env: Env, now: number): Promise<Metrics> {
        SUM(CASE WHEN last_seen > ?1 THEN 1 ELSE 0 END) AS active,
        SUM(CASE WHEN last_seen > ?1 AND plan = 'free' THEN 1 ELSE 0 END) AS free,
        SUM(CASE WHEN first_seen > ?2 THEN 1 ELSE 0 END) AS fresh
-     FROM installs`,
+     FROM installs WHERE ${NOT_MINE_INSTALL}`,
   )
-    .bind(now - WEEK - 86_400, now - WEEK)
+    .bind(now - WEEK - 86_400, now - WEEK, null, null, null, null, null, null, await mineInstalls(env))
     .first<{ active: number | null; free: number | null; fresh: number | null }>();
 
   return {
