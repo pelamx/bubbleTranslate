@@ -320,12 +320,18 @@ export const SELECT_ROWS = `
 export async function search(env: Env, query: string): Promise<Row[]> {
   const term = query.trim();
   if (!term) {
-    const { results } = await env.DB.prepare(
-      `${SELECT_ROWS} ORDER BY l.created_at DESC LIMIT ?`,
-    )
-      .bind(PAGE_SIZE)
-      .all<Row>();
-    return results ?? [];
+    // A page of each kind rather than one page of both: the panel shows them
+    // apart, and a run of hand-issued keys must not push every sale off it.
+    const latest = (where: string) =>
+      env.DB.prepare(`${SELECT_ROWS} WHERE ${where} ORDER BY l.created_at DESC LIMIT ?`)
+        .bind(PAGE_SIZE)
+        .all<Row>()
+        .then((r) => r.results ?? []);
+    const [paid, manual] = await Promise.all([
+      latest("l.provider = 'paddle'"),
+      latest("l.provider != 'paddle'"),
+    ]);
+    return [...paid, ...manual];
   }
 
   if (/^BT-/i.test(term)) {

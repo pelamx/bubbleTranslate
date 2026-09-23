@@ -80,11 +80,19 @@ export function relativeDays(unix: number): string {
   return `in ${days}d`;
 }
 
+/** Whether a licence was sold through Paddle, as opposed to issued by hand.
+ *  The two are kept apart on the panel because they are not the same thing:
+ *  one has a customer, a payment and webhooks behind it, the other has none. */
+export function isPaddle(licence: Row): boolean {
+  return licence.provider === "paddle";
+}
+
 export function statusCell(licence: Row): string {
   if (!isLive(licence)) {
-    return `<span class="err">${escapeHtml(
-      licence.status === "refunded" ? "refunded" : "expired",
-    )}</span>`;
+    // A manual licence was never paid for, so ending one early is a
+    // revocation, whatever the column underneath calls it.
+    const ended = licence.status === "refunded" ? (isPaddle(licence) ? "refunded" : "revoked") : "expired";
+    return `<span class="err">${escapeHtml(ended)}</span>`;
   }
   if (licence.status === "cancelled") {
     return '<span class="warn">ending</span>';
@@ -131,7 +139,7 @@ export function editPanel(r: Row): string {
       <div style="flex:0 1 140px">
         <label class="field" for="e-st-${escapeHtml(r.id)}">Status</label>
         <select id="e-st-${escapeHtml(r.id)}" name="status">
-          ${option("active", "Active", r.status)}${option("cancelled", "Cancelled", r.status)}${option("refunded", "Refunded", r.status)}
+          ${option("active", "Active", r.status)}${option("cancelled", "Cancelled", r.status)}${option("refunded", isPaddle(r) ? "Refunded" : "Revoked", r.status)}
         </select>
       </div>
       <div style="flex:0 1 130px">
@@ -155,6 +163,24 @@ export function editPanel(r: Row): string {
   </details>`;
 }
 
+/** The licences of one kind, under a heading that says which. */
+export function licenceGroup(rows: Row[], paddle: boolean, searching: boolean): string {
+  const kind = paddle ? "paddle" : "manual";
+  const title = paddle ? "Paddle — sold" : "Manual — issued by hand";
+  const note = paddle
+    ? "Bought through checkout. Paddle's webhooks keep these current; refunds and cancellations belong in Paddle."
+    : "Press copies, testers, support apologies. No payment and no webhook behind them — only this panel changes them.";
+  const empty = searching ? "Nothing matched." : paddle ? "No licence has been sold yet." : "None issued yet.";
+  return `<section class="group ${kind}">
+    <p class="group-head"><span class="badge ${kind}">${paddle ? "Paddle" : "Manual"}</span>
+      <b>${escapeHtml(title)}</b> <span class="muted">${rows.length}${
+        !searching && rows.length >= PAGE_SIZE ? ` latest` : ""
+      }</span></p>
+    <p class="muted group-note">${escapeHtml(note)}</p>
+    ${rows.length ? rowsTable(rows) : `<p class="muted">${escapeHtml(empty)}</p>`}
+  </section>`;
+}
+
 export function rowsTable(rows: Row[]): string {
   if (!rows.length) return '<p class="muted">Nothing matched.</p>';
   const body = rows
@@ -163,7 +189,11 @@ export function rowsTable(rows: Row[]): string {
       <tr>
         <td><code>${escapeHtml(r.id)}</code></td>
         <td>${escapeHtml(r.email ?? "—")}</td>
-        <td>${escapeHtml(r.cycle)}<br><span class="muted">${escapeHtml(r.provider)}</span></td>
+        <td>${escapeHtml(r.cycle)}${
+          isPaddle(r) && r.provider_ref
+            ? `<br><span class="muted" title="Paddle subscription"><code>${escapeHtml(r.provider_ref)}</code></span>`
+            : ""
+        }</td>
         <td>${statusCell(r)}</td>
         <td>${escapeHtml(date(r.expires_at))}<br><span class="muted">${escapeHtml(
           relativeDays(r.expires_at),
@@ -190,8 +220,13 @@ export function rowsTable(rows: Row[]): string {
               ? `<form class="inline" method="post" action="/admin/end">
                    <input type="hidden" name="id" value="${escapeHtml(r.id)}">
                    <input type="hidden" name="status" value="refunded">
-                   <button class="quiet" type="submit"
-                     onclick="return confirm('Mark refunded? This ends Pro immediately.')">Refund</button>
+                   ${
+                     isPaddle(r)
+                       ? `<button class="quiet" type="submit"
+                     onclick="return confirm('Mark refunded? This ends Pro immediately. It does not move any money -- refund in Paddle.')">Refund</button>`
+                       : `<button class="quiet" type="submit"
+                     onclick="return confirm('Revoke this key? This ends Pro immediately.')">Revoke</button>`
+                   }
                  </form>`
               : ""
           }
@@ -304,6 +339,13 @@ export const ADMIN_STYLE = `
   .badge.on { background: rgba(74,222,128,.15); color: var(--accent); }
   .badge.off { color: var(--faint); }
   .badge.you { background: rgba(251,146,60,.15); color: var(--orange); }
+  .badge.paddle { background: rgba(110,168,254,.18); color: var(--brand); }
+  .badge.manual { background: rgba(251,146,60,.15); color: var(--orange); }
+  .group { border-left: 3px solid var(--border); padding-left: 14px; margin-top: 22px; }
+  .group.paddle { border-left-color: var(--brand); }
+  .group.manual { border-left-color: var(--orange); }
+  .group-head { margin: 0; display: flex; align-items: center; gap: 8px; }
+  .group-note { margin: 4px 0 10px; }
   tr.mine td { opacity: .6; }
   tr.total td { border-top: 1px solid var(--border); font-weight: 600; }
   .os.zero { color: var(--faint); }
@@ -532,8 +574,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
            </div>
            <button type="submit">Search</button>
          </form>
-         <p class="muted">${query ? "Results" : `Latest ${PAGE_SIZE}`}</p>
-         ${rowsTable(rows)}
+         ${licenceGroup(rows.filter(isPaddle), true, !!query)}
+         ${licenceGroup(rows.filter((r) => !isPaddle(r)), false, !!query)}
        </div>
      </details>
 
