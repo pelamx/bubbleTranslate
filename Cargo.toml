@@ -70,6 +70,14 @@ ksni = { version = "0.3.6", default-features = false, features = [
 eframe = { version = "0.35.0", features = ["wgpu"] }
 raw-window-handle = "0.6"
 windows = { version = "0.62", features = [
+    # WinRT rather than Win32, and the only four of those here: the OCR engine
+    # Windows ships, the bitmap it takes, and the buffer the screen copy is
+    # handed over in. See `platform::windows::ocr`.
+    "Foundation_Collections",
+    "Globalization",
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Storage_Streams",
     "Win32_Foundation",
     "Win32_Globalization",
     "Win32_Graphics_Gdi",

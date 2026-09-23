@@ -24,6 +24,7 @@
 
 pub mod capture;
 pub mod monitor;
+pub mod ocr;
 pub mod shell;
 
 use std::sync::atomic::{AtomicIsize, Ordering};
