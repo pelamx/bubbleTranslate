@@ -153,6 +153,27 @@ export async function downloads(env: Env): Promise<Record<string, number> | null
   return out;
 }
 
+/** The version each platform is offered right now, as `latest.json` in the
+ *  downloads repository says -- the same file installed copies read, so this
+ *  is what "latest" means to them. Null when it cannot be read. */
+export async function published(): Promise<Record<string, string> | null> {
+  const url = "https://raw.githubusercontent.com/bubbleTranslate/downloads/main/latest.json";
+  try {
+    // Short-lived: a release should show up here within a minute or two.
+    const res = await fetch(url, { cf: { cacheTtl: 60 } } as RequestInit);
+    if (!res.ok) return null;
+    const manifest = (await res.json()) as Record<string, { version?: string }>;
+    const out: Record<string, string> = {};
+    for (const os of PLATFORMS) {
+      const v = manifest[os]?.version;
+      if (typeof v === "string") out[os] = v;
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
 /** "3 / 10 · 30%", or a dash when nobody is old enough to count yet. */
 export function ratio(part: number, whole: number): string {
   if (!whole) return `<span class="muted">—</span>`;

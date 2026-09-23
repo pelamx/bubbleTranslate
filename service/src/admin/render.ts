@@ -22,6 +22,7 @@ import {
   mineInstalls,
   osBreakdown,
   osLabel,
+  published,
   ratio,
   recentFailures,
   search,
@@ -401,7 +402,7 @@ export function delta(today: number, yesterday: number): string {
 }
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, licOs, rows, failures, people, hl, vers, dl] = await Promise.all([
+  const [s, u, p, byOs, licOs, rows, failures, people, hl, vers, dl, pub] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -413,6 +414,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     health(env),
     versions(env),
     downloads(env),
+    published(),
   ]);
 
   const h = (os: string) =>
@@ -434,13 +436,27 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
       </tr>`)
     .join("");
 
-  const versionList = [...new Set(vers.map((v) => v.app))].sort(compareVersions);
+  // "Latest" is what each platform is offered today, not the highest number
+  // anyone happens to run: the platforms are released separately, and a
+  // published version nobody has installed yet still belongs in the table.
+  const versionList = [...new Set([...vers.map((v) => v.app), ...Object.values(pub ?? {})])].sort(
+    compareVersions,
+  );
   const versionRows = versionList
-    .map((app, i) => {
+    .map((app) => {
       const n = (os: string) => vers.filter((v) => v.app === app && v.os === os).reduce((a, v) => a + v.n, 0);
       const all = vers.filter((v) => v.app === app).reduce((a, v) => a + v.n, 0);
-      return `<tr><td>${escapeHtml(app)} ${i === 0 ? `<span class="badge on">latest</span>` : ""}</td>
-        ${PLATFORMS.map((os) => `<td class="num">${n(os) || `<span class="muted">0</span>`}</td>`).join("")}
+      const current = PLATFORMS.filter((os) => pub?.[os] === app);
+      const badge = current.length
+        ? ` <span class="badge on">latest${
+            current.length < PLATFORMS.length ? ` · ${current.map(osLabel).join(", ")}` : ""
+          }</span>`
+        : "";
+      return `<tr><td>${escapeHtml(app)}${badge}</td>
+        ${PLATFORMS.map((os) => {
+          const count = n(os) || `<span class="muted">0</span>`;
+          return `<td class="num">${pub?.[os] === app ? `<b class="ok">${count}</b>` : count}</td>`;
+        }).join("")}
         <td class="num"><b>${all}</b></td></tr>`;
     })
     .join("");
@@ -553,7 +569,9 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
          <b>Lost</b>: used in the last 30 days, but not in the last 7.
        </p>
 
-       <p class="label" style="margin-top:22px">Versions in use, last 30 days</p>
+       <p class="label" style="margin-top:22px">Versions in use, last 30 days${
+         pub ? "" : ` <span class="muted">— latest.json could not be read, so no version is marked latest</span>`
+       }</p>
        <div class="scroll"><table>
          <tr><th>Version</th>${PLATFORMS.map((os) => `<th class="num">${osLabel(os)}</th>`).join("")}<th class="num">Total</th></tr>
          ${versionRows || `<tr><td colspan="5" class="muted">No installs this month.</td></tr>`}
