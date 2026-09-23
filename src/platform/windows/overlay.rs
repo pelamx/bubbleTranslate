@@ -51,9 +51,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
     GetMessageW, GetSystemMetrics, IDC_CROSS, LWA_ALPHA, LoadCursorW, MSG, PostQuitMessage,
     RegisterClassW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
-    SW_SHOW, SetForegroundWindow, SetLayeredWindowAttributes, ShowWindow, TranslateMessage,
-    WM_CHAR, WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT,
-    WM_RBUTTONDOWN, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    SW_SHOW, SetCursor, SetForegroundWindow, SetLayeredWindowAttributes, ShowWindow,
+    TranslateMessage, WM_CHAR, WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_PAINT, WM_RBUTTONDOWN, WM_SETCURSOR, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
@@ -65,6 +66,9 @@ use super::ocr::Region;
 static ANCHOR: AtomicIsize = AtomicIsize::new(NONE);
 /// Where the pointer is now, same packing.
 static CURRENT: AtomicIsize = AtomicIsize::new(NONE);
+/// Where the pointer was at the last cut, so [`reshape`] can repaint the
+/// frame's old position instead of the whole sheet. `NONE` before the first.
+static PREVIOUS: AtomicIsize = AtomicIsize::new(NONE);
 /// Set when the gesture ended, either way. [`CANCELLED`] says which.
 static FINISHED: AtomicBool = AtomicBool::new(false);
 static CANCELLED: AtomicBool = AtomicBool::new(false);
@@ -119,6 +123,7 @@ fn between(a: (i32, i32), b: (i32, i32)) -> Region {
 pub fn select_region() -> Option<Region> {
     ANCHOR.store(NONE, Ordering::SeqCst);
     CURRENT.store(NONE, Ordering::SeqCst);
+    PREVIOUS.store(NONE, Ordering::SeqCst);
     FINISHED.store(false, Ordering::SeqCst);
     CANCELLED.store(false, Ordering::SeqCst);
 
@@ -288,9 +293,22 @@ fn reshape(window: HWND) {
         }
         let _ = DeleteObject(HGDIOBJ(hole.0));
 
-        // The cut moves the hole; this is what redraws the frame around its
-        // new position and erases it from the old one.
-        let _ = InvalidateRect(Some(window), None, true);
+        // Repaint where the frame was and where it now is, rather than the
+        // whole sheet. The difference is not academic: the sheet covers every
+        // monitor, and erasing eight megapixels on each mouse move is enough
+        // work to make the thread look busy to the system — which is the
+        // other half of why the pointer was a spinner.
+        let moved_from = PREVIOUS.swap(pack(current.0, current.1), Ordering::SeqCst);
+        for corner in [unpack(moved_from), Some(current)].into_iter().flatten() {
+            let area = between(anchor, corner);
+            let stale = RECT {
+                left: area.x - origin_x - FRAME_WIDTH,
+                top: area.y - origin_y - FRAME_WIDTH,
+                right: area.x - origin_x + area.width + FRAME_WIDTH,
+                bottom: area.y - origin_y + area.height + FRAME_WIDTH,
+            };
+            let _ = InvalidateRect(Some(window), Some(&stale), true);
+        }
     }
 }
 
@@ -371,6 +389,24 @@ extern "system" fn procedure(
             CANCELLED.store(true, Ordering::SeqCst);
             FINISHED.store(true, Ordering::SeqCst);
             LRESULT(0)
+        }
+        // The crosshair, set here rather than left to the window class.
+        //
+        // A class cursor is only consulted if nothing claims the message
+        // first, and on a window created by a worker thread what claims it is
+        // the system's own idea that the application is still starting — the
+        // spinner. Claiming it here, and returning TRUE so nothing downstream
+        // gets a say, is what makes the pointer say "draw a rectangle" from
+        // the moment the sheet appears.
+        WM_SETCURSOR => {
+            // SAFETY: a shared system cursor. It is not owned here and must
+            // never be destroyed.
+            unsafe {
+                if let Ok(crosshair) = LoadCursorW(None, IDC_CROSS) {
+                    SetCursor(Some(crosshair));
+                }
+            }
+            LRESULT(1)
         }
         // The frame around the selection, and the only thing on the sheet
         // with a colour of its own.
