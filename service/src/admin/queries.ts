@@ -234,7 +234,7 @@ export interface LicenceOsRow {
   expiring: number;
 }
 
-/** Licences by the OS of the devices they were activated on. A licence on two
+/** Paid licences by the OS of the devices they were activated on. A licence on two
  *  systems counts under both; one never activated counts as "unknown". */
 export async function licenceOs(env: Env): Promise<LicenceOsRow[]> {
   const t = now();
@@ -245,7 +245,8 @@ export async function licenceOs(env: Env): Promise<LicenceOsRow[]> {
             COUNT(DISTINCT CASE WHEN l.status != 'refunded' AND l.expires_at > ?1
                                  AND l.expires_at < ?1 + 7 * ${DAY} THEN l.id END) AS expiring
        FROM licences l LEFT JOIN seats s ON s.licence_id = l.id
-      WHERE (l.email IS NULL OR LOWER(l.email) NOT IN (SELECT value FROM json_each(?9)))
+      WHERE l.provider = 'paddle'
+        AND (l.email IS NULL OR LOWER(l.email) NOT IN (SELECT value FROM json_each(?9)))
       GROUP BY COALESCE(s.os, 'unknown')`,
   )
     .bind(t, startOfToday(), null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_EMAILS))
@@ -265,6 +266,8 @@ export function osLabel(os: string): string {
   return known[os] ?? os;
 }
 
+/** The paid side only: every figure here is read as customers or money, and a
+ *  key issued by hand is neither. Manual licences are listed on their own. */
 export async function stats(env: Env): Promise<Stats> {
   const t = now();
   // One pass with conditional sums rather than eight queries. "Live" here is
@@ -280,7 +283,7 @@ export async function stats(env: Env): Promise<Stats> {
        SUM(CASE WHEN status != 'refunded' AND expires_at > ?1 AND expires_at < ?2 THEN 1 ELSE 0 END) AS expiring,
        SUM(CASE WHEN created_at > ?3 THEN 1 ELSE 0 END) AS fresh,
        COUNT(*) AS total
-     FROM licences WHERE ${NOT_MINE_LICENCE}`,
+     FROM licences WHERE provider = 'paddle' AND ${NOT_MINE_LICENCE}`,
   )
     .bind(t, t + 7 * DAY, t - 30 * DAY, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_EMAILS))
     .first<Stats>();

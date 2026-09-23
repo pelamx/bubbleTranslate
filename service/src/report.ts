@@ -69,7 +69,7 @@ export async function gather(env: Env, now: number): Promise<Metrics> {
   const active = await env.DB.prepare(
     `SELECT cycle, COUNT(*) AS n
        FROM licences
-      WHERE status = 'active' AND expires_at > ?
+      WHERE status = 'active' AND expires_at > ? AND provider = 'paddle'
       GROUP BY cycle`,
   )
     .bind(now)

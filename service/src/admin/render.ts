@@ -276,7 +276,7 @@ export async function pulse(env: Env): Promise<Pulse> {
       `SELECT
          SUM(CASE WHEN created_at >= ?1 THEN 1 ELSE 0 END) AS today,
          SUM(CASE WHEN created_at >= ?2 AND created_at < ?1 THEN 1 ELSE 0 END) AS yesterday
-       FROM licences WHERE ${NOT_MINE_LICENCE}`,
+       FROM licences WHERE provider = 'paddle' AND ${NOT_MINE_LICENCE}`,
     )
       .bind(t, t - DAY, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_EMAILS))
       .first<{ today: number; yesterday: number }>(),
