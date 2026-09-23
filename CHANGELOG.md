@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.3.0 — 2026-09-24
 
 **Translate text that cannot be selected, by drawing a box around it.
 (Windows)** Press Ctrl+Shift+E, drag a rectangle over anything on the screen,
