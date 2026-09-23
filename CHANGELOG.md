@@ -13,7 +13,14 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## 0.2.8 — 2026-09-22
+## 0.2.8 — 2026-09-23
+
+**Text in Google Drive's PDF preview translates even when a screenshot is on
+the clipboard. (Linux)** Pages like that one only hand over text when it is
+copied, so bubbleTranslate briefly borrows the clipboard and then puts back
+what was there. It used to refuse whenever the clipboard held an image, and the
+bubble never appeared. Now it saves whatever the clipboard holds, images
+included, and restores it exactly.
 
 **The bubble is no longer a black rectangle. (Windows)** On some machines —
 virtual machines and remote desktops especially — every translation came up as
