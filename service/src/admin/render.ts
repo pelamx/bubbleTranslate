@@ -437,11 +437,10 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     .join("");
 
   // "Latest" is what each platform is offered today, not the highest number
-  // anyone happens to run: the platforms are released separately, and a
-  // published version nobody has installed yet still belongs in the table.
-  const versionList = [...new Set([...vers.map((v) => v.app), ...Object.values(pub ?? {})])].sort(
-    compareVersions,
-  );
+  // anyone happens to run: the platforms are released separately. Only
+  // versions somebody runs get a row; the published one is named in each
+  // column's header, so a release nobody has installed yet is still visible.
+  const versionList = [...new Set(vers.map((v) => v.app))].sort(compareVersions);
   const versionRows = versionList
     .map((app) => {
       const n = (os: string) => vers.filter((v) => v.app === app && v.os === os).reduce((a, v) => a + v.n, 0);
@@ -573,7 +572,12 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
          pub ? "" : ` <span class="muted">— latest.json could not be read, so no version is marked latest</span>`
        }</p>
        <div class="scroll"><table>
-         <tr><th>Version</th>${PLATFORMS.map((os) => `<th class="num">${osLabel(os)}</th>`).join("")}<th class="num">Total</th></tr>
+         <tr><th>Version</th>${PLATFORMS.map(
+           (os) =>
+             `<th class="num">${osLabel(os)}${
+               pub?.[os] ? `<br><span class="muted" style="font-weight:400">latest ${escapeHtml(pub[os])}</span>` : ""
+             }</th>`,
+         ).join("")}<th class="num">Total</th></tr>
          ${versionRows || `<tr><td colspan="5" class="muted">No installs this month.</td></tr>`}
        </table></div>
      </section>
