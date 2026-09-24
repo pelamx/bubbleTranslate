@@ -52,6 +52,12 @@ export const NOT_MINE_INSTALL = `install NOT IN (SELECT value FROM json_each(?9)
 export const NOT_MINE_LICENCE = `(email IS NULL OR LOWER(email) NOT IN (SELECT value FROM json_each(?9)))
   AND id NOT IN (SELECT licence_id FROM ignored_licences)`;
 
+/** The other side of {@link NOT_MINE_INSTALL}: the operator's own machines and
+ *  nobody else's. Written as the exact complement so a machine can never fall
+ *  through both conditions, or be caught by both. */
+export const MINE_INSTALL = `(install IN (SELECT value FROM json_each(?9))
+  OR install IN (SELECT install FROM ignored_installs))`;
+
 export const PLATFORMS = ["windows", "linux", "macos"] as const;
 
 export interface HealthRow {
@@ -285,6 +291,32 @@ export interface OsRow {
   active_today: number;
   active: number;
   total: number;
+}
+
+/** The operator's own machines, split by OS.
+ *
+ *  Every other count on this page leaves these out, which is right for reading
+ *  how the app is doing and wrong for the one question the operator asks about
+ *  their own machines: did the install I just made arrive? Without this the
+ *  answer to "I installed it and nothing shows" is indistinguishable from a
+ *  ping that never happened.
+ *
+ *  Same shape as {@link osBreakdown} so the page can draw both with one
+ *  helper, and the same `os` values — Rust's `env::consts::OS`. */
+export async function mineBreakdown(env: Env): Promise<OsRow[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT COALESCE(os, 'unknown') AS os,
+            SUM(CASE WHEN first_seen >= ?2 THEN 1 ELSE 0 END) AS today,
+            SUM(CASE WHEN last_seen  >= ?2 THEN 1 ELSE 0 END) AS active_today,
+            SUM(CASE WHEN last_seen  >  ?1 THEN 1 ELSE 0 END) AS active,
+            COUNT(*) AS total
+       FROM installs
+      WHERE ${MINE_INSTALL}
+      GROUP BY os`,
+  )
+    .bind(now() - 8 * DAY, startOfToday(), null, null, null, null, null, null, await mineInstalls(env))
+    .all<OsRow>();
+  return results ?? [];
 }
 
 export async function osBreakdown(env: Env): Promise<OsRow[]> {

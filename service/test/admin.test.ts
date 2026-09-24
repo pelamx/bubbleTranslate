@@ -98,3 +98,37 @@ it("counts monthly recurring revenue from licences set to renew", async () => {
   // $2 + $20/12
   expect(html).toContain("$3.67");
 });
+
+/** The operator's own machines are kept out of every count on purpose, which
+ *  leaves "I installed it and nothing appeared" indistinguishable from a ping
+ *  that never arrived. The tile that answers it has to count exactly the
+ *  machines the others leave out, and split them the same way. */
+it("counts the operator's own machines, by platform, apart from everyone else's", async () => {
+  const mine = "a".repeat(32);
+  const theirs = "b".repeat(32);
+  const ping = (install: string, os: string) =>
+    worker.fetch(
+      new Request("https://api.bubbletranslate.app/v1/ping", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ install, os, app: "0.3.5", plan: "free" }),
+      }),
+      env,
+    );
+
+  await ping(mine, "macos");
+  await ping(theirs, "windows");
+
+  // The variable is a comma-separated list, not JSON.
+  const res = await get("/admin", { ...withPassword, ADMIN_IGNORE_INSTALLS: mine });
+  const html = await res.text();
+
+  const tile = html.slice(html.indexOf("Your own machines"));
+  const upTo = tile.slice(0, tile.indexOf("</div></div>"));
+  expect(upTo).toContain("macOS 1");
+  // The one that is not the operator's stays out of this tile...
+  expect(upTo).toContain("Windows 0");
+  // ...and the operator's stays out of the count it would otherwise inflate.
+  const everyone = html.slice(html.indexOf("Installs ever seen"));
+  expect(everyone.slice(0, everyone.indexOf("</div></div>"))).toContain("macOS 0");
+});

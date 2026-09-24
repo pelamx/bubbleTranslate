@@ -31,6 +31,7 @@ import {
   ignoreList,
   licenceOs,
   mineInstalls,
+  mineBreakdown,
   osBreakdown,
   osLabel,
   published,
@@ -553,11 +554,12 @@ export function delta(today: number, yesterday: number): string {
 }
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share] = await Promise.all([
+  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
     osBreakdown(env),
+    mineBreakdown(env),
     licenceOs(env),
     search(env, query),
     recentFailures(env),
@@ -649,6 +651,9 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
   };
   const osChips = (pick: (o: OsRow) => number) => chipsFor(byOs, pick);
   const licChips = (pick: (o: LicenceOsRow) => number) => chipsFor(licOs, pick);
+  const mineChips = (pick: (o: OsRow) => number) => chipsFor(mineOs, pick);
+  const mineTotal = mineOs.reduce((a, o) => a + o.total, 0);
+  const mineActive = mineOs.reduce((a, o) => a + o.active, 0);
   const peak = Math.max(1, ...p.series);
   const bars = p.series
     .map((n, i) => {
@@ -721,6 +726,9 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
          <div class="stat${s.expiring > 0 ? " alert" : ""}"><div class="k">Ending in 7 days</div><div class="v">${s.expiring}</div>
            ${licChips((o) => o.expiring)}
            <div class="sub">${s.winding_down} cancelled, still paid</div></div>
+         <div class="stat"><div class="k">Your own machines</div><div class="v">${mineTotal}</div>
+           ${mineChips((o) => o.total)}
+           <div class="sub">${mineActive} active this week · left out of every count above</div></div>
        </div>
        <p class="label" style="margin-top:20px">New installs, last 14 days</p>
        <div class="bars">${bars}</div>
