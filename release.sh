@@ -167,6 +167,12 @@ echo
 echo "built $DMG ($(du -h "$DMG" | cut -f1)), version $VERSION"
 echo "upload $DMG to the v$VERSION release in bubbleTranslate/downloads:"
 echo "  gh release upload v$VERSION -R bubbleTranslate/downloads $DMG --clobber"
+echo "  ./scripts/fill-release.sh v$VERSION macos"
+echo
+echo "the second line is not optional: /releases/latest/download follows"
+echo "whichever release is newest, so a release carrying only the dmg makes"
+echo "the Windows and Linux downloads 404 for everyone until it is filled in"
+echo
 echo "(latest.json is already published; the binary is not tracked)"
 if [[ -z "$NOTARY_PROFILE" ]]; then
     echo

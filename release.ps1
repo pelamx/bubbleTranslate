@@ -151,6 +151,12 @@ Write-Host "built $OUT ($size MB), version $version"
 Write-Host "      $ZIP ($zipSize MB)"
 Write-Host "upload both to the v$version release in ${repo}:"
 Write-Host "  gh release upload v$version -R $repo $OUT $ZIP --clobber"
+Write-Host "  bash ./scripts/fill-release.sh v$version windows"
+Write-Host ""
+Write-Host "the second line is not optional: /releases/latest/download follows" -ForegroundColor Yellow
+Write-Host "whichever release is newest, so a release carrying only the Windows" -ForegroundColor Yellow
+Write-Host "files makes the macOS and Linux downloads 404 for everyone." -ForegroundColor Yellow
+Write-Host ""
 Write-Host "(latest.json is already published; neither file is tracked)"
 Write-Host ""
 Write-Host "First run:"

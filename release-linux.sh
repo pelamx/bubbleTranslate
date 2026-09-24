@@ -61,8 +61,11 @@ rm -f "$SUMS.new"
 #
 # The download links in README.md and on the website point at
 # /releases/latest/download/, which GitHub resolves to whichever release is
-# current, so publishing the release is what moves them. There is nothing to
-# edit there per release.
+# current — so publishing this release is what moves *all three* of them,
+# including the two platforms it has nothing to do with. A release carrying
+# only the Linux binary therefore breaks the macOS and Windows downloads for
+# everybody until it is filled in. `fill-release.sh` is what fills it; run it
+# once the release exists.
 
 echo
 echo "built $OUT ($(du -h "$OUT" | cut -f1)), version $VERSION"
@@ -70,6 +73,10 @@ echo "checksummed into $SUMS"
 echo
 echo "  gh release create v$VERSION -R bubbleTranslate/downloads \\"
 echo "      --title \"bubbleTranslate $VERSION\" $OUT $SUMS"
+echo "  ./scripts/fill-release.sh v$VERSION linux"
+echo
+echo "the second line is not optional: without it the macOS and Windows"
+echo "downloads 404 for everyone, because latest/download follows this release"
 echo
 echo "use this version's section of CHANGELOG.md as the release notes -- it is"
 echo "what the download page shows to whoever just saw the update banner"
