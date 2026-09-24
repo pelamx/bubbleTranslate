@@ -27,6 +27,17 @@ installed and which languages it reads, and when something is missing it
 shows the one command that installs it for your distribution, with a button
 to copy it. It notices by itself once you have run it — no restart needed.
 
+## 0.3.5 — 2026-09-24
+
+**The headings in the window are bold now.** They were meant to be, and on
+every system they came out as slightly paler grey instead: the interface
+toolkit has no bold of its own, so asking for it only changed the colour. The
+app now loads a bold face from the system at startup and the headings use it,
+which makes the sections easier to tell apart at a glance.
+
+Where a system has no such face — some Linux installs — nothing breaks: the
+headings stay exactly as they were.
+
 ## 0.3.4 — 2026-09-24
 
 **The Linux download now starts on Ubuntu, Debian, Fedora and the rest.

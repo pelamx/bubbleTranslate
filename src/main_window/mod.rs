@@ -285,9 +285,14 @@ fn paint_background(ui: &egui::Ui, rect: egui::Rect) {
 }
 
 fn section(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
+    // Drawn in the bold family rather than with `strong`, which in egui
+    // brightens the text instead of thickening it: with no bold face loaded a
+    // heading reads as slightly lighter grey and nothing more. Where a machine
+    // had no such face this falls back to the ordinary one and the colour
+    // carries the heading alone, exactly as before.
     ui.label(
         egui::RichText::new(title)
-            .size(12.0)
+            .font(egui::FontId::new(12.0, crate::ui::theme::emphasis_family()))
             .color(TEXT_MUTED)
             .strong(),
     );

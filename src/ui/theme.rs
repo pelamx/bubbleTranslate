@@ -384,6 +384,28 @@ pub(super) const LINE_HEIGHT_RATIO: f32 = 1.45;
 pub(super) const FALLBACK_FONTS: &[&str] =
     &["/System/Library/Fonts/Supplemental/Arial Unicode.ttf"];
 
+/// A bold face, for the few words that have to stand out — a key name in the
+/// status panel, and nothing else.
+///
+/// egui ships no bold: its `strong` brightens the text rather than thickening
+/// it, so without a face like this the only emphasis available is colour. One
+/// file per system, the first that is there wins, and none of them being there
+/// is not a failure: the text simply stays the weight it was.
+#[cfg(target_os = "macos")]
+pub(super) const BOLD_FONTS: &[&str] = &[
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Verdana Bold.ttf",
+];
+
+#[cfg(target_os = "linux")]
+pub(super) const BOLD_FONTS: &[&str] = &[
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+    "/usr/share/fonts/noto/NotoSans-Bold.ttf",
+    "/usr/share/fonts/liberation/LiberationSans-Bold.ttf",
+];
+
 #[cfg(target_os = "linux")]
 pub(super) const FALLBACK_FONTS: &[&str] = &[
     "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
@@ -401,6 +423,9 @@ pub(super) const FALLBACK_FONTS: &[&str] = &[
 /// every Windows 10 and 11 install, including the ones that never had an East
 /// Asian language pack added — the font files are always there even when the
 /// input methods are not.
+#[cfg(target_os = "windows")]
+pub(super) const BOLD_FONTS: &[&str] = &[r"C:\Windows\Fonts\segoeuib.ttf", r"C:\Windows\Fonts\arialbd.ttf"];
+
 #[cfg(target_os = "windows")]
 pub(super) const FALLBACK_FONTS: &[&str] = &[
     r"C:\Windows\Fonts\msyh.ttc",
@@ -430,7 +455,55 @@ pub(super) fn install_fonts(ctx: &egui::Context) {
             fonts.families.entry(family).or_default().push(name.clone());
         }
     }
+    // The bold family, if this machine has a face for it. Named rather than a
+    // weight because egui has no notion of weight: a family is a list of
+    // files, so "bold" is simply a different list. The Unicode fallbacks are
+    // appended to it as well, so a Japanese word inside an emphasised phrase
+    // still draws — just not bold, which is the right way round.
+    if let Some((path, bytes)) = find_bold_font() {
+        crate::trace!("bold font: {path}");
+        fonts
+            .font_data
+            .insert(BOLD_FAMILY.to_string(), Arc::new(egui::FontData::from_owned(bytes)));
+        let mut family = vec![BOLD_FAMILY.to_string()];
+        family.extend(
+            fonts
+                .families
+                .get(&egui::FontFamily::Proportional)
+                .cloned()
+                .unwrap_or_default(),
+        );
+        fonts
+            .families
+            .insert(egui::FontFamily::Name(BOLD_FAMILY.into()), family);
+        BOLD_AVAILABLE.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
     ctx.set_fonts(fonts);
+}
+
+/// The name the bold family is registered under.
+const BOLD_FAMILY: &str = "bold";
+
+static BOLD_AVAILABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The family to draw emphasised words in: the bold one where this machine had
+/// a face for it, and the ordinary one where it did not.
+///
+/// Asking rather than assuming, because naming a family egui never registered
+/// is a panic, and a missing font file is an ordinary thing on Linux.
+pub(crate) fn emphasis_family() -> egui::FontFamily {
+    if BOLD_AVAILABLE.load(std::sync::atomic::Ordering::Relaxed) {
+        egui::FontFamily::Name(BOLD_FAMILY.into())
+    } else {
+        egui::FontFamily::Proportional
+    }
+}
+
+fn find_bold_font() -> Option<(String, Vec<u8>)> {
+    BOLD_FONTS
+        .iter()
+        .find_map(|path| std::fs::read(path).ok().map(|bytes| ((*path).to_string(), bytes)))
 }
 
 /// Finds fonts with coverage past Latin, and reads them.
