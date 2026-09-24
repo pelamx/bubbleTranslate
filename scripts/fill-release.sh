@@ -104,6 +104,22 @@ for os in macos linux windows; do
     done
 done
 
+# The checksums describe the assets, so they are rewritten once the assets are
+# settled rather than copied from whichever release each binary came from --
+# one of those files would name three downloads this release does not have.
+if gh release download "$TAG" -R "$REPO" -D "$WORK/sums" --clobber \
+        -p 'bubbleTranslate*' >/dev/null 2>&1; then
+    (
+        cd "$WORK/sums" || exit 0
+        # Sorted, so the file does not churn on the order the downloads arrive.
+        shasum -a 256 $(ls | sort) > SHA256SUMS.txt
+        gh release upload "$TAG" -R "$REPO" SHA256SUMS.txt --clobber >/dev/null
+    )
+    echo "  rewrote SHA256SUMS.txt over every asset in $TAG"
+else
+    echo "warning: could not read $TAG's assets back; SHA256SUMS.txt is unchanged" >&2
+fi
+
 if [[ "$copied" -eq 0 ]]; then
     echo "nothing to copy into $TAG"
 else
