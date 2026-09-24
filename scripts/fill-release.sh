@@ -47,7 +47,11 @@ if ! command -v gh >/dev/null || ! command -v perl >/dev/null; then
     exit 1
 fi
 
-MANIFEST="$(gh api "repos/$REPO/contents/latest.json" --jq .content 2>/dev/null | tr -d '\n' | base64 -d 2>/dev/null || true)"
+# Only base64 lines are kept: a gh reached through a version-manager shim can
+# print a line of its own on stdout first, and one stray line is enough to make
+# the whole decode come back empty -- which reads as "no entry" for every
+# platform and fills nothing.
+MANIFEST="$(gh api "repos/$REPO/contents/latest.json" --jq .content 2>/dev/null | grep -E '^[A-Za-z0-9+/=]+$' | tr -d '\n' | base64 -d 2>/dev/null || true)"
 if [[ -z "$MANIFEST" ]]; then
     echo "error: could not read latest.json from $REPO; nothing was copied" >&2
     exit 1
