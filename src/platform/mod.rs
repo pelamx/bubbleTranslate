@@ -182,6 +182,11 @@ pub struct ScreenReading {
 
 /// The built-in reader, which reads the screen on Linux when Tesseract is
 /// not installed.
+// Only Linux ever constructs these, but the window matches on all four
+// everywhere — the same arrangement as [`CaptureSource`], and the same
+// reason for the allow: without it this is a warning on Windows and macOS,
+// and clippy is an error in CI.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum BuiltinReader {
     /// Its models have not been fetched yet.
