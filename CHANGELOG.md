@@ -31,6 +31,25 @@ Windows has installed: it has to recognise the language you are translating
 confident nonsense rather than an error. Windows Settings, under Time &
 language, is where those are added.
 
+**The same, on a Mac, with ⌘⇧E. (macOS)** It puts up the crosshair the Mac's
+own screenshot tool uses, so multi-display, window mode on the space bar and
+Escape-to-cancel all come with it. The translation appears under the box you
+drew rather than over it, so you can compare the two.
+
+The first time you press it, macOS asks whether bubbleTranslate may record the
+screen, and opens the right settings page. Nothing is captured until you say
+yes, and nothing is asked during installation — if you never press ⌘⇧E you are
+never asked at all. macOS only grants that to a freshly started app, so quit
+bubbleTranslate from the menu bar and open it again afterwards.
+
+Reading happens on the Mac itself, and the picture is deleted the moment the
+words have been taken out of it. Before it is read the picture is doubled in
+size and its colour drained to plain contrast, which sounds like a detail and
+is not: on a poster title in slanted hand-lettering it is the difference
+between two broken fragments and every word coming back. macOS reads far more
+languages than it is set up for, Turkish among them, so unlike Windows there
+is nothing to install first.
+
 ## 0.2.9 — 2026-09-23
 
 **A Bluetooth mouse keeps working after the laptop sleeps. (Linux)** A

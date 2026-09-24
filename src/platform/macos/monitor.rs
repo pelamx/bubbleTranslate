@@ -12,7 +12,7 @@
 //! double/triple clicks get through.
 
 use std::cell::Cell;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use core_foundation::base::TCFType;
@@ -122,6 +122,52 @@ fn satisfies(key: TriggerKey, flags: CGEventFlags) -> bool {
     flags.contains(wanted)
 }
 
+/// The callback for the read-the-screen key, and the drag that drew the last
+/// rectangle.
+///
+/// `screencapture` never says which rectangle the user drew, so the tap
+/// watches the drag that drew it — recorded ahead of the pause gate, because
+/// while the crosshair is up the tap is paused and that is precisely the drag
+/// the bubble has to keep clear of. In global display points, `(x, y, width,
+/// height)`.
+static ON_REGION: OnceLock<Mutex<Box<dyn Fn() + Send>>> = OnceLock::new();
+static DRAG_FROM: Mutex<Option<(f64, f64)>> = Mutex::new(None);
+static LAST_DRAG: Mutex<Option<(f64, f64, f64, f64)>> = Mutex::new(None);
+
+/// Registers the callback for Cmd+Shift+E.
+///
+/// Best effort and silent if called twice: the tap is installed once for the
+/// life of the process, and a second registration would be a bug rather than
+/// something to recover from.
+pub fn on_region_request(ask: impl Fn() + Send + 'static) {
+    let _ = ON_REGION.set(Mutex::new(Box::new(ask)));
+}
+
+/// The rectangle of the last completed drag, forgotten once read.
+pub fn take_last_drag() -> Option<(f64, f64, f64, f64)> {
+    LAST_DRAG.lock().unwrap().take()
+}
+
+/// Throws away any drag recorded so far, so a read cannot be handed one left
+/// over from before it started.
+pub fn forget_last_drag() {
+    *LAST_DRAG.lock().unwrap() = None;
+}
+
+/// Whether this key-up is the read-the-screen combination.
+///
+/// Cmd+Shift+E, beside the system's own Cmd+Shift+4 and Cmd+Shift+5. It could
+/// not be Shift+E alone: that is how a capital E is typed, and claiming it
+/// would put a crosshair up in every application that ever saw one. The tap
+/// only listens, so the keystroke still reaches whatever has focus.
+fn is_region_key(keycode: i64, flags: CGEventFlags) -> bool {
+    /// `kVK_ANSI_E`, from `HIToolbox/Events.h`.
+    const KEYCODE_E: i64 = 0x0E;
+    keycode == KEYCODE_E
+        && flags.contains(CGEventFlags::CGEventFlagShift)
+        && flags.contains(CGEventFlags::CGEventFlagCommand)
+}
+
 /// Starts the tap on a dedicated thread and returns immediately.
 ///
 /// Returns an error only if the tap could not be created, which in practice
@@ -167,6 +213,27 @@ fn run(on_trigger: impl Fn(Trigger) + Send + 'static) {
             if capture::is_synthesizing() || capture::is_marked_synthetic(event) {
                 return CallbackResult::Keep;
             }
+            // Recorded before the pause gate: while the crosshair is up the
+            // tap is paused, and that drag is the one the bubble needs.
+            match event_type {
+                CGEventType::LeftMouseDown => {
+                    let p = event.location();
+                    *DRAG_FROM.lock().unwrap() = Some((p.x, p.y));
+                }
+                CGEventType::LeftMouseUp => {
+                    if let Some((x0, y0)) = *DRAG_FROM.lock().unwrap() {
+                        let p = event.location();
+                        *LAST_DRAG.lock().unwrap() = Some((
+                            x0.min(p.x),
+                            y0.min(p.y),
+                            (p.x - x0).abs(),
+                            (p.y - y0).abs(),
+                        ));
+                    }
+                }
+                _ => {}
+            }
+
             if PAUSED.load(Ordering::Relaxed) {
                 crate::trace!("event ignored: pointer is over the bubble");
                 return CallbackResult::Keep;
@@ -226,6 +293,16 @@ fn run(on_trigger: impl Fn(Trigger) + Send + 'static) {
                 CGEventType::KeyUp => {
                     let flags = event.get_flags();
                     let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+                    // Asked for outright, so it is checked before the trigger
+                    // key and before the selection gestures: it has nothing to
+                    // do with whatever happens to be selected.
+                    if is_region_key(keycode, flags) {
+                        crate::trace!("key-up    keycode={keycode} -> read the screen");
+                        if let Some(ask) = ON_REGION.get() {
+                            ask.lock().unwrap()();
+                        }
+                        return CallbackResult::Keep;
+                    }
                     let shift_select = flags.contains(CGEventFlags::CGEventFlagShift)
                         && NAVIGATION_KEYS.contains(&keycode);
                     let select_all =

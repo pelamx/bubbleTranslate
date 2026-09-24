@@ -27,6 +27,31 @@ core-graphics = "0.25.0"
 objc2 = "0.6.4"
 objc2-app-kit = "0.3.2"
 objc2-foundation = "0.3.2"
+# Reading text off the screen. On-device: the picture handed to the recogniser
+# is whatever was on the user's screen, so it never leaves the machine.
+objc2-vision = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "VNRequest",
+    "VNRequestHandler",
+    "VNRecognizeTextRequest",
+    "VNObservation",
+    "VNTypes",
+    "objc2-core-foundation",
+    # The CIImage handler, for the prepared image.
+    "objc2-core-image",
+] }
+# Scaling and contrast before the recogniser sees the pixels; see ocr.rs for
+# why both are worth it and why sharpening is not.
+objc2-core-image = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "CIImage",
+    "CIFilterBuiltins",
+    "objc2-core-foundation",
+] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "CFCGTypes",
+] }
 
 # The bubble has to place itself at the cursor, and Wayland has no protocol
 # that lets a toplevel choose its own position. So on Linux the interface is an

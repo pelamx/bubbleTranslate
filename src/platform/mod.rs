@@ -19,6 +19,8 @@
 mod macos;
 #[cfg(target_os = "macos")]
 pub use macos::{capture, monitor, shell};
+#[cfg(target_os = "macos")]
+pub use macos::{on_screen_region_request, read_screen_region};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -157,7 +159,7 @@ pub struct ScreenRead {
 /// was cancelled or held no text. A platform without it is not broken and
 /// says nothing: the key that asks for this simply does nothing, exactly as
 /// it did before there was a key.
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn read_screen_region() -> Option<ScreenRead> {
     None
 }
@@ -167,7 +169,7 @@ pub fn read_screen_region() -> Option<ScreenRead> {
 /// Nothing anywhere but Windows yet. The callback is simply never called,
 /// which is what keeps [`crate::engine`] free of a platform test: it sends
 /// the request the same way everywhere and nowhere else has to know.
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn on_screen_region_request(_ask: impl Fn() + Send + 'static) {}
 
 /// Cuts the bubble's window to the shape of the card painted inside it.
