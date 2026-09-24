@@ -13,10 +13,19 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## 0.3.6 — 2026-09-24
+## 0.3.5 — 2026-09-24
 
-**The window now shows how to read text off the screen.** Ctrl+Shift+E (⌘⇧E
-on a Mac) was only described on the website, so anyone who had not read it
+**The headings in the window are bold now.** They were meant to be, and on
+every system they came out as slightly paler grey instead: the interface
+toolkit has no bold of its own, so asking for it only changed the colour. The
+app now loads a bold face from the system at startup and the headings use it,
+which makes the sections easier to tell apart at a glance.
+
+Where a system has no such face — some Linux installs — nothing breaks: the
+headings stay exactly as they were.
+
+**The window now shows how to read text off the screen. (Linux)**
+Ctrl+Shift+E was only described on the website, so anyone who had not read it
 there had no way to know it existed. A new *Read the screen* section, right
 under the translate box, says what it is for and how to use it in three
 steps, with a button to try it straight away.
@@ -36,17 +45,6 @@ so, and shows the one command that installs Tesseract with your language for
 your distribution, with a button to copy it. Once it is installed Tesseract
 does the reading instead, and the window notices by itself — no restart
 needed.
-
-## 0.3.5 — 2026-09-24
-
-**The headings in the window are bold now.** They were meant to be, and on
-every system they came out as slightly paler grey instead: the interface
-toolkit has no bold of its own, so asking for it only changed the colour. The
-app now loads a bold face from the system at startup and the headings use it,
-which makes the sections easier to tell apart at a glance.
-
-Where a system has no such face — some Linux installs — nothing breaks: the
-headings stay exactly as they were.
 
 ## 0.3.4 — 2026-09-24
 

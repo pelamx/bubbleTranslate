@@ -1,6 +1,6 @@
 [package]
 name = "bubbleTranslate"
-version = "0.3.6"
+version = "0.3.5"
 edition = "2024"
 
 # Platform-neutral: the translation engine, config, and the egui interface.
