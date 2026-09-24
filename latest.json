@@ -1,14 +1,14 @@
 {
   "linux": {
-    "version": "0.2.9",
-    "url": "https://github.com/bubbleTranslate/downloads/releases/download/v0.2.9/bubbleTranslate-linux-x86_64"
+    "version": "0.3.2",
+    "url": "https://github.com/bubbleTranslate/downloads/releases/download/v0.3.2/bubbleTranslate-linux-x86_64"
   },
   "macos": {
-    "version": "0.2.9",
-    "url": "https://github.com/bubbleTranslate/downloads/releases/download/v0.2.9/bubbleTranslate.dmg"
+    "version": "0.3.0",
+    "url": "https://github.com/bubbleTranslate/downloads/releases/download/v0.3.0/bubbleTranslate.dmg"
   },
   "windows": {
-    "version": "0.3.0",
-    "url": "https://github.com/bubbleTranslate/downloads/releases/download/v0.3.0/bubbleTranslate-windows-x64.zip"
+    "version": "0.3.3",
+    "url": "https://github.com/bubbleTranslate/downloads/releases/download/v0.3.3/bubbleTranslate-windows-x64.zip"
   }
 }
