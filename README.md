@@ -197,6 +197,11 @@ selection](#how-it-reads-the-selection).
 - A font with coverage past Latin, if you translate into Chinese, Japanese,
   Korean, Arabic or Cyrillic. Any Noto CJK package will do; `fc-match` is asked
   where it went.
+- **Tesseract**, to read text off the screen with Ctrl+Shift+E, and a language
+  pack for each language you read from: `pacman -S tesseract tesseract-data-eng`
+  on Arch, `apt install tesseract-ocr tesseract-ocr-eng` on Debian and Ubuntu.
+  Every installed language is tried at once, so install the ones you read and
+  no others. Nothing else in the app needs it.
 
 ### Granting Accessibility (macOS)
 
@@ -607,8 +612,9 @@ sudo usermod -aG input "$USER"   # then log out and back in
 Until that is done the settings panel says the gate is not in force and every
 selection is translated, exactly as before. What is read there is kept as
 narrow as the job allows: only devices that have a Shift key, and only the
-eight modifier keycodes — every other key is dropped inside the read loop, and
-nothing else is stored or sent anywhere.
+eight modifier keycodes, plus E so that Ctrl+Shift+E can be noticed — every
+other key is dropped inside the read loop, and nothing else is stored or sent
+anywhere.
 
 ### Translating from a keybinding
 
@@ -639,9 +645,26 @@ immediately — which is also what happens if you launch the app twice, except
 that a plain second launch means "show me the window" and brings the first
 copy's window forward instead of starting a rival translator.
 
+### Reading the screen on Linux
+
+Ctrl+Shift+E dims the screen; drag a rectangle over any text, and what is
+inside it is read by Tesseract and translated. Escape or the right button
+cancels. On Hyprland the combination is bound in the compositor, so the window
+underneath never sees it; elsewhere it is read from `/dev/input`, like the
+trigger key. Where neither works, bind the same request yourself:
+
+```sh
+bubbleTranslate --read-screen
+```
+
+It works on X11 sessions and on Wayland compositors that implement
+`wlr-screencopy` — Hyprland, sway, river, Wayfire. GNOME and KDE on Wayland do
+not let applications read the screen that way, and are not supported yet.
+
 ## Known limits
 
 - GNOME's Wayland session cannot be watched at all; see above.
+- Reading the screen does not work on GNOME or KDE under Wayland yet.
 - On a Wayland session that is not Hyprland, the trigger key needs membership
   of the `input` group; without it the gate is not in force. A keybinding on
   `--translate-selection` is the alternative that needs nothing.

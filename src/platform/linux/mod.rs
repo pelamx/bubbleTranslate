@@ -31,6 +31,9 @@ pub mod shell;
 mod borrow;
 mod compositor;
 mod evdev;
+mod ocr;
+mod overlay;
+mod screen;
 mod wayland;
 mod window;
 mod x11;
@@ -237,6 +240,135 @@ pub fn pointer_over(
     Some(rect.contains(eframe::egui::pos2(x as f32, y as f32)))
 }
 
+/// Who to tell when the key that reads the screen is pressed.
+static ON_REGION: std::sync::Mutex<Option<Box<dyn Fn() + Send>>> = std::sync::Mutex::new(None);
+
+/// Registers the callback for Ctrl+Shift+E, and starts listening for it.
+///
+/// Two ways in. On Hyprland the combination is bound in the compositor, which
+/// swallows it — see [`compositor::ensure_read_screen_bind`]. Everywhere, it
+/// is also read from `/dev/input`, the same reader the trigger key falls back
+/// to, which works wherever the user is in the `input` group and is what
+/// notices the press after a config reload has dropped the binding. Where
+/// neither works, `bubbleTranslate --read-screen` is the same request, for a
+/// desktop keybinding to run.
+pub fn on_screen_region_request(ask: impl Fn() + Send + 'static) {
+    if let Ok(mut slot) = ON_REGION.lock() {
+        *slot = Some(Box::new(ask));
+    }
+    // Off the interface thread: it waits on the compositor, twice.
+    let _ = std::thread::Builder::new()
+        .name("read-screen-key".into())
+        .spawn(|| {
+            compositor::ensure_read_screen_bind();
+            evdev::ensure_started();
+        });
+}
+
+/// What the keyboard reader does on Ctrl+Shift+E.
+///
+/// Passed on only when the compositor did not deliver it already: a binding
+/// that was live ran `--read-screen` itself, and asking again would put the
+/// overlay up twice.
+pub(crate) fn read_screen_key_pressed() {
+    if compositor::ensure_read_screen_bind() != compositor::ReadScreenBind::Live {
+        ask_for_screen_region();
+    }
+}
+
+/// Asks for the screen to be read, from the key or from a second process.
+pub fn ask_for_screen_region() {
+    match ON_REGION.lock() {
+        Ok(slot) => match slot.as_ref() {
+            Some(ask) => ask(),
+            None => crate::trace!("region    nobody registered for the key"),
+        },
+        Err(_) => crate::trace!("region    the callback lock was poisoned"),
+    }
+}
+
+/// Why reading the screen will not work here, for the one place that can
+/// print it: the `--read-screen` command.
+pub fn screen_reading_missing() -> Option<&'static str> {
+    ocr::missing()
+}
+
+/// Reads text out of a rectangle the user draws on the screen.
+///
+/// Three steps: a still of the screen is taken, the user draws a rectangle
+/// over a dimmed copy of it, and Tesseract reads what is inside. `None` when
+/// any of them has nothing to give — no Tesseract, a desktop that will not be
+/// read, a cancelled drag, a rectangle with no text in it. None of those is
+/// worth a bubble saying so, the same as on Windows.
+pub fn read_screen_region() -> Option<crate::platform::ScreenRead> {
+    crate::trace!("region    asked to read the screen");
+
+    // Asked before the screen is taken over: a machine that can never answer
+    // should not make the user draw a rectangle first.
+    if let Some(reason) = ocr::missing() {
+        crate::trace!("ocr       {reason}");
+        return None;
+    }
+
+    let shot = match screen::grab() {
+        Ok(shot) => shot,
+        Err(err) => {
+            crate::trace!("screen    {err}");
+            return None;
+        }
+    };
+    let (x, y, width, height) = overlay::select(&shot.frame, shot.placement)?;
+    let region = shot.frame.crop(x, y, width, height);
+    let text = ocr::recognize(&region, shot.scale())?;
+
+    // Whitespace is what a rectangle drawn over a photograph comes back as.
+    if text.trim().is_empty() {
+        crate::trace!("ocr       nothing readable in the region");
+        return None;
+    }
+
+    let scale = shot.scale();
+    let region = (
+        shot.origin.0 + f64::from(x) / scale,
+        shot.origin.1 + f64::from(y) / scale,
+        f64::from(width) / scale,
+        f64::from(height) / scale,
+    );
+    let screen_bottom = shot.origin.1 + shot.size.1;
+    Some(crate::platform::ScreenRead {
+        capture: crate::platform::Capture {
+            text,
+            via: crate::platform::CaptureSource::Ocr,
+        },
+        at: Some(bubble_anchor(region, screen_bottom)),
+    })
+}
+
+/// How far below the region the bubble sits, in the pointer's units.
+const REGION_GAP: f64 = 8.0;
+
+/// How much room under the region counts as enough to put the bubble there.
+/// A little more than the bubble's smallest height; being wrong is cosmetic,
+/// because the bubble is kept on the screen either way.
+const REGION_MIN_ROOM: f64 = 80.0;
+
+/// How far inside the region the bubble sits when it has to go on top of it.
+const REGION_INSET: f64 = 12.0;
+
+/// Where the bubble goes for a region that was just read: underneath it, so
+/// what was read stays in view beside its translation, or on top of it when
+/// the region reaches the bottom of the screen and there is nowhere else.
+fn bubble_anchor(region: (f64, f64, f64, f64), screen_bottom: f64) -> (f64, f64) {
+    let (x, y, _, height) = region;
+    let below = y + height + REGION_GAP;
+    if below + REGION_MIN_ROOM <= screen_bottom {
+        (x, below)
+    } else {
+        crate::trace!("bubble    no room under the region; placing it on top");
+        (x + REGION_INSET, y + REGION_INSET)
+    }
+}
+
 pub fn backend() -> &'static Backend {
     static BACKEND: OnceLock<Backend> = OnceLock::new();
     BACKEND.get_or_init(detect)
@@ -271,4 +403,22 @@ fn detect() -> Backend {
     }
 
     Backend::Unavailable("no display server: neither WAYLAND_DISPLAY nor DISPLAY is set".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_bubble_goes_under_the_region_while_there_is_room() {
+        assert_eq!(bubble_anchor((100.0, 100.0, 200.0, 50.0), 800.0), (100.0, 158.0));
+    }
+
+    #[test]
+    fn a_region_at_the_bottom_gets_the_bubble_on_top_of_it() {
+        assert_eq!(
+            bubble_anchor((100.0, 600.0, 200.0, 190.0), 800.0),
+            (112.0, 612.0)
+        );
+    }
 }

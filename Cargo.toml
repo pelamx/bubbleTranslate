@@ -1,6 +1,6 @@
 [package]
 name = "bubbleTranslate"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 
 # Platform-neutral: the translation engine, config, and the egui interface.
@@ -69,7 +69,7 @@ eframe = { version = "0.35.0", default-features = false, features = [
 raw-window-handle = "0.6"
 x11rb = { version = "0.13", features = ["xfixes"] }
 wayland-client = "0.31"
-wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # The tray icon, so closing the interface leaves the translator running with
 # something to bring it back. Blocking API — the app has no async runtime of

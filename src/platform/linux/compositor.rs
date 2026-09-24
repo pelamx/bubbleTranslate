@@ -130,9 +130,154 @@ fn hyprland_eval(lua: &str) -> Option<String> {
     Some(reply)
 }
 
+/// How the key that reads the screen reaches us on Hyprland.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadScreenBind {
+    /// Our binding was already there: Hyprland ran it, and swallowed the key.
+    Live,
+    /// It was missing — a config reload clears it — and has just been put
+    /// back. This press was not swallowed and not delivered, so whoever saw it
+    /// has to pass it on themselves.
+    Added,
+    /// Not Hyprland, or the combination is the user's own, or the compositor
+    /// would not take the binding. The key is read from `/dev/input` instead.
+    None,
+}
+
+/// What our binding is called, which is how it is found again: a binding made
+/// through the Lua API is listed by its description, not by what it runs.
+const READ_SCREEN_DESCRIPTION: &str = "bubbleTranslate: read the screen";
+
+/// Makes sure Ctrl+Shift+E is bound, in the compositor, to
+/// `bubbleTranslate --read-screen`.
+///
+/// Worth it for two reasons. A binding is consumed by the compositor, so the
+/// window underneath never sees the key — reading it from `/dev/input` cannot
+/// stop VS Code opening its explorer at the same moment. And it needs no
+/// group membership at all.
+///
+/// A combination the user has bound to something of their own is left alone.
+pub fn ensure_read_screen_bind() -> ReadScreenBind {
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
+        return ReadScreenBind::None;
+    }
+    let Some(binds) = hyprland_binds() else {
+        return ReadScreenBind::None;
+    };
+    match classify(&binds) {
+        Chord::Ours => return ReadScreenBind::Live,
+        Chord::Theirs => return ReadScreenBind::None,
+        Chord::Free => {}
+    }
+
+    let Some(command) = read_screen_command() else {
+        return ReadScreenBind::None;
+    };
+    // 0.56 and later configure in Lua; before that, in bind strings. Long
+    // brackets, so nothing in the path needs escaping for Lua.
+    let lua = format!(
+        "hl.bind('CTRL + SHIFT + E', hl.dsp.exec_cmd([==[{command}]==]), \
+         {{ description = '{READ_SCREEN_DESCRIPTION}' }})"
+    );
+    if !hyprctl_ok(&["eval", &lua]) {
+        let _ = hyprctl_ok(&["keyword", "bind", &format!("CTRL SHIFT, E, exec, {command}")]);
+    }
+    match hyprland_binds().map(|binds| classify(&binds)) {
+        Some(Chord::Ours) => {
+            crate::trace!("hotkey    ctrl+shift+e bound in hyprland");
+            ReadScreenBind::Added
+        }
+        _ => ReadScreenBind::None,
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Chord {
+    Ours,
+    Theirs,
+    Free,
+}
+
+/// Who, if anyone, has Ctrl+Shift+E in this list of bindings.
+fn classify(binds: &[serde_json::Value]) -> Chord {
+    /// Hyprland's modifier mask: Shift is 1, Control is 4.
+    const CTRL_SHIFT: i64 = 1 | 4;
+    let text = |bind: &serde_json::Value, key: &str| {
+        bind.get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let mut theirs = false;
+    for bind in binds {
+        let ours = text(bind, "description") == READ_SCREEN_DESCRIPTION
+            || (text(bind, "dispatcher") == "exec" && text(bind, "arg").ends_with("--read-screen"));
+        if ours {
+            return Chord::Ours;
+        }
+        if text(bind, "key").eq_ignore_ascii_case("e")
+            && bind.get("modmask").and_then(|v| v.as_i64()) == Some(CTRL_SHIFT)
+            && text(bind, "submap").is_empty()
+        {
+            theirs = true;
+        }
+    }
+    if theirs { Chord::Theirs } else { Chord::Free }
+}
+
+/// This binary with the flag, quoted for the shell Hyprland runs it through.
+fn read_screen_command() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let exe = exe.to_str()?;
+    if exe.contains("]==]") {
+        return None;
+    }
+    Some(format!("'{}' --read-screen", exe.replace('\'', "'\\''")))
+}
+
+fn hyprland_binds() -> Option<Vec<serde_json::Value>> {
+    let mut command = std::process::Command::new("hyprctl");
+    command.args(["binds", "-j"]);
+    let out = super::timed_output(command, super::IPC_BUDGET).ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    serde_json::from_slice(&out.stdout).ok()
+}
+
+/// Runs `hyprctl`, and says whether it both ran and did not answer with an
+/// error — which it prints on stdout with a successful exit.
+fn hyprctl_ok(args: &[&str]) -> bool {
+    let mut command = std::process::Command::new("hyprctl");
+    command.args(args);
+    super::timed_output(command, super::IPC_BUDGET)
+        .is_ok_and(|out| out.status.success() && !out.stdout.starts_with(b"Error"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn our_binding_is_recognised_and_a_users_own_is_left_alone() {
+        let bind = |key: &str, modmask: i64, description: &str| {
+            serde_json::json!({
+                "key": key, "modmask": modmask, "submap": "",
+                "description": description, "dispatcher": "__lua", "arg": "7",
+            })
+        };
+        assert_eq!(classify(&[bind("E", 64, "Editor")]), Chord::Free);
+        assert_eq!(classify(&[bind("E", 5, "Something else")]), Chord::Theirs);
+        assert_eq!(
+            classify(&[bind("E", 5, READ_SCREEN_DESCRIPTION)]),
+            Chord::Ours
+        );
+        let legacy = serde_json::json!({
+            "key": "E", "modmask": 5, "submap": "", "description": "",
+            "dispatcher": "exec", "arg": "'/opt/bubbleTranslate' --read-screen",
+        });
+        assert_eq!(classify(&[legacy]), Chord::Ours);
+    }
 
     #[test]
     fn every_gated_key_has_a_pair_of_keysyms() {

@@ -90,6 +90,23 @@ fn main() -> eframe::Result<()> {
         );
         std::process::exit(1);
     }
+    #[cfg(target_os = "linux")]
+    if args.iter().any(|a| a == "--read-screen") {
+        // Ctrl+Shift+E as a command, for a desktop keybinding on a session
+        // where the keyboard cannot be read directly.
+        if let Some(reason) = crate::platform::screen_reading_missing() {
+            eprintln!("bubbleTranslate: {reason}");
+            std::process::exit(1);
+        }
+        if ipc::request_read_screen() {
+            std::process::exit(0);
+        }
+        eprintln!(
+            "bubbleTranslate: nothing is running to read the screen — \
+             start bubbleTranslate first."
+        );
+        std::process::exit(1);
+    }
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!(concat!("bubbleTranslate ", env!("CARGO_PKG_VERSION")));
         std::process::exit(0);

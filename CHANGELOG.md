@@ -13,6 +13,28 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## 0.3.2 — 2026-09-24
+
+**Translate text that cannot be selected, by drawing a box around it.
+(Linux)** What Windows and macOS gained in 0.3.0 comes to Linux. Press
+Ctrl+Shift+E, drag a rectangle over anything on the screen — a screenshot, a
+video, a scanned page, a game — and what is inside it is read and translated.
+Escape, or the right mouse button, cancels.
+
+It needs Tesseract, which does the reading, and a language pack for each
+language you read from: `tesseract` and `tesseract-data-eng` on Arch,
+`tesseract-ocr` and `tesseract-ocr-eng` on Debian and Ubuntu. Tesseract is a
+separate package rather than part of the download because each language adds
+tens of megabytes, and this way you only install the ones you read. The
+reading happens on your own computer and the picture is never sent anywhere.
+
+It works on X11 and on Hyprland, sway and the other wlroots desktops. GNOME
+and KDE on Wayland do not let applications take a picture of the screen this
+way, so there the key does nothing yet. On Hyprland the key is bound in the
+compositor, so the window you are reading does not also react to it. Anywhere
+else, `bubbleTranslate --read-screen` does the same thing from a keybinding of
+your own.
+
 ## 0.3.1 — 2026-09-24
 
 **Reading the screen works every time, not just the first. (Windows)** Pressing

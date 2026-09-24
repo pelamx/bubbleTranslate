@@ -15,7 +15,8 @@
 //!   * only devices that carry a Shift key, which rules out mice, lid
 //!     switches, power buttons and the rest of the event nodes;
 //!   * only the eight modifier keycodes, and only as a bitmask of what is
-//!     currently held. Every other keycode is dropped inside the read loop —
+//!     currently held — plus E, and only to notice Ctrl+Shift+E, the key that
+//!     reads the screen. Every other keycode is dropped inside the read loop —
 //!     nothing else is stored, counted or forwarded anywhere.
 //!
 //! The one exception is the left mouse button, read from devices that have no
@@ -57,6 +58,8 @@ mod keycode {
     pub const RIGHTALT: u16 = 100;
     pub const LEFTMETA: u16 = 125;
     pub const RIGHTMETA: u16 = 126;
+    /// Not a modifier: the key that, with Ctrl and Shift, reads the screen.
+    pub const E: u16 = 18;
     /// Not a modifier: read only by [`super::start_pointer`], from devices
     /// that have no keyboard at all.
     pub const BTN_LEFT: u16 = 272;
@@ -168,6 +171,15 @@ fn bit(code: u16) -> Option<u32> {
     })
 }
 
+/// Whether the modifiers held with E make it the key that reads the screen:
+/// Ctrl and Shift, and neither Alt nor Super, so a desktop's own Super+Shift+E
+/// does not also open the overlay.
+fn is_read_screen_chord(held: u32) -> bool {
+    const SHIFT: u32 = 1 << 0;
+    const CTRL: u32 = 1 << 1;
+    held & (SHIFT | CTRL) == SHIFT | CTRL && held & !(SHIFT | CTRL) == 0
+}
+
 fn wanted_bit(key: TriggerKey) -> Option<u32> {
     Some(match key {
         TriggerKey::Always => return None,
@@ -273,6 +285,8 @@ pub fn start() -> Result<(), String> {
             // "no idea" (fail-open) instead of "not held" (every gated
             // selection silently dropped) for the life of the process.
             RUNNING.store(true, Ordering::Relaxed);
+            // Whether E is down, so holding it — which repeats — asks once.
+            let mut e_down = false;
             read_loop(
                 devices,
                 "keyboard",
@@ -286,7 +300,16 @@ pub fn start() -> Result<(), String> {
                         HELD.store(0, Ordering::Relaxed);
                     }
                 },
-                |code, down| {
+                move |code, down| {
+                    if code == keycode::E {
+                        let pressed = down && !e_down;
+                        e_down = down;
+                        if pressed && is_read_screen_chord(HELD.load(Ordering::Relaxed)) {
+                            crate::trace!("key-down  ctrl+shift+e -> READ SCREEN");
+                            super::read_screen_key_pressed();
+                        }
+                        return;
+                    }
                     // Everything that is not a modifier leaves no trace: no
                     // branch below stores it.
                     let Some(bit) = bit(code) else {
@@ -611,6 +634,19 @@ mod tests {
         }
         assert_eq!(bit(keycode::LEFTSHIFT), bit(keycode::RIGHTSHIFT));
         assert_eq!(bit(keycode::LEFTMETA), wanted_bit(TriggerKey::Super));
+    }
+
+    #[test]
+    fn only_ctrl_shift_on_its_own_reads_the_screen() {
+        let shift = bit(keycode::LEFTSHIFT).unwrap();
+        let ctrl = bit(keycode::RIGHTCTRL).unwrap();
+        let alt = bit(keycode::LEFTALT).unwrap();
+        let meta = bit(keycode::LEFTMETA).unwrap();
+        assert!(is_read_screen_chord(shift | ctrl));
+        assert!(!is_read_screen_chord(ctrl));
+        assert!(!is_read_screen_chord(shift));
+        assert!(!is_read_screen_chord(shift | ctrl | alt));
+        assert!(!is_read_screen_chord(shift | meta));
     }
 
     #[test]

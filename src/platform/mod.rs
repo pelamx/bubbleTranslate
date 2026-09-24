@@ -153,25 +153,6 @@ pub struct ScreenRead {
     pub at: Option<(f64, f64)>,
 }
 
-/// Reads text out of a rectangle the user draws on the screen.
-///
-/// `None` everywhere but Windows so far, and `None` there too when the drag
-/// was cancelled or held no text. A platform without it is not broken and
-/// says nothing: the key that asks for this simply does nothing, exactly as
-/// it did before there was a key.
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
-pub fn read_screen_region() -> Option<ScreenRead> {
-    None
-}
-
-/// Asks to be told when the user presses the key that reads the screen.
-///
-/// Nothing anywhere but Windows yet. The callback is simply never called,
-/// which is what keeps [`crate::engine`] free of a platform test: it sends
-/// the request the same way everywhere and nowhere else has to know.
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
-pub fn on_screen_region_request(_ask: impl Fn() + Send + 'static) {}
-
 /// Cuts the bubble's window to the shape of the card painted inside it.
 ///
 /// Nothing to do wherever the bubble's window is transparent, which is
@@ -200,7 +181,9 @@ pub fn keep_on_all_workspaces() -> bool {
 
 #[cfg(target_os = "linux")]
 pub use linux::{
-    keep_on_all_workspaces, mark_as_notification, pointer_over, preferred_zoom, to_points,
+    ask_for_screen_region, keep_on_all_workspaces, mark_as_notification,
+    on_screen_region_request, pointer_over, preferred_zoom, read_screen_region,
+    screen_reading_missing, to_points,
 };
 
 #[cfg(target_os = "windows")]

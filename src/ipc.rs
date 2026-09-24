@@ -30,6 +30,11 @@
 /// The messages. Kept to fixed words so the listener never has to parse
 /// anything a caller controls.
 const TRANSLATE: &str = "translate-selection";
+/// Read a rectangle of the screen: the same request Ctrl+Shift+E makes, for a
+/// Linux session where the keyboard cannot be read and a desktop keybinding
+/// has to run a command instead.
+#[cfg(target_os = "linux")]
+const READ_SCREEN: &str = "read-screen";
 #[cfg(target_os = "windows")]
 const OPEN: &str = "open-window";
 
@@ -58,6 +63,8 @@ const MAX_MESSAGE: u64 = 64;
 
 #[cfg(unix)]
 pub use unix::{listen, request_translate};
+#[cfg(target_os = "linux")]
+pub use unix::request_read_screen;
 
 #[cfg(target_os = "windows")]
 pub use windows::{listen, request_open, request_translate};
@@ -121,6 +128,11 @@ mod unix {
                         crate::trace!("ipc: asked to translate the selection");
                         on_translate();
                     }
+                    #[cfg(target_os = "linux")]
+                    if message.trim() == super::READ_SCREEN {
+                        crate::trace!("ipc: asked to read the screen");
+                        crate::platform::ask_for_screen_region();
+                    }
                 }
             })?;
         crate::trace!("ipc: listening on {}", path.display());
@@ -136,6 +148,16 @@ mod unix {
             return false;
         };
         stream.write_all(TRANSLATE.as_bytes()).is_ok()
+    }
+
+    /// Asks the running instance to put up the overlay that reads the screen.
+    /// The whole of `--read-screen`.
+    #[cfg(target_os = "linux")]
+    pub fn request_read_screen() -> bool {
+        let Ok(mut stream) = UnixStream::connect(socket_path()) else {
+            return false;
+        };
+        stream.write_all(super::READ_SCREEN.as_bytes()).is_ok()
     }
 }
 
