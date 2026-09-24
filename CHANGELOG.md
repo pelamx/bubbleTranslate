@@ -52,6 +52,12 @@ Pressing it in Visual Studio, an admin terminal or any other program started
 keys typed into those windows. The screen now dims whatever window is in
 front.
 
+**The selection no longer leaves a smear behind it. (Windows)** Dragging a box
+could leave stale pieces of the desktop inside it — most visibly a ghost of
+the pointer, left where it had been when the key was pressed. The bright
+cut-out that caused it is gone; the box is marked by its frame, which looks
+the same on every machine and leaves nothing behind.
+
 ## 0.3.4 — 2026-09-24
 
 **The Linux download now starts on Ubuntu, Debian, Fedora and the rest.

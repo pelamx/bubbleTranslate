@@ -5,26 +5,24 @@
 //! comes back to full brightness. Let go and that is the region; press Escape
 //! or the right button and nothing happened.
 //!
-//! **How the hole is made.** The window is one translucent sheet over the
-//! whole virtual desktop, and the bright part is not drawn — it is cut out
-//! with [`SetWindowRgn`], exactly as the bubble's corners are in
-//! [`super::shape_bubble`]. Inside the cut the window does not exist: the
-//! pixels underneath are the real ones, at full brightness, with no alpha
-//! blending to wash them out. That matters here more than it looks, because
-//! those are the pixels that are about to be read — dimming them and
-//! undimming them in software would hand the OCR engine a slightly different
-//! image than the one on screen.
+//! **How the selection is shown.** The window is one translucent sheet over
+//! the whole virtual desktop, and [`procedure`] paints a bright frame around
+//! the rectangle being dragged. That is all of it.
 //!
-//! **And why the selection is shown twice.** The cut alone was not enough.
-//! A window region hole reveals what is beneath it only if the desktop
-//! composites those pixels back, and on a virtual GPU it does not reliably:
-//! the sheet was solid grey, the rectangle was being drawn correctly —
-//! `CombineRgn` and `SetWindowRgn` both reported success — and there was
-//! still nothing on screen to show where it was. So the sheet is translucent
-//! rather than opaque, and [`procedure`] paints a frame around the selection
-//! in the part of the window that survives the cut. Either one alone answers
-//! "where am I selecting"; together they answer it on machines where the
-//! other does not.
+//! It used to cut the rectangle out of the sheet with `SetWindowRgn`, so the
+//! selection stood at full brightness, and that was wrong twice over. A
+//! window region hole only reveals what is beneath it if the desktop
+//! composites those pixels back, and on a virtual GPU it does not: the hole
+//! showed stale desktop instead — including, memorably, a ghost of the
+//! pointer left where it had been when the key was pressed. And the reason
+//! given for wanting the real pixels — that they are what the OCR engine is
+//! about to read — was never true. [`super::read_screen_region`] destroys
+//! this window before it captures anything, so the sheet is long gone by then
+//! and could not have tinted a single pixel of what is read.
+//!
+//! So the hole is gone, and with it a region rebuilt on every mouse move. The
+//! frame alone says where the rectangle is, and says it the same way on every
+//! machine.
 //!
 //! **Why a raw window and not a second egui viewport.** This is one black
 //! rectangle and one cut-out; it needs no renderer, and after what a frameless
@@ -42,8 +40,8 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CombineRgn, CreateRectRgn, CreateSolidBrush, DeleteObject, EndPaint, FillRect,
-    HGDIOBJ, HRGN, InvalidateRect, PAINTSTRUCT, RGN_DIFF, SetWindowRgn, UpdateWindow,
+    BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, FillRect, HGDIOBJ, InvalidateRect,
+    PAINTSTRUCT, UpdateWindow,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE};
@@ -277,7 +275,11 @@ fn pump(window: HWND) -> Option<Region> {
     Some(between(anchor, current))
 }
 
-/// Cuts the current selection out of the dim sheet.
+/// Repaints where the frame was and where it now is.
+///
+/// Only those two rectangles, not the whole sheet. The difference is not
+/// academic: the sheet covers every monitor, and erasing eight megapixels on
+/// each mouse move is enough work to make the thread look busy to the system.
 fn reshape(window: HWND) {
     let (Some(anchor), Some(current)) = (
         unpack(ANCHOR.load(Ordering::SeqCst)),
@@ -285,41 +287,19 @@ fn reshape(window: HWND) {
     ) else {
         return;
     };
-    let region = between(anchor, current);
-    let (origin_x, origin_y, width, height) = virtual_screen();
+    let (origin_x, origin_y, _, _) = virtual_screen();
 
-    // SAFETY: both regions are owned here until `SetWindowRgn` takes the
-    // combined one; the window frees it on the next call and on destruction.
-    unsafe {
-        let whole: HRGN = CreateRectRgn(0, 0, width, height);
-        // The window's own coordinates, so the screen origin comes off.
-        let hole: HRGN = CreateRectRgn(
-            region.x - origin_x,
-            region.y - origin_y,
-            region.x - origin_x + region.width,
-            region.y - origin_y + region.height,
-        );
-        if CombineRgn(Some(whole), Some(whole), Some(hole), RGN_DIFF).0 != 0 {
-            SetWindowRgn(window, Some(whole), true);
-        } else {
-            let _ = DeleteObject(HGDIOBJ(whole.0));
-        }
-        let _ = DeleteObject(HGDIOBJ(hole.0));
-
-        // Repaint where the frame was and where it now is, rather than the
-        // whole sheet. The difference is not academic: the sheet covers every
-        // monitor, and erasing eight megapixels on each mouse move is enough
-        // work to make the thread look busy to the system — which is the
-        // other half of why the pointer was a spinner.
-        let moved_from = PREVIOUS.swap(pack(current.0, current.1), Ordering::SeqCst);
-        for corner in [unpack(moved_from), Some(current)].into_iter().flatten() {
-            let area = between(anchor, corner);
-            let stale = RECT {
-                left: area.x - origin_x - FRAME_WIDTH,
-                top: area.y - origin_y - FRAME_WIDTH,
-                right: area.x - origin_x + area.width + FRAME_WIDTH,
-                bottom: area.y - origin_y + area.height + FRAME_WIDTH,
-            };
+    let moved_from = PREVIOUS.swap(pack(current.0, current.1), Ordering::SeqCst);
+    for corner in [unpack(moved_from), Some(current)].into_iter().flatten() {
+        let area = between(anchor, corner);
+        let stale = RECT {
+            left: area.x - origin_x - FRAME_WIDTH,
+            top: area.y - origin_y - FRAME_WIDTH,
+            right: area.x - origin_x + area.width + FRAME_WIDTH,
+            bottom: area.y - origin_y + area.height + FRAME_WIDTH,
+        };
+        // SAFETY: the window is alive for as long as the loop that calls this.
+        unsafe {
             let _ = InvalidateRect(Some(window), Some(&stale), true);
         }
     }
