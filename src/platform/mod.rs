@@ -181,9 +181,8 @@ pub fn keep_on_all_workspaces() -> bool {
 
 #[cfg(target_os = "linux")]
 pub use linux::{
-    ask_for_screen_region, keep_on_all_workspaces, mark_as_notification,
-    on_screen_region_request, pointer_over, preferred_zoom, read_screen_region,
-    screen_reading_missing, to_points,
+    ask_for_screen_region, keep_on_all_workspaces, mark_as_notification, on_screen_region_request,
+    pointer_over, preferred_zoom, read_screen_region, screen_reading_missing, to_points,
 };
 
 #[cfg(target_os = "windows")]

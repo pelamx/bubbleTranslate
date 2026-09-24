@@ -13,6 +13,27 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## 0.3.4 — 2026-09-24
+
+**The Linux download now starts on Ubuntu, Debian, Fedora and the rest.
+(Linux)** Until now it only ran on the newest rolling-release distributions:
+on Ubuntu 24.04, Debian 13 or anything older it refused to start with a
+message about `GLIBC_2.43`, and the only way round it was building from
+source. It is now built to run on any distribution from Debian 10 and Ubuntu
+20.04 onwards — one download for all of them, and a smaller one, 16 MB rather
+than 21.
+
+**Reading the screen works on GNOME and KDE too. (Linux)** On their Wayland
+sessions Ctrl+Shift+E used to do nothing, because those desktops do not let an
+application take a picture of the screen by itself. It now asks the desktop
+for one, the way screenshot tools there do. The first time, your desktop may
+ask whether bubbleTranslate is allowed to take screenshots; if it will not
+hand one over quietly, its own screenshot tool opens instead, and you choose
+the region there.
+
+**A rectangle dragged tightly around a line reads it better. (Linux)** Letters
+that touched the edge of the rectangle were sometimes misread or missed.
+
 ## 0.3.2 — 2026-09-24
 
 **Translate text that cannot be selected, by drawing a box around it.

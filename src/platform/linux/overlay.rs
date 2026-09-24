@@ -91,12 +91,20 @@ pub fn select(still: &Frame, placement: Placement) -> Option<Selection> {
 
 struct Overlay<'a> {
     conn: RustConnection,
+    root: u32,
     window: u32,
     gc: u32,
     depth: u8,
     still: &'a Frame,
-    /// The window's size, and the two pixmaps made for it.
+    /// The X11 root's size when the still is the whole desktop, so the part
+    /// under the window can be found; `None` when the still is exactly what
+    /// the window covers.
+    desktop: Option<(u16, u16)>,
+    /// The window's size and position, and the two pixmaps made for them.
+    placed: Option<((u16, u16), (i16, i16))>,
     size: (u16, u16),
+    /// The rectangle of the still the window is showing, in its pixels.
+    shown: (u32, u32, u32, u32),
     bright: u32,
     dim: u32,
 }
@@ -119,14 +127,17 @@ fn run(still: &Frame, placement: Placement) -> Result<Option<Selection>, String>
         } => (x, y, width, height, true),
         // A first guess only: the window manager decides, and the window is
         // repainted for whatever size it is given.
-        Placement::Fullscreen => (
+        Placement::Fullscreen | Placement::Chosen => (
             0,
             0,
             still.width.min(u32::from(u16::MAX)) as u16,
             still.height.min(u32::from(u16::MAX)) as u16,
             false,
         ),
+        Placement::Desktop => (0, 0, screen.width_in_pixels, screen.height_in_pixels, false),
     };
+    let desktop = matches!(placement, Placement::Desktop)
+        .then_some((screen.width_in_pixels, screen.height_in_pixels));
 
     if !override_redirect {
         hyprland_rule();
@@ -174,11 +185,15 @@ fn run(still: &Frame, placement: Placement) -> Result<Option<Selection>, String>
 
     let mut overlay = Overlay {
         conn,
+        root: screen.root,
         window,
         gc,
         depth,
         still,
+        desktop,
+        placed: None,
         size: (0, 0),
+        shown: (0, 0, still.width, still.height),
         bright: 0,
         dim: 0,
     };
@@ -198,13 +213,35 @@ fn run(still: &Frame, placement: Placement) -> Result<Option<Selection>, String>
 }
 
 impl Overlay<'_> {
-    /// Makes the two pictures the window is painted from, at its size.
+    /// Makes the two pictures the window is painted from, at its size and
+    /// for where it is.
     fn prepare(&mut self, size: (u16, u16)) -> Result<(), String> {
-        if size == self.size || size.0 == 0 || size.1 == 0 {
+        if size.0 == 0 || size.1 == 0 {
             return Ok(());
         }
+        // Only a picture of the whole desktop cares where the window is; a
+        // reparenting window manager reports the position relative to its
+        // frame, so it is asked of the root instead.
+        let position = match self.desktop {
+            Some(_) => self
+                .conn
+                .translate_coordinates(self.window, self.root, 0, 0)
+                .ok()
+                .and_then(|cookie| cookie.reply().ok())
+                .map_or((0, 0), |reply| (reply.dst_x, reply.dst_y)),
+            None => (0, 0),
+        };
+        if self.placed == Some((size, position)) {
+            return Ok(());
+        }
+        self.shown = match self.desktop {
+            Some(root) => part_under(self.still, root, size, position),
+            None => (0, 0, self.still.width, self.still.height),
+        };
         self.free_pixmaps();
-        let fitted = self.still.resized(u32::from(size.0), u32::from(size.1));
+        let (x, y, w, h) = self.shown;
+        let view = self.still.crop(x, y, w, h);
+        let fitted = view.resized(u32::from(size.0), u32::from(size.1));
         let mut dimmed = fitted.bgrx.clone();
         for level in &mut dimmed {
             *level = ((u32::from(*level) * DIM) >> 8) as u8;
@@ -212,6 +249,7 @@ impl Overlay<'_> {
         self.bright = self.upload(&fitted.bgrx, size)?;
         self.dim = self.upload(&dimmed, size)?;
         self.size = size;
+        self.placed = Some((size, position));
         // The server repaints from the dimmed copy on its own whenever part
         // of the window is exposed, so there is never a black flash to cover.
         self.conn
@@ -377,7 +415,14 @@ impl Overlay<'_> {
             Some(old) => {
                 let old = grow(old, 2);
                 let _ = conn.copy_area(
-                    self.dim, self.window, self.gc, old.x, old.y, old.x, old.y, old.width,
+                    self.dim,
+                    self.window,
+                    self.gc,
+                    old.x,
+                    old.y,
+                    old.x,
+                    old.y,
+                    old.width,
                     old.height,
                 );
             }
@@ -414,10 +459,11 @@ impl Overlay<'_> {
 
     /// A rectangle in the window, in the still's pixels.
     fn in_still(&self, rect: Rectangle) -> Selection {
-        let sx = f64::from(self.still.width) / f64::from(self.size.0.max(1));
-        let sy = f64::from(self.still.height) / f64::from(self.size.1.max(1));
-        let x = (f64::from(rect.x.max(0)) * sx) as u32;
-        let y = (f64::from(rect.y.max(0)) * sy) as u32;
+        let (left, top, shown_w, shown_h) = self.shown;
+        let sx = f64::from(shown_w) / f64::from(self.size.0.max(1));
+        let sy = f64::from(shown_h) / f64::from(self.size.1.max(1));
+        let x = left + (f64::from(rect.x.max(0)) * sx) as u32;
+        let y = top + (f64::from(rect.y.max(0)) * sy) as u32;
         let width = (f64::from(rect.width) * sx).ceil() as u32;
         let height = (f64::from(rect.height) * sy).ceil() as u32;
         (x, y, width, height)
@@ -474,7 +520,10 @@ fn describe(conn: &RustConnection, window: u32, override_redirect: bool) -> Resu
     )
     .map_err(|e| e.to_string())?;
     if !override_redirect {
-        let state = [atom("_NET_WM_STATE_FULLSCREEN")?, atom("_NET_WM_STATE_ABOVE")?];
+        let state = [
+            atom("_NET_WM_STATE_FULLSCREEN")?,
+            atom("_NET_WM_STATE_ABOVE")?,
+        ];
         conn.change_property32(
             PropMode::REPLACE,
             window,
@@ -526,12 +575,11 @@ fn hyprland_rule() {
                 "keyword",
                 "windowrulev2",
                 "fullscreen,class:^(bubbleTranslate-overlay)$",
-            ])
-                && run(&[
-                    "keyword",
-                    "windowrulev2",
-                    "float,class:^(bubbleTranslate-overlay)$",
-                ]);
+            ]) && run(&[
+                "keyword",
+                "windowrulev2",
+                "float,class:^(bubbleTranslate-overlay)$",
+            ]);
         crate::trace!("overlay   hyprland window rule added: {added}");
     });
 }
@@ -559,6 +607,27 @@ fn crosshair(conn: &RustConnection) -> Option<u32> {
     Some(cursor)
 }
 
+/// The rectangle of a whole-desktop still that lies under a window of `size`
+/// at `position` on a root of `root` size, in the still's pixels.
+///
+/// The still and the root cover the same desktop at different scales — the
+/// portal's picture is in real pixels, the root may be in logical ones — so
+/// the window's rectangle is scaled across.
+fn part_under(
+    still: &Frame,
+    root: (u16, u16),
+    size: (u16, u16),
+    position: (i16, i16),
+) -> (u32, u32, u32, u32) {
+    let kx = f64::from(still.width) / f64::from(root.0.max(1));
+    let ky = f64::from(still.height) / f64::from(root.1.max(1));
+    let x = ((f64::from(position.0.max(0)) * kx) as u32).min(still.width);
+    let y = ((f64::from(position.1.max(0)) * ky) as u32).min(still.height);
+    let w = ((f64::from(size.0) * kx).round() as u32).min(still.width - x);
+    let h = ((f64::from(size.1) * ky).round() as u32).min(still.height - y);
+    (x, y, w.max(1), h.max(1))
+}
+
 /// The rectangle the two corners describe, whichever way the drag went.
 fn between(a: (i16, i16), b: (i16, i16)) -> Rectangle {
     Rectangle {
@@ -581,6 +650,24 @@ fn grow(rect: Rectangle, by: i16) -> Rectangle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_part_of_the_desktop_under_the_window_is_the_part_shown() {
+        // Two 1280x800 logical monitors side by side, photographed at 2x.
+        let still = Frame {
+            width: 5120,
+            height: 1600,
+            bgrx: Vec::new(),
+        };
+        assert_eq!(
+            part_under(&still, (2560, 800), (1280, 800), (1280, 0)),
+            (2560, 0, 2560, 1600)
+        );
+        assert_eq!(
+            part_under(&still, (2560, 800), (1280, 800), (0, 0)),
+            (0, 0, 2560, 1600)
+        );
+    }
 
     #[test]
     fn dragging_backwards_is_the_same_rectangle() {

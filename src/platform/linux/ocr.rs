@@ -65,7 +65,8 @@ impl Frame {
                 .min(u64::from(self.height.saturating_sub(1))) as u32;
             for col in 0..width {
                 let from_col = (u64::from(col) * u64::from(self.width) / u64::from(width.max(1)))
-                    .min(u64::from(self.width.saturating_sub(1))) as u32;
+                    .min(u64::from(self.width.saturating_sub(1)))
+                    as u32;
                 let at = ((from_row * self.width + from_col) * 4) as usize;
                 bgrx.extend_from_slice(&self.bgrx[at..at + 4]);
             }
@@ -192,8 +193,12 @@ pub fn recognize(frame: &Frame, scale: f64) -> Option<String> {
     }
 
     let factor = if scale < 1.5 { 2 } else { 1 };
-    let grey = frame.grey(factor);
-    let (width, height) = (frame.width * factor, frame.height * factor);
+    let (grey, width, height) = pad(
+        &frame.grey(factor),
+        frame.width * factor,
+        frame.height * factor,
+        MARGIN,
+    );
 
     // A file rather than stdin, because the command runner that enforces the
     // deadline hands its child no input. PGM because it is a ten-byte header
@@ -218,6 +223,14 @@ pub fn recognize(frame: &Frame, scale: f64) -> Option<String> {
         .env("OMP_THREAD_LIMIT", "1");
     let started = std::time::Instant::now();
     let result = super::timed_output(command, BUDGET);
+    // With tracing on, the last picture read is kept, so a region that came
+    // back empty can be looked at rather than guessed about.
+    if crate::trace::enabled() {
+        let kept = path.with_file_name("bubbleTranslate-last-ocr.pgm");
+        if std::fs::rename(&path, &kept).is_ok() {
+            crate::trace!("ocr       kept the picture at {}", kept.display());
+        }
+    }
     let _ = std::fs::remove_file(&path);
 
     let out = match result {
@@ -243,6 +256,27 @@ pub fn recognize(frame: &Frame, scale: f64) -> Option<String> {
         started.elapsed()
     );
     Some(text)
+}
+
+/// How much background is put around a region before it is read, in pixels.
+///
+/// A rectangle dragged tight around a line of text leaves the letters touching
+/// the edge, and Tesseract reads those worse — measurably so, "It Is" for
+/// "It is" on a line a margin fixes.
+const MARGIN: u32 = 16;
+
+/// `grey` with `margin` pixels added on every side, in the colour of its top
+/// left corner, which is the background far more often than it is a letter.
+fn pad(grey: &[u8], width: u32, height: u32, margin: u32) -> (Vec<u8>, u32, u32) {
+    let background = grey.first().copied().unwrap_or(255);
+    let (out_w, out_h) = (width + 2 * margin, height + 2 * margin);
+    let mut out = vec![background; (out_w * out_h) as usize];
+    for row in 0..height {
+        let from = (row * width) as usize;
+        let to = ((row + margin) * out_w + margin) as usize;
+        out[to..to + width as usize].copy_from_slice(&grey[from..from + width as usize]);
+    }
+    (out, out_w, out_h)
 }
 
 /// Where the image waits for Tesseract: the user's runtime directory, which
@@ -333,6 +367,13 @@ mod tests {
         let crop = frame.crop(1, 1, 5, 5);
         assert_eq!((crop.width, crop.height), (2, 1));
         assert_eq!(crop.bgrx, (16..24).collect::<Vec<u8>>());
+    }
+
+    #[test]
+    fn a_margin_surrounds_the_picture_in_its_background() {
+        let (out, w, h) = pad(&[9, 1, 1, 1], 2, 2, 1);
+        assert_eq!((w, h), (4, 4));
+        assert_eq!(out, [9, 9, 9, 9, 9, 9, 1, 9, 9, 1, 1, 9, 9, 9, 9, 9]);
     }
 
     #[test]

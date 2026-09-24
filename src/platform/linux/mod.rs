@@ -33,6 +33,7 @@ mod compositor;
 mod evdev;
 mod ocr;
 mod overlay;
+mod portal;
 mod screen;
 mod wayland;
 mod window;
@@ -317,7 +318,14 @@ pub fn read_screen_region() -> Option<crate::platform::ScreenRead> {
             return None;
         }
     };
-    let (x, y, width, height) = overlay::select(&shot.frame, shot.placement)?;
+    // A region the desktop's own screenshot interface already chose needs no
+    // overlay, and has nowhere on screen to anchor the bubble to.
+    let chosen = matches!(shot.placement, screen::Placement::Chosen);
+    let (x, y, width, height) = if chosen {
+        (0, 0, shot.frame.width, shot.frame.height)
+    } else {
+        overlay::select(&shot.frame, shot.placement)?
+    };
     let region = shot.frame.crop(x, y, width, height);
     let text = ocr::recognize(&region, shot.scale())?;
 
@@ -340,7 +348,7 @@ pub fn read_screen_region() -> Option<crate::platform::ScreenRead> {
             text,
             via: crate::platform::CaptureSource::Ocr,
         },
-        at: Some(bubble_anchor(region, screen_bottom)),
+        at: (!chosen).then(|| bubble_anchor(region, screen_bottom)),
     })
 }
 
@@ -411,7 +419,10 @@ mod tests {
 
     #[test]
     fn the_bubble_goes_under_the_region_while_there_is_room() {
-        assert_eq!(bubble_anchor((100.0, 100.0, 200.0, 50.0), 800.0), (100.0, 158.0));
+        assert_eq!(
+            bubble_anchor((100.0, 100.0, 200.0, 50.0), 800.0),
+            (100.0, 158.0)
+        );
     }
 
     #[test]

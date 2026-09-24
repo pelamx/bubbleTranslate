@@ -504,7 +504,7 @@ dependencies = [
 
 [[package]]
 name = "bubbleTranslate"
-version = "0.3.2"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "base64",
@@ -523,6 +523,7 @@ dependencies = [
  "objc2-core-image 0.3.2",
  "objc2-foundation 0.3.2",
  "objc2-vision",
+ "png",
  "raw-window-handle",
  "serde",
  "serde_json",
@@ -536,6 +537,7 @@ dependencies = [
  "windows",
  "winresource",
  "x11rb",
+ "zbus",
 ]
 
 [[package]]

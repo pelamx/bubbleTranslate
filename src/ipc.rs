@@ -61,10 +61,10 @@ fn split_request(message: &str) -> (&str, &str) {
 /// able to grow the listener's memory.
 const MAX_MESSAGE: u64 = 64;
 
-#[cfg(unix)]
-pub use unix::{listen, request_translate};
 #[cfg(target_os = "linux")]
 pub use unix::request_read_screen;
+#[cfg(unix)]
+pub use unix::{listen, request_translate};
 
 #[cfg(target_os = "windows")]
 pub use windows::{listen, request_open, request_translate};

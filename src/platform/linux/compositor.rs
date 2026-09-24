@@ -180,7 +180,11 @@ pub fn ensure_read_screen_bind() -> ReadScreenBind {
          {{ description = '{READ_SCREEN_DESCRIPTION}' }})"
     );
     if !hyprctl_ok(&["eval", &lua]) {
-        let _ = hyprctl_ok(&["keyword", "bind", &format!("CTRL SHIFT, E, exec, {command}")]);
+        let _ = hyprctl_ok(&[
+            "keyword",
+            "bind",
+            &format!("CTRL SHIFT, E, exec, {command}"),
+        ]);
     }
     match hyprland_binds().map(|binds| classify(&binds)) {
         Some(Chord::Ours) => {

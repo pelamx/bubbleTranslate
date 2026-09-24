@@ -15,13 +15,11 @@ selected, which is a surprisingly large difference: see
 |---|---|---|
 | **macOS** | [`bubbleTranslate.dmg`](https://github.com/bubbleTranslate/downloads/releases/latest/download/bubbleTranslate.dmg) (14 MB, Intel + Apple Silicon) | An app bundle to drag into Applications |
 | **Windows** | [`bubbleTranslate-windows-x64.zip`](https://github.com/bubbleTranslate/downloads/releases/latest/download/bubbleTranslate-windows-x64.zip) (7 MB, Windows 10 and 11) — or the [bare `.exe`](https://github.com/bubbleTranslate/downloads/releases/latest/download/bubbleTranslate.exe) (17 MB) | One executable to double-click |
-| **Linux** | [`bubbleTranslate-linux-x86_64`](https://github.com/bubbleTranslate/downloads/releases/latest/download/bubbleTranslate-linux-x86_64) (20 MB) | One executable to `chmod +x` and run |
+| **Linux** | [`bubbleTranslate-linux-x86_64`](https://github.com/bubbleTranslate/downloads/releases/latest/download/bubbleTranslate-linux-x86_64) (16 MB, any distribution with glibc 2.28 or newer) | One executable to `chmod +x` and run |
 
 The download is the metered build: ten free translations a day, and Pro to
 lift the limit — see [The free allowance and Pro](#the-free-allowance-and-pro).
-It needs no Rust toolchain; building from source is covered below and is the
-better route on Linux if your distribution is not a recent one — see the note
-on glibc.
+It needs no Rust toolchain; building from source is covered below.
 
 ### macOS — from the DMG
 
@@ -139,17 +137,10 @@ chmod +x bubbleTranslate-linux-x86_64
 without opening a window, which separates "the app is broken" from "the network
 is" on a first run.
 
-**It needs a recent distribution.** The binary is built on Arch and links
-against glibc 2.43 or newer — `atan2f@GLIBC_2.43` and friends, pulled in by the
-maths in the bubble's layout. On anything older the loader refuses it outright:
-
-```
-version `GLIBC_2.43' not found (required by ./bubbleTranslate-linux-x86_64)
-```
-
-Ubuntu 24.04 (glibc 2.39) and Debian 13 (2.41) are both below that line. If you
-see that error, build from source instead — it takes a couple of minutes and
-produces a binary matched to your own system.
+**It runs on any distribution from the last several years** — anything with
+glibc 2.28 or newer: Debian 10, Ubuntu 20.04, Fedora, RHEL and Rocky 8, Arch,
+openSUSE and everything newer. The release is built against that old glibc on
+purpose, so the one download serves them all.
 
 Everything else it needs is already on any desktop that can run a GUI, and is
 loaded at runtime rather than linked: `libGL`, `libxkbcommon`, and
@@ -657,19 +648,20 @@ trigger key. Where neither works, bind the same request yourself:
 bubbleTranslate --read-screen
 ```
 
-It works on X11 sessions and on Wayland compositors that implement
-`wlr-screencopy` — Hyprland, sway, river, Wayfire. GNOME and KDE on Wayland do
-not let applications read the screen that way, and are not supported yet.
+It works on every desktop. On X11 and on the wlroots compositors — Hyprland,
+sway, river, Wayfire — the picture is taken directly. GNOME and KDE on Wayland
+let applications have one only through the desktop's screenshot portal, so
+there it is asked for that way: the first time, the desktop may ask whether
+bubbleTranslate is allowed to take screenshots, and a desktop that will not
+give one quietly opens its own screenshot tool instead, where the region is
+chosen before it is read.
 
 ## Known limits
 
 - GNOME's Wayland session cannot be watched at all; see above.
-- Reading the screen does not work on GNOME or KDE under Wayland yet.
 - On a Wayland session that is not Hyprland, the trigger key needs membership
   of the `input` group; without it the gate is not in force. A keybinding on
   `--translate-selection` is the alternative that needs nothing.
-- The prebuilt Linux binary needs glibc 2.43 or newer, which rules out the
-  current Debian and Ubuntu releases. Build from source there.
 - A Linux session with no StatusNotifierItem host gets no tray icon, and there
   the main window is the only way back to the app, so closing it quits.
 - On Windows, a window running as administrator cannot be read by a

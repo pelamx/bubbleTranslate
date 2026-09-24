@@ -13,9 +13,7 @@
 //! another client's pixels. `wlr-screencopy` is the extension that exists for
 //! screenshot tools, and the wlroots compositors — Hyprland, sway, river,
 //! Wayfire — implement it. GNOME and KDE do not: there a screenshot goes
-//! through the desktop's own portal, which is a separate route and not built
-//! yet, so on those desktops this reports that it cannot rather than
-//! appearing to work.
+//! through the desktop's own portal instead, see [`super::portal`].
 
 use std::fs::File;
 use std::os::fd::{AsFd, FromRawFd};
@@ -70,6 +68,15 @@ pub enum Placement {
         width: u16,
         height: u16,
     },
+    /// Like [`Placement::Fullscreen`], but the picture is the whole desktop
+    /// rather than one screen — the portal takes every monitor at once — so
+    /// the overlay shows the part of it under wherever the window manager
+    /// put the window. The picture spans the X11 root window, which is how
+    /// that part is found.
+    Desktop,
+    /// No overlay at all: the desktop's own screenshot interface already had
+    /// the user choose, and the picture is the region.
+    Chosen,
 }
 
 /// Takes the picture, of the screen the pointer is on.
@@ -77,8 +84,15 @@ pub enum Placement {
 /// The error is a sentence for the trace, not for the user: a desktop that
 /// cannot be read is a platform limit, and the key simply does nothing there.
 pub fn grab() -> Result<Shot, String> {
+    // For trying the GNOME and KDE route on a desktop that has a better one.
+    if std::env::var_os("BUBBLETRANSLATE_SCREENSHOT").is_some_and(|v| v == "portal") {
+        return portal_grab();
+    }
     if super::on_wayland() {
-        wayland_grab()
+        wayland_grab().or_else(|err| {
+            crate::trace!("screen    {err}; asking the desktop's portal instead");
+            portal_grab()
+        })
     } else if std::env::var_os("DISPLAY").is_some() {
         x11_grab()
     } else {
@@ -107,15 +121,7 @@ fn x11_grab() -> Result<Shot, String> {
 
     let (width, height) = (screen.width_in_pixels, screen.height_in_pixels);
     let reply = conn
-        .get_image(
-            ImageFormat::Z_PIXMAP,
-            screen.root,
-            0,
-            0,
-            width,
-            height,
-            !0,
-        )
+        .get_image(ImageFormat::Z_PIXMAP, screen.root, 0, 0, width, height, !0)
         .map_err(|err| format!("could not ask for the screen: {err}"))?
         .reply()
         .map_err(|err| format!("the X server would not hand over the screen: {err}"))?;
@@ -142,6 +148,44 @@ fn x11_grab() -> Result<Shot, String> {
             height,
         },
     })
+}
+
+// --- the portal -------------------------------------------------------------
+
+fn portal_grab() -> Result<Shot, String> {
+    use x11rb::connection::Connection as _;
+
+    // The overlay is an X11 window, so the X11 root is the space the picture
+    // is laid over: under XWayland it spans every monitor, as the portal's
+    // picture does.
+    let root = x11rb::connect(None).ok().map(|(conn, n)| {
+        let screen = &conn.setup().roots[n];
+        (
+            f64::from(screen.width_in_pixels),
+            f64::from(screen.height_in_pixels),
+        )
+    });
+
+    match super::portal::grab()? {
+        super::portal::Picture::Desktop(frame) => {
+            let size = root.unwrap_or((f64::from(frame.width), f64::from(frame.height)));
+            Ok(Shot {
+                frame,
+                origin: (0.0, 0.0),
+                size,
+                placement: Placement::Desktop,
+            })
+        }
+        super::portal::Picture::Chosen(frame) => {
+            let size = (f64::from(frame.width), f64::from(frame.height));
+            Ok(Shot {
+                frame,
+                origin: (0.0, 0.0),
+                size,
+                placement: Placement::Chosen,
+            })
+        }
+    }
 }
 
 // --- Wayland ----------------------------------------------------------------
@@ -325,7 +369,11 @@ fn to_bgrx(raw: &[u8], spec: BufferSpec, y_invert: bool) -> Result<Vec<u8>, Stri
     let swap = match spec.format {
         wl_shm::Format::Argb8888 | wl_shm::Format::Xrgb8888 => false,
         wl_shm::Format::Abgr8888 | wl_shm::Format::Xbgr8888 => true,
-        other => return Err(format!("the screen is in a pixel format this cannot read: {other:?}")),
+        other => {
+            return Err(format!(
+                "the screen is in a pixel format this cannot read: {other:?}"
+            ));
+        }
     };
     let row_bytes = (spec.width * 4) as usize;
     let mut out = Vec::with_capacity(row_bytes * spec.height as usize);
@@ -372,7 +420,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                     ..Output::default()
                 });
             }
-            "zxdg_output_manager_v1" => state.xdg = Some(registry.bind(name, version.min(2), qh, ())),
+            "zxdg_output_manager_v1" => {
+                state.xdg = Some(registry.bind(name, version.min(2), qh, ()))
+            }
             "zwlr_screencopy_manager_v1" => {
                 let version = version.min(3);
                 state.manager = Some((registry.bind(name, version, qh, ()), version));

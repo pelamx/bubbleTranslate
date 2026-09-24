@@ -1,6 +1,6 @@
 [package]
 name = "bubbleTranslate"
-version = "0.3.2"
+version = "0.3.4"
 edition = "2024"
 
 # Platform-neutral: the translation engine, config, and the egui interface.
@@ -78,6 +78,12 @@ ksni = { version = "0.3.6", default-features = false, features = [
     "async-io",
     "blocking",
 ] }
+# The screenshot portal, which is how GNOME and KDE hand an application a
+# picture of the screen; see `platform::linux::portal`. The same zbus the tray
+# already brings in, on the same executor.
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+png = "0.18"
+
 
 # Windows draws through the same toolkit with nothing to choose: there is one
 # windowing system, and a toplevel may put itself at the cursor, which is the
