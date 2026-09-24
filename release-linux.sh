@@ -55,6 +55,9 @@ rm -f "$SUMS.new"
 # stays public and every installed copy reads it on startup. Only the Linux
 # line is touched: the other platforms are released on their own machines.
 
+# Deliberately after the upload below rather than before it: latest.json is a
+# promise that the file is there, and making that promise first leaves a window
+# where every installed copy is told about a download that answers 404.
 ./scripts/publish-manifest.sh linux "$VERSION" "$OUT"
 
 # --- what is left to do -----------------------------------------------------

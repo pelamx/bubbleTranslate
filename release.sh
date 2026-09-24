@@ -161,19 +161,30 @@ fi
 # stays public and every installed copy reads it on startup. Only the macOS
 # line is touched: the other platforms are released on their own machines.
 
+# The upload comes first and the manifest second, and the order is the whole
+# point: latest.json is a promise that a file is there to be downloaded, so
+# making it before uploading leaves a window -- minutes, if the upload is slow
+# or fails -- where every installed copy is told about a version it would get a
+# 404 for.
+REPO="bubbleTranslate/downloads"
+if gh release view "v$VERSION" -R "$REPO" >/dev/null 2>&1; then
+    gh release upload "v$VERSION" -R "$REPO" "$DMG" --clobber
+else
+    gh release create "v$VERSION" -R "$REPO" "$DMG" --title "bubbleTranslate $VERSION" \
+        --notes "$(sed -n "/^## $VERSION /,/^## /p" CHANGELOG.md | sed '1d;$d')"
+fi
+echo "uploaded $DMG to v$VERSION in $REPO"
+
+# Every asset in place before anything promises it: this copies the other
+# platforms' downloads into the new release, so /releases/latest/download does
+# not 404 for them the moment this one becomes the newest.
+./scripts/fill-release.sh "v$VERSION" macos
+
+# And the promise last of all.
 ./scripts/publish-manifest.sh macos "$VERSION" "$DMG"
 
 echo
-echo "built $DMG ($(du -h "$DMG" | cut -f1)), version $VERSION"
-echo "upload $DMG to the v$VERSION release in bubbleTranslate/downloads:"
-echo "  gh release upload v$VERSION -R bubbleTranslate/downloads $DMG --clobber"
-echo "  ./scripts/fill-release.sh v$VERSION macos"
-echo
-echo "the second line is not optional: /releases/latest/download follows"
-echo "whichever release is newest, so a release carrying only the dmg makes"
-echo "the Windows and Linux downloads 404 for everyone until it is filled in"
-echo
-echo "(latest.json is already published; the binary is not tracked)"
+echo "built and published $DMG ($(du -h "$DMG" | cut -f1)), version $VERSION"
 if [[ -z "$NOTARY_PROFILE" ]]; then
     echo
     echo "Not notarized. On another Mac the first launch is blocked; clear it once"
