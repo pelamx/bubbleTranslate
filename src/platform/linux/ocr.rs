@@ -16,8 +16,8 @@
 //! runtime directory, read, and deleted.
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 /// A picture of part of the screen, as the capture hands it over.
 ///
@@ -125,28 +125,43 @@ const BUDGET: Duration = Duration::from_secs(30);
 /// down and makes it worse.
 const NOT_LANGUAGES: [&str; 2] = ["osd", "equ"];
 
+/// How long an answer about the installed languages is trusted.
+///
+/// The main window asks on every frame it draws, and the person reading it
+/// may be installing a language in a terminal beside it at that very moment:
+/// the window should notice within a few seconds, without a restart, and
+/// without running Tesseract sixty times a second.
+const LANGUAGES_TTL: Duration = Duration::from_secs(3);
+
 /// The installed reading languages, as Tesseract names them (`eng`, `tur`,
 /// `jpn`…), or `None` when Tesseract is not installed at all.
-///
-/// Asked once per run. A language installed while the app is running is
-/// picked up the next time it starts — the same as installing any other part
-/// of the system it depends on.
-pub fn languages() -> Option<&'static [String]> {
-    static LANGUAGES: OnceLock<Option<Vec<String>>> = OnceLock::new();
-    LANGUAGES
-        .get_or_init(|| {
-            let mut command = std::process::Command::new("tesseract");
-            command.arg("--list-langs");
-            let out = super::timed_output(command, Duration::from_secs(5)).ok()?;
-            if !out.status.success() {
-                return None;
-            }
-            // Older releases print the list on stderr, newer ones on stdout.
-            let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
-            text.push_str(&String::from_utf8_lossy(&out.stderr));
-            Some(parse_languages(&text))
-        })
-        .as_deref()
+pub fn languages() -> Option<Vec<String>> {
+    static CACHE: Mutex<Option<(Instant, Option<Vec<String>>)>> = Mutex::new(None);
+
+    if let Ok(cache) = CACHE.lock()
+        && let Some((at, languages)) = cache.as_ref()
+        && at.elapsed() < LANGUAGES_TTL
+    {
+        return languages.clone();
+    }
+    let languages = list_languages();
+    if let Ok(mut cache) = CACHE.lock() {
+        *cache = Some((Instant::now(), languages.clone()));
+    }
+    languages
+}
+
+fn list_languages() -> Option<Vec<String>> {
+    let mut command = std::process::Command::new("tesseract");
+    command.arg("--list-langs");
+    let out = super::timed_output(command, Duration::from_secs(5)).ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    // Older releases print the list on stderr, newer ones on stdout.
+    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&out.stderr));
+    Some(parse_languages(&text))
 }
 
 fn parse_languages(listing: &str) -> Vec<String> {
@@ -163,7 +178,7 @@ fn parse_languages(listing: &str) -> Vec<String> {
 /// Why the screen cannot be read on this machine, in a sentence the user can
 /// act on, or `None` when it can.
 pub fn missing() -> Option<&'static str> {
-    match languages() {
+    match languages().as_deref() {
         None => Some(
             "Reading text off the screen needs Tesseract. Install the tesseract \
              package and a language for it — tesseract-data-eng, for example — \
@@ -329,9 +344,137 @@ fn join_lines(raw: &str) -> String {
     paragraphs.join("\n")
 }
 
+/// Tesseract's name for the language of an ISO 639-1 code, for the
+/// languages the app offers. `None` for a code it has no pack for.
+pub fn tesseract_code(iso: &str) -> Option<&'static str> {
+    Some(match iso.split('-').next().unwrap_or(iso) {
+        "en" => "eng",
+        "tr" => "tur",
+        "de" => "deu",
+        "fr" => "fra",
+        "es" => "spa",
+        "it" => "ita",
+        "pt" => "por",
+        "nl" => "nld",
+        "pl" => "pol",
+        "ru" => "rus",
+        "uk" => "ukr",
+        "ar" => "ara",
+        "fa" => "fas",
+        "hi" => "hin",
+        "zh" => "chi_sim",
+        "ja" => "jpn",
+        "ko" => "kor",
+        _ => return None,
+    })
+}
+
+/// The families of distribution whose package names are known here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Family {
+    Arch,
+    Debian,
+    Fedora,
+}
+
+/// Which family this system belongs to, from `/etc/os-release`.
+fn family() -> Option<Family> {
+    let text = std::fs::read_to_string("/etc/os-release").ok()?;
+    family_of(&text)
+}
+
+fn family_of(os_release: &str) -> Option<Family> {
+    // ID first, then everything it says it is like: Mint is like Ubuntu,
+    // which is like Debian; Rocky is like RHEL, which is like Fedora.
+    let mut ids = Vec::new();
+    for line in os_release.lines() {
+        for key in ["ID=", "ID_LIKE="] {
+            if let Some(value) = line.strip_prefix(key) {
+                ids.extend(
+                    value
+                        .trim_matches('"')
+                        .split_whitespace()
+                        .map(str::to_lowercase),
+                );
+            }
+        }
+    }
+    ids.iter().find_map(|id| match id.as_str() {
+        "arch" | "manjaro" | "endeavouros" | "cachyos" => Some(Family::Arch),
+        "debian" | "ubuntu" => Some(Family::Debian),
+        "fedora" | "rhel" | "centos" => Some(Family::Fedora),
+        _ => None,
+    })
+}
+
+/// The command that installs what is missing for reading `pack`: Tesseract
+/// itself when `with_engine`, and the language pack either way.
+///
+/// `None` on a distribution whose package names are not known here, where
+/// the interface says what to install instead of how.
+pub fn install_command(pack: &str, with_engine: bool) -> Option<String> {
+    command_for(family()?, pack, with_engine)
+}
+
+fn command_for(family: Family, pack: &str, with_engine: bool) -> Option<String> {
+    let (install, engine, language) = match family {
+        Family::Arch => (
+            "sudo pacman -S",
+            "tesseract",
+            format!("tesseract-data-{pack}"),
+        ),
+        // Debian's names use hyphens where Tesseract's use underscores.
+        Family::Debian => (
+            "sudo apt install",
+            "tesseract-ocr",
+            format!("tesseract-ocr-{}", pack.replace('_', "-")),
+        ),
+        Family::Fedora => (
+            "sudo dnf install",
+            "tesseract",
+            format!("tesseract-langpack-{pack}"),
+        ),
+    };
+    Some(if with_engine {
+        format!("{install} {engine} {language}")
+    } else {
+        format!("{install} {language}")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_distribution_family_comes_from_id_or_what_it_is_like() {
+        assert_eq!(family_of("ID=arch\n"), Some(Family::Arch));
+        assert_eq!(
+            family_of("ID=linuxmint\nID_LIKE=\"ubuntu debian\"\n"),
+            Some(Family::Debian)
+        );
+        assert_eq!(
+            family_of("ID=\"rocky\"\nID_LIKE=\"rhel centos fedora\"\n"),
+            Some(Family::Fedora)
+        );
+        assert_eq!(family_of("ID=nixos\n"), None);
+    }
+
+    #[test]
+    fn each_family_names_its_own_packages() {
+        assert_eq!(
+            command_for(Family::Debian, "chi_sim", true).unwrap(),
+            "sudo apt install tesseract-ocr tesseract-ocr-chi-sim"
+        );
+        assert_eq!(
+            command_for(Family::Arch, "tur", false).unwrap(),
+            "sudo pacman -S tesseract-data-tur"
+        );
+        assert_eq!(
+            command_for(Family::Fedora, "eng", true).unwrap(),
+            "sudo dnf install tesseract tesseract-langpack-eng"
+        );
+    }
 
     #[test]
     fn a_wrapped_sentence_comes_back_as_one() {

@@ -261,9 +261,39 @@ pub fn on_screen_region_request(ask: impl Fn() + Send + 'static) {
     let _ = std::thread::Builder::new()
         .name("read-screen-key".into())
         .spawn(|| {
-            compositor::ensure_read_screen_bind();
+            if compositor::ensure_read_screen_bind() != compositor::ReadScreenBind::None {
+                KEY_BOUND.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
             evdev::ensure_started();
         });
+}
+
+/// Whether Ctrl+Shift+E was bound in the compositor.
+static KEY_BOUND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// What the main window shows about reading the screen here.
+pub fn screen_reading(source_lang: &str) -> Option<crate::platform::ScreenReading> {
+    let installed = ocr::languages();
+    let engine = installed.is_some();
+    let languages = installed.unwrap_or_default();
+
+    // The language the user reads from decides which pack matters. With the
+    // source left to detection there is no way to know, and English — the
+    // pack most text on a screen needs — stands in until one is installed.
+    let wanted = match source_lang {
+        "auto" | "" => (languages.is_empty()).then_some("eng"),
+        code => ocr::tesseract_code(code),
+    };
+    let missing_pack = wanted.filter(|pack| !languages.iter().any(|l| l == pack));
+    let install = missing_pack.and_then(|pack| ocr::install_command(pack, !engine));
+
+    Some(crate::platform::ScreenReading {
+        languages,
+        engine,
+        install,
+        missing_pack,
+        key_heard: KEY_BOUND.load(std::sync::atomic::Ordering::Relaxed) || evdev::available(),
+    })
 }
 
 /// What the keyboard reader does on Ctrl+Shift+E.

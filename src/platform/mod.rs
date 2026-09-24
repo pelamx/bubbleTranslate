@@ -153,6 +153,36 @@ pub struct ScreenRead {
     pub at: Option<(f64, f64)>,
 }
 
+/// What the main window can say about reading the screen on this system,
+/// beyond how to do it.
+///
+/// Only Linux has anything to say: there the reading is done by Tesseract,
+/// which the user installs, so the window shows whether it is there, which
+/// languages it reads, and the command that installs what is missing.
+/// Elsewhere the engine is part of the system, and there is nothing to check.
+pub struct ScreenReading {
+    /// The languages Tesseract reads, as its own codes; empty when it is not
+    /// installed or has none.
+    pub languages: Vec<String>,
+    /// Whether Tesseract is installed at all.
+    pub engine: bool,
+    /// The one command that installs what is missing for the source language
+    /// — Tesseract itself if it is absent, the language pack if only that is —
+    /// or `None` when nothing is missing or this distribution's package names
+    /// are not known.
+    pub install: Option<String>,
+    /// The source language's pack, when it is not installed.
+    pub missing_pack: Option<&'static str>,
+    /// Whether Ctrl+Shift+E itself reaches the app on this session. When it
+    /// does not, the same thing is a command to bind to a key.
+    pub key_heard: bool,
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn screen_reading(_source_lang: &str) -> Option<ScreenReading> {
+    None
+}
+
 /// Cuts the bubble's window to the shape of the card painted inside it.
 ///
 /// Nothing to do wherever the bubble's window is transparent, which is
@@ -182,7 +212,8 @@ pub fn keep_on_all_workspaces() -> bool {
 #[cfg(target_os = "linux")]
 pub use linux::{
     ask_for_screen_region, keep_on_all_workspaces, mark_as_notification, on_screen_region_request,
-    pointer_over, preferred_zoom, read_screen_region, screen_reading_missing, to_points,
+    pointer_over, preferred_zoom, read_screen_region, screen_reading, screen_reading_missing,
+    to_points,
 };
 
 #[cfg(target_os = "windows")]

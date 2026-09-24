@@ -13,6 +13,20 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**The window now shows how to read text off the screen.** Ctrl+Shift+E (⌘⇧E
+on a Mac) was only described on the website, so anyone who had not read it
+there had no way to know it existed. A new *Read the screen* section, right
+under the translate box, says what it is for and how to use it in three
+steps, with a button to try it straight away.
+
+**…and on Linux, whether it is ready. (Linux)** Without Tesseract the key
+silently did nothing. The same section now says whether Tesseract is
+installed and which languages it reads, and when something is missing it
+shows the one command that installs it for your distribution, with a button
+to copy it. It notices by itself once you have run it — no restart needed.
+
 ## 0.3.4 — 2026-09-24
 
 **The Linux download now starts on Ubuntu, Debian, Fedora and the rest.

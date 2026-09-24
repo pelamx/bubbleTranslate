@@ -20,6 +20,7 @@ use crate::translate::{TranslateError, Translation};
 
 mod account;
 mod feedback;
+mod screen;
 mod settings;
 
 use account::*;
@@ -185,6 +186,15 @@ pub fn draw(
             section(ui, t("Translate", "Çevir", "Traducir"), |ui| {
                 translate_box(ui, &mut state, &cfg)
             });
+            section(
+                ui,
+                t(
+                    "Read the screen",
+                    "Ekrandaki yazıyı oku",
+                    "Leer la pantalla",
+                ),
+                |ui| screen::screen_reading(ui, &mut state, &cfg),
+            );
             section(ui, t("Languages", "Diller", "Idiomas"), |ui| {
                 dirty |= languages(ui, &mut state, &mut cfg);
             });
