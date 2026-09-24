@@ -73,6 +73,14 @@ the region there.
 **A rectangle dragged tightly around a line reads it better. (Linux)** Letters
 that touched the edge of the rectangle were sometimes misread or missed.
 
+## 0.3.3 — 2026-09-24
+
+**The crosshair is there the moment you press the key. (Windows)** Ctrl+Shift+E
+dimmed the screen but left the pointer as the spinning "busy" ring until you
+moved the mouse — which says the app is working on something, when what it is
+actually doing is waiting for you to draw a rectangle. It is the crosshair
+straight away now, before anything has moved.
+
 ## 0.3.2 — 2026-09-24
 
 **Translate text that cannot be selected, by drawing a box around it.

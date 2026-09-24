@@ -12,8 +12,8 @@
 //! double/triple clicks get through.
 
 use std::cell::Cell;
-use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use core_foundation::base::TCFType;
 use core_foundation::mach_port::CFMachPortRef;
@@ -223,12 +223,8 @@ fn run(on_trigger: impl Fn(Trigger) + Send + 'static) {
                 CGEventType::LeftMouseUp => {
                     if let Some((x0, y0)) = *DRAG_FROM.lock().unwrap() {
                         let p = event.location();
-                        *LAST_DRAG.lock().unwrap() = Some((
-                            x0.min(p.x),
-                            y0.min(p.y),
-                            (p.x - x0).abs(),
-                            (p.y - y0).abs(),
-                        ));
+                        *LAST_DRAG.lock().unwrap() =
+                            Some((x0.min(p.x), y0.min(p.y), (p.x - x0).abs(), (p.y - y0).abs()));
                     }
                 }
                 _ => {}

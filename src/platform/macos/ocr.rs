@@ -289,7 +289,10 @@ mod tests {
             "zh-Hans".to_string(),
         ];
         assert_eq!(wanted_language("de", &supported).as_deref(), Some("de-DE"));
-        assert_eq!(wanted_language("zh", &supported).as_deref(), Some("zh-Hans"));
+        assert_eq!(
+            wanted_language("zh", &supported).as_deref(),
+            Some("zh-Hans")
+        );
     }
 
     /// A language this machine cannot read falls back to detection rather than

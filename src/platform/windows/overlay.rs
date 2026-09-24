@@ -206,6 +206,20 @@ pub fn select_region() -> Option<Region> {
         let _ = SetForegroundWindow(window);
         let _ = UpdateWindow(window);
         SetCapture(window);
+
+        // Put the crosshair up *now*, rather than waiting to be asked for it.
+        //
+        // Handling `WM_SETCURSOR` is not enough on its own, which is the whole
+        // of a bug that was called fixed once already: that message only
+        // arrives when the pointer moves. Press the key and hold still and it
+        // never comes, so the shape stays whatever the last window set — and
+        // what the system puts there in the meantime is the "application is
+        // starting" spinner, which says the opposite of "draw a rectangle".
+        // Capture is taken above, so this thread owns the shape until the
+        // sheet comes down.
+        if let Ok(crosshair) = LoadCursorW(None, IDC_CROSS) {
+            SetCursor(Some(crosshair));
+        }
     }
 
     let outcome = pump(window);
@@ -605,9 +619,46 @@ mod tests {
             }
         });
 
+        // What shape the pointer is, right now, system-wide.
+        //
+        // Asserting on this is the point: the crosshair was "fixed" once by
+        // handling `WM_SETCURSOR` alone, which only arrives when the pointer
+        // moves — so pressing the key and holding still still gave the
+        // starting-spinner, and nothing in the suite noticed. It is checked
+        // before the drag begins, with the pointer deliberately unmoved.
+        fn pointer_is_crosshair() -> bool {
+            use windows::Win32::UI::WindowsAndMessaging::{
+                CURSORINFO, GetCursorInfo, IDC_CROSS, LoadCursorW,
+            };
+            let mut info = CURSORINFO {
+                cbSize: std::mem::size_of::<CURSORINFO>() as u32,
+                ..Default::default()
+            };
+            // SAFETY: `cbSize` is set, as the call requires, and the crosshair
+            // is a shared system cursor that is not owned here.
+            unsafe {
+                if GetCursorInfo(&mut info).is_err() {
+                    return false;
+                }
+                match LoadCursorW(None, IDC_CROSS) {
+                    Ok(crosshair) => info.hCursor == crosshair,
+                    Err(_) => false,
+                }
+            }
+        }
+
         for (attempt, (from, to)) in gestures.into_iter().enumerate() {
             // The overlay has to exist before it can be dragged on.
             std::thread::sleep(Duration::from_millis(700));
+
+            assert!(
+                pointer_is_crosshair(),
+                "the pointer was not a crosshair when the sheet came up for \
+                 drag {} — nothing has moved it yet, which is exactly the \
+                 case that regressed",
+                attempt + 1
+            );
+
             drag(from, to);
 
             let region = rx
