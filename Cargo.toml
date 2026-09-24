@@ -1,6 +1,6 @@
 [package]
 name = "bubbleTranslate"
-version = "0.3.5"
+version = "0.3.6"
 edition = "2024"
 
 # Platform-neutral: the translation engine, config, and the egui interface.
@@ -83,6 +83,11 @@ ksni = { version = "0.3.6", default-features = false, features = [
 # already brings in, on the same executor.
 zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
 png = "0.18"
+# The reader that works with nothing installed; see `platform::linux::reader`.
+# Pure Rust, so the glibc floor the release is built against is unchanged. The
+# two models it runs are downloaded on first use rather than carried here.
+ocrs = "0.13"
+rten = { version = "0.26", default-features = false, features = ["rten_format"] }
 
 
 # Windows draws through the same toolkit with nothing to choose: there is one
@@ -146,3 +151,18 @@ x11rb = { version = "0.13", features = ["xfixes", "xtest"] }
 # each shape would add a type per call site that says less than the tuple does.
 [lints.clippy]
 type_complexity = "allow"
+
+# The neural reader is unusably slow unoptimised — seconds per line — so a
+# debug build optimises it even when it optimises nothing else.
+[profile.dev.package.rten]
+opt-level = 3
+[profile.dev.package.rten-tensor]
+opt-level = 3
+[profile.dev.package.rten-vecmath]
+opt-level = 3
+[profile.dev.package.rten-simd]
+opt-level = 3
+[profile.dev.package.rten-gemm]
+opt-level = 3
+[profile.dev.package.ocrs]
+opt-level = 3

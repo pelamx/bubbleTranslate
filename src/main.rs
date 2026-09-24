@@ -94,10 +94,6 @@ fn main() -> eframe::Result<()> {
     if args.iter().any(|a| a == "--read-screen") {
         // Ctrl+Shift+E as a command, for a desktop keybinding on a session
         // where the keyboard cannot be read directly.
-        if let Some(reason) = crate::platform::screen_reading_missing() {
-            eprintln!("bubbleTranslate: {reason}");
-            std::process::exit(1);
-        }
         if ipc::request_read_screen() {
             std::process::exit(0);
         }

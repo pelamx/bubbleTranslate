@@ -156,16 +156,18 @@ pub struct ScreenRead {
 /// What the main window can say about reading the screen on this system,
 /// beyond how to do it.
 ///
-/// Only Linux has anything to say: there the reading is done by Tesseract,
-/// which the user installs, so the window shows whether it is there, which
-/// languages it reads, and the command that installs what is missing.
-/// Elsewhere the engine is part of the system, and there is nothing to check.
+/// Only Linux has anything to say: there the reading is done by a built-in
+/// reader whose models are fetched on first use, or by Tesseract when the
+/// user installed it for the letters the built-in one does not know. The
+/// window shows which is ready, which languages Tesseract reads, and the
+/// command that installs what is missing. Elsewhere the engine is part of the
+/// system, and there is nothing to check.
 pub struct ScreenReading {
     /// The languages Tesseract reads, as its own codes; empty when it is not
     /// installed or has none.
     pub languages: Vec<String>,
-    /// Whether Tesseract is installed at all.
-    pub engine: bool,
+    /// Where the built-in reader stands.
+    pub builtin: BuiltinReader,
     /// The one command that installs what is missing for the source language
     /// — Tesseract itself if it is absent, the language pack if only that is —
     /// or `None` when nothing is missing or this distribution's package names
@@ -178,10 +180,27 @@ pub struct ScreenReading {
     pub key_heard: bool,
 }
 
+/// The built-in reader, which reads the screen on Linux when Tesseract is
+/// not installed.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BuiltinReader {
+    /// Its models have not been fetched yet.
+    Absent,
+    /// Being fetched; how far, from 0 to 1.
+    Downloading(f32),
+    Ready,
+    /// The last attempt to fetch them failed, and why.
+    Failed(String),
+}
+
 #[cfg(not(target_os = "linux"))]
 pub fn screen_reading(_source_lang: &str) -> Option<ScreenReading> {
     None
 }
+
+/// Nothing to fetch where the system has its own reader.
+#[cfg(not(target_os = "linux"))]
+pub fn download_screen_reader() {}
 
 /// Cuts the bubble's window to the shape of the card painted inside it.
 ///
@@ -211,8 +230,8 @@ pub fn keep_on_all_workspaces() -> bool {
 
 #[cfg(target_os = "linux")]
 pub use linux::{
-    ask_for_screen_region, keep_on_all_workspaces, mark_as_notification, on_screen_region_request,
-    pointer_over, preferred_zoom, read_screen_region, screen_reading, screen_reading_missing,
+    ask_for_screen_region, download_screen_reader, keep_on_all_workspaces, mark_as_notification,
+    on_screen_region_request, pointer_over, preferred_zoom, read_screen_region, screen_reading,
     to_points,
 };
 

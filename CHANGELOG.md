@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.3.6 — 2026-09-24
 
 **The window now shows how to read text off the screen.** Ctrl+Shift+E (⌘⇧E
 on a Mac) was only described on the website, so anyone who had not read it
@@ -21,11 +21,21 @@ there had no way to know it existed. A new *Read the screen* section, right
 under the translate box, says what it is for and how to use it in three
 steps, with a button to try it straight away.
 
-**…and on Linux, whether it is ready. (Linux)** Without Tesseract the key
-silently did nothing. The same section now says whether Tesseract is
-installed and which languages it reads, and when something is missing it
-shows the one command that installs it for your distribution, with a button
-to copy it. It notices by itself once you have run it — no restart needed.
+**Reading the screen works on Linux with nothing installed. (Linux)** Until
+now Ctrl+Shift+E needed Tesseract, and without it the key silently did
+nothing. The first time you use it, a small built-in reader (12 MB) is now
+downloaded and used — the picture itself is still read on your computer and
+never sent anywhere. The window shows its progress, with a button to fetch it
+ahead of time.
+
+**…but install Tesseract for it to read properly. (Linux)** The built-in
+reader only knows letters without accents: ç, ğ, ş, é and ü come out as plain
+c, g, s, e and u, and Cyrillic, Arabic or Chinese is not read at all — and a
+word missing its letters can translate as a different word. The window says
+so, and shows the one command that installs Tesseract with your language for
+your distribution, with a button to copy it. Once it is installed Tesseract
+does the reading instead, and the window notices by itself — no restart
+needed.
 
 ## 0.3.5 — 2026-09-24
 

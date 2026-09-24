@@ -1,15 +1,16 @@
-//! Reading text out of pixels, with the Tesseract the user installed.
+//! Reading text out of pixels: with the Tesseract the user installed, when
+//! they did, and with the built-in reader otherwise.
 //!
-//! Linux ships no recognition engine of its own the way Windows does, and
-//! bundling one would mean carrying a model for every script anyone might
-//! read — tens of megabytes per language, in a download that is otherwise one
-//! small executable. Tesseract is packaged by every distribution, and its
-//! languages are packaged one by one, so the person who reads Japanese
-//! installs Japanese and nobody else pays for it.
+//! Linux ships no recognition engine of its own the way Windows does. The
+//! built-in one ([`super::reader`]) needs nothing installed but knows only
+//! unaccented Latin letters; carrying a model for every script anyone might
+//! read would be tens of megabytes per language. Tesseract is the option
+//! for the rest: packaged by every distribution, its languages packaged one
+//! by one, so the person who reads Japanese installs Japanese and nobody else
+//! pays for it. When it is installed with a language, it is the one used.
 //!
 //! It is run as a command rather than linked. That keeps the binary starting
-//! on a machine that has never heard of Tesseract — where the key that reads
-//! the screen simply explains what to install — and keeps it free of a
+//! on a machine that has never heard of Tesseract, and keeps it free of a
 //! library whose version differs on every distribution.
 //!
 //! Nothing leaves the machine here: the image is written to the user's own
@@ -110,6 +111,19 @@ impl Frame {
         }
         grey
     }
+
+    /// The picture as a reader gets it: grey, enlarged on an unscaled
+    /// display, with a margin around it. `scale` is how many of the frame's
+    /// pixels make one logical pixel of the desktop — 2 on a HiDPI display.
+    pub(super) fn prepared(&self, scale: f64) -> (Vec<u8>, u32, u32) {
+        let factor = if scale < 1.5 { 2 } else { 1 };
+        pad(
+            &self.grey(factor),
+            self.width * factor,
+            self.height * factor,
+            MARGIN,
+        )
+    }
 }
 
 /// How long a single recognition may take before it is given up on.
@@ -175,22 +189,20 @@ fn parse_languages(listing: &str) -> Vec<String> {
         .collect()
 }
 
-/// Why the screen cannot be read on this machine, in a sentence the user can
-/// act on, or `None` when it can.
-pub fn missing() -> Option<&'static str> {
-    match languages().as_deref() {
-        None => Some(
-            "Reading text off the screen needs Tesseract. Install the tesseract \
-             package and a language for it — tesseract-data-eng, for example — \
-             then restart bubbleTranslate.",
-        ),
-        Some([]) => Some(
-            "Tesseract is installed but has no languages. Install one for the \
-             text you read — tesseract-data-eng, for example — then restart \
-             bubbleTranslate.",
-        ),
-        Some(_) => None,
+/// Whether Tesseract is installed with at least one language, which makes
+/// it the reader used.
+fn tesseract_ready() -> bool {
+    languages().is_some_and(|languages| !languages.is_empty())
+}
+
+/// Gets a reader ready before the screen is taken over: nothing to do when
+/// Tesseract is there, the built-in reader's models fetched when it is not.
+/// The reason it cannot be, otherwise.
+pub fn prepare() -> Result<(), String> {
+    if tesseract_ready() {
+        return Ok(());
     }
+    super::reader::ensure()
 }
 
 /// Reads whatever text is in `frame`.
@@ -199,21 +211,20 @@ pub fn missing() -> Option<&'static str> {
 /// desktop: 2 on a HiDPI display, 1 on an ordinary one. It decides whether
 /// the frame is enlarged first; see [`Frame::grey`].
 ///
-/// `None` when the engine is missing or failed. An empty string is a real
+/// `None` when no reader is ready or it failed. An empty string is a real
 /// answer — the pixels were read, and held no text.
 pub fn recognize(frame: &Frame, scale: f64) -> Option<String> {
-    let languages = languages()?;
-    if languages.is_empty() {
-        return None;
-    }
+    let raw = if tesseract_ready() {
+        tesseract(frame, scale)?
+    } else {
+        super::reader::recognize(frame, scale)?
+    };
+    Some(join_lines(&raw))
+}
 
-    let factor = if scale < 1.5 { 2 } else { 1 };
-    let (grey, width, height) = pad(
-        &frame.grey(factor),
-        frame.width * factor,
-        frame.height * factor,
-        MARGIN,
-    );
+fn tesseract(frame: &Frame, scale: f64) -> Option<String> {
+    let languages = languages()?;
+    let (grey, width, height) = frame.prepared(scale);
 
     // A file rather than stdin, because the command runner that enforces the
     // deadline hands its child no input. PGM because it is a ten-byte header
@@ -263,7 +274,7 @@ pub fn recognize(frame: &Frame, scale: f64) -> Option<String> {
         }
     };
 
-    let text = join_lines(&String::from_utf8_lossy(&out.stdout));
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
     crate::trace!(
         "ocr       read {} chars from {width}x{height} as {} in {:?}",
         text.chars().count(),

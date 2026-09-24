@@ -34,6 +34,7 @@ mod evdev;
 mod ocr;
 mod overlay;
 mod portal;
+mod reader;
 mod screen;
 mod wayland;
 mod window;
@@ -287,9 +288,16 @@ pub fn screen_reading(source_lang: &str) -> Option<crate::platform::ScreenReadin
     let missing_pack = wanted.filter(|pack| !languages.iter().any(|l| l == pack));
     let install = missing_pack.and_then(|pack| ocr::install_command(pack, !engine));
 
+    let builtin = match reader::state() {
+        reader::State::Absent => crate::platform::BuiltinReader::Absent,
+        reader::State::Downloading(done) => crate::platform::BuiltinReader::Downloading(done),
+        reader::State::Ready => crate::platform::BuiltinReader::Ready,
+        reader::State::Failed(why) => crate::platform::BuiltinReader::Failed(why),
+    };
+
     Some(crate::platform::ScreenReading {
         languages,
-        engine,
+        builtin,
         install,
         missing_pack,
         key_heard: KEY_BOUND.load(std::sync::atomic::Ordering::Relaxed) || evdev::available(),
@@ -318,26 +326,28 @@ pub fn ask_for_screen_region() {
     }
 }
 
-/// Why reading the screen will not work here, for the one place that can
-/// print it: the `--read-screen` command.
-pub fn screen_reading_missing() -> Option<&'static str> {
-    ocr::missing()
+/// Fetches the built-in reader's models in the background, for the window's
+/// download button.
+pub fn download_screen_reader() {
+    reader::start_download();
 }
 
 /// Reads text out of a rectangle the user draws on the screen.
 ///
 /// Three steps: a still of the screen is taken, the user draws a rectangle
-/// over a dimmed copy of it, and Tesseract reads what is inside. `None` when
-/// any of them has nothing to give — no Tesseract, a desktop that will not be
+/// over a dimmed copy of it, and Tesseract or the built-in reader reads what
+/// is inside. `None` when any of them has nothing to give — no reader and no
+/// network to fetch one, a desktop that will not be
 /// read, a cancelled drag, a rectangle with no text in it. None of those is
 /// worth a bubble saying so, the same as on Windows.
 pub fn read_screen_region() -> Option<crate::platform::ScreenRead> {
     crate::trace!("region    asked to read the screen");
 
-    // Asked before the screen is taken over: a machine that can never answer
-    // should not make the user draw a rectangle first.
-    if let Some(reason) = ocr::missing() {
-        crate::trace!("ocr       {reason}");
+    // Before the screen is taken over: a machine that cannot answer should
+    // not make the user draw a rectangle first. The first time, this is where
+    // the built-in reader's models are fetched.
+    if let Err(reason) = ocr::prepare() {
+        crate::trace!("ocr       no reader: {reason}");
         return None;
     }
 

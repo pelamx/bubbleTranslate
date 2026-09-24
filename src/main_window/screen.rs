@@ -3,8 +3,9 @@
 //! Selecting is the gesture everyone already knows; drawing a box to read a
 //! picture is not, and a keyboard shortcut nobody told you about does not
 //! exist as far as you are concerned. So the window says what it is for, how
-//! to do it, and — on Linux, where the reading engine is something the user
-//! installs — whether it is ready, and the one command that makes it so.
+//! to do it, and — on Linux, where the reader is fetched on first use and
+//! Tesseract is an option for more alphabets — whether it is ready, and what
+//! to do when it is not.
 
 use eframe::egui;
 
@@ -12,6 +13,7 @@ use super::{ERR_RED, OK_GREEN, TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY, WARN_AM
 use crate::config::Config;
 use crate::engine::Request;
 use crate::i18n::t;
+use crate::platform::BuiltinReader;
 
 use super::MainState;
 
@@ -87,9 +89,11 @@ pub fn screen_reading(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
     );
 
     let status = crate::platform::screen_reading(&cfg.source_lang);
+    // Only a download under way holds the button back: with the models not
+    // fetched yet, trying it is what fetches them.
     let ready = status
         .as_ref()
-        .is_none_or(|status| !status.languages.is_empty());
+        .is_none_or(|status| !matches!(status.builtin, BuiltinReader::Downloading(_)));
 
     ui.add_space(8.0);
     if ui
@@ -108,55 +112,36 @@ pub fn screen_reading(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
     }
 }
 
-/// Whether Tesseract is ready, what it reads, and how to install what is not
-/// there.
+/// Which reader is ready and what it reads, how the built-in one is fetched,
+/// and how to install Tesseract for what it does not read.
 fn linux_status(ui: &mut egui::Ui, status: &crate::platform::ScreenReading) {
-    if !status.engine {
-        ui.label(
-            egui::RichText::new(t(
-                "● Needs Tesseract, which does the reading",
-                "● Okumayı yapan Tesseract gerekiyor",
-                "● Necesita Tesseract, que hace la lectura",
-            ))
-            .size(12.5)
-            .color(ERR_RED),
-        );
-        ui.label(
-            egui::RichText::new(t(
-                "Install it once — it stays through every update. Selecting text to \
-                 translate does not need it.",
-                "Bir kez kurman yeterli, her güncellemede yerinde kalır. Metin seçip \
-                 çevirmek için gerekmez.",
-                "Instálalo una vez; se mantiene en cada actualización. Traducir texto \
-                 seleccionado no lo necesita.",
-            ))
-            .size(12.0)
-            .color(TEXT_SECONDARY),
-        );
-    } else if status.languages.is_empty() {
-        ui.label(
-            egui::RichText::new(t(
-                "● Tesseract has no languages yet",
-                "● Tesseract'ta henüz dil yok",
-                "● Tesseract aún no tiene idiomas",
-            ))
-            .size(12.5)
-            .color(ERR_RED),
-        );
-    } else {
+    let tesseract = !status.languages.is_empty();
+    if tesseract {
         ui.label(
             egui::RichText::new(format!(
                 "{} {}",
                 t(
-                    "● Ready — reads",
-                    "● Hazır — okuduğu diller:",
-                    "● Listo — lee"
+                    "● Ready — Tesseract reads",
+                    "● Hazır — Tesseract'ın okuduğu diller:",
+                    "● Listo — Tesseract lee"
                 ),
                 status.languages.join(", ")
             ))
             .size(12.5)
             .color(OK_GREEN),
         );
+    } else {
+        builtin_status(ui, &status.builtin);
+    }
+
+    // Tesseract is never required; it is offered for what the built-in
+    // reader cannot do, and for the source language when its pack is not
+    // there.
+    if tesseract && status.missing_pack.is_none() {
+        return key_note(ui, status);
+    }
+    ui.add_space(8.0);
+    if tesseract {
         if let Some(pack) = status.missing_pack {
             ui.label(
                 egui::RichText::new(format!(
@@ -171,6 +156,39 @@ fn linux_status(ui: &mut egui::Ui, status: &crate::platform::ScreenReading) {
                 .color(WARN_AMBER),
             );
         }
+    } else {
+        ui.label(
+            egui::RichText::new(t(
+                "For it to read properly, install Tesseract",
+                "Düzgün okuması için Tesseract'ı kur",
+                "Para que lea bien, instala Tesseract",
+            ))
+            .size(12.5)
+            .color(TEXT_PRIMARY)
+            .strong(),
+        );
+        ui.label(
+            egui::RichText::new(t(
+                "The built-in reader only knows letters without accents: ç, ğ, ş, é, ü \
+                 come out as plain c, g, s, e, u, and Cyrillic, Arabic, Chinese or \
+                 Japanese text is not read at all. A word missing its letters can \
+                 translate as a different word. Tesseract, with a pack for the \
+                 language you read from, reads every letter as it is — and once it \
+                 is installed, it does the reading instead.",
+                "Dahili okuyucu yalnızca aksansız harfleri tanır: ç, ğ, ş, é, ü düz c, \
+                 g, s, e, u olarak okunur; Kiril, Arapça, Çince ya da Japonca metin \
+                 hiç okunmaz. Harfi eksik bir kelime başka bir kelime gibi çevrilebilir. \
+                 Tesseract, okuduğun dilin paketiyle her harfi olduğu gibi okur ve \
+                 kurulduğunda okumayı o yapar.",
+                "El lector integrado solo conoce letras sin acento: ç, ğ, ş, é, ü salen \
+                 como c, g, s, e, u, y el texto en cirílico, árabe, chino o japonés no \
+                 se lee. Una palabra sin sus letras puede traducirse como otra. \
+                 Tesseract, con el paquete del idioma que lees, lee cada letra tal como \
+                 es, y una vez instalado es él quien lee.",
+            ))
+            .size(12.0)
+            .color(TEXT_SECONDARY),
+        );
     }
 
     match (&status.install, status.missing_pack) {
@@ -204,6 +222,93 @@ fn linux_status(ui: &mut egui::Ui, status: &crate::platform::ScreenReading) {
         (None, None) => {}
     }
 
+    key_note(ui, status);
+}
+
+/// Where the built-in reader stands, and the button that fetches it.
+fn builtin_status(ui: &mut egui::Ui, builtin: &BuiltinReader) {
+    let note = |ui: &mut egui::Ui| {
+        ui.label(
+            egui::RichText::new(t(
+                "It reads Latin letters without accents, digits and punctuation.",
+                "Aksansız Latin harflerini, rakamları ve noktalama işaretlerini okur.",
+                "Lee letras latinas sin acento, cifras y signos de puntuación.",
+            ))
+            .size(12.0)
+            .color(TEXT_SECONDARY),
+        );
+    };
+    match builtin {
+        BuiltinReader::Ready => {
+            ui.label(
+                egui::RichText::new(t(
+                    "● Ready — built-in reader",
+                    "● Hazır — dahili okuyucu",
+                    "● Listo — lector integrado",
+                ))
+                .size(12.5)
+                .color(OK_GREEN),
+            );
+            note(ui);
+        }
+        BuiltinReader::Absent => {
+            ui.label(
+                egui::RichText::new(t(
+                    "● The built-in reader is downloaded the first time you use it (12 MB)",
+                    "● Dahili okuyucu ilk kullanımda indirilir (12 MB)",
+                    "● El lector integrado se descarga la primera vez que lo usas (12 MB)",
+                ))
+                .size(12.5)
+                .color(WARN_AMBER),
+            );
+            note(ui);
+            ui.add_space(4.0);
+            if ui
+                .button(t("Download now", "Şimdi indir", "Descargar ahora"))
+                .clicked()
+            {
+                crate::platform::download_screen_reader();
+            }
+        }
+        BuiltinReader::Downloading(done) => {
+            ui.label(
+                egui::RichText::new(t(
+                    "● Downloading the built-in reader…",
+                    "● Dahili okuyucu indiriliyor…",
+                    "● Descargando el lector integrado…",
+                ))
+                .size(12.5)
+                .color(WARN_AMBER),
+            );
+            ui.add(egui::ProgressBar::new(*done).show_percentage());
+            // Nothing else wakes the window while the bar moves.
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(200));
+        }
+        BuiltinReader::Failed(why) => {
+            ui.label(
+                egui::RichText::new(t(
+                    "● The built-in reader could not be downloaded",
+                    "● Dahili okuyucu indirilemedi",
+                    "● No se pudo descargar el lector integrado",
+                ))
+                .size(12.5)
+                .color(ERR_RED),
+            );
+            ui.label(egui::RichText::new(why).size(11.0).color(TEXT_MUTED));
+            ui.add_space(4.0);
+            if ui
+                .button(t("Try again", "Tekrar dene", "Reintentar"))
+                .clicked()
+            {
+                crate::platform::download_screen_reader();
+            }
+        }
+    }
+}
+
+/// On a session that does not pass the key on, the command to bind instead.
+fn key_note(ui: &mut egui::Ui, status: &crate::platform::ScreenReading) {
     if !status.key_heard {
         ui.add_space(6.0);
         ui.label(
