@@ -27,14 +27,15 @@ use std::time::{Duration, Instant};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::UI::HiDpi::GetDpiForSystem;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, GetDoubleClickTime, VIRTUAL_KEY, VK_A, VK_C, VK_CONTROL, VK_DOWN, VK_E,
+    GetAsyncKeyState, GetDoubleClickTime, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey,
+    VIRTUAL_KEY, VK_A, VK_C, VK_CONTROL, VK_DOWN, VK_E,
     VK_END, VK_HOME, VK_LEFT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RIGHT, VK_RWIN, VK_SHIFT,
     VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetCursorPos, GetMessageW, HHOOK, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT,
     SetWindowsHookExW, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_SYSKEYUP,
+    WM_HOTKEY, WM_LBUTTONUP, WM_SYSKEYUP,
 };
 
 use crate::config::TriggerKey;
@@ -101,6 +102,17 @@ static ON_REGION: OnceLock<Mutex<Box<dyn Fn() + Send>>> = OnceLock::new();
 /// something to recover from.
 pub fn on_region_request(ask: impl Fn() + Send + 'static) {
     let _ = ON_REGION.set(Mutex::new(Box::new(ask)));
+}
+
+/// Passes Ctrl+Shift+E on, from the hook or from the registered hotkey.
+fn ask_region() {
+    match ON_REGION.get() {
+        Some(ask) => match ask.lock() {
+            Ok(ask) => ask(),
+            Err(_) => crate::trace!("region    the callback lock was poisoned"),
+        },
+        None => crate::trace!("region    nobody registered for the key"),
+    }
 }
 
 /// The press that a drag is being measured from, and what the clipboard looked
@@ -256,6 +268,24 @@ fn run() {
         }
     }
 
+    // Ctrl+Shift+E a second time, as a registered hotkey. The keyboard hook
+    // is blind to keys typed into a window running as administrator — Visual
+    // Studio, an elevated terminal — because Windows keeps a lower process
+    // from watching a higher one. A registered hotkey is answered by Windows
+    // itself, whatever is in front. Everywhere else the hook sees the press
+    // first and swallows it, so this never fires twice for one press.
+    // Without a window it arrives on this thread's queue, as `WM_HOTKEY`.
+    if let Err(err) = unsafe {
+        RegisterHotKey(
+            None,
+            1,
+            MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
+            VK_E.0 as u32,
+        )
+    } {
+        crate::trace!("hotkey    not registered — {err}");
+    }
+
     // The hooks are only ever called while this thread is pumping messages,
     // and this loop never ends: the process exits and Windows removes them.
     //
@@ -267,6 +297,10 @@ fn run() {
     loop {
         if unsafe { GetMessageW(&mut message, Some(HWND::default()), 0, 0) }.0 <= 0 {
             break;
+        }
+        if message.message == WM_HOTKEY {
+            crate::trace!("hotkey    ctrl+shift+e -> READ SCREEN");
+            ask_region();
         }
     }
 }
@@ -388,13 +422,7 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
     if key == VK_E && held(VK_CONTROL) && held(VK_SHIFT) {
         if wparam.0 as u32 == WM_KEYDOWN {
             crate::trace!("key-down  ctrl+shift+e -> READ SCREEN");
-            match ON_REGION.get() {
-                Some(ask) => match ask.lock() {
-                    Ok(ask) => ask(),
-                    Err(_) => crate::trace!("region    the callback lock was poisoned"),
-                },
-                None => crate::trace!("region    nobody registered for the key"),
-            }
+            ask_region();
         }
         return LRESULT(1);
     }

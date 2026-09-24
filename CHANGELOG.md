@@ -13,6 +13,14 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**Ctrl+Shift+E now works in windows running as administrator.** (Windows)
+Pressing it in Visual Studio, an admin terminal or any other program started
+"as administrator" did nothing: Windows keeps an ordinary program from seeing
+keys typed into those windows. The screen now dims whatever window is in
+front.
+
 ## 0.3.5 — 2026-09-24
 
 **The headings in the window are bold now.** They were meant to be, and on
