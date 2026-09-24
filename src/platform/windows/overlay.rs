@@ -49,12 +49,11 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE};
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-    GetMessageW, GetSystemMetrics, IDC_CROSS, LWA_ALPHA, LoadCursorW, MSG, PostQuitMessage,
-    RegisterClassW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
-    SW_SHOW, SetCursor, SetForegroundWindow, SetLayeredWindowAttributes, ShowWindow,
-    TranslateMessage, WM_CHAR, WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-    WM_PAINT, WM_RBUTTONDOWN, WM_SETCURSOR, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_POPUP,
+    GetMessageW, GetSystemMetrics, IDC_CROSS, LWA_ALPHA, LoadCursorW, MSG, RegisterClassW,
+    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_SHOW,
+    SetCursor, SetForegroundWindow, SetLayeredWindowAttributes, ShowWindow, TranslateMessage,
+    WM_CHAR, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_RBUTTONDOWN,
+    WM_SETCURSOR, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
@@ -476,11 +475,19 @@ extern "system" fn procedure(
         // that does not handle it is a system sound, and this one is up over
         // whatever the user was reading.
         WM_CHAR => LRESULT(0),
-        WM_DESTROY => {
-            // SAFETY: ends the loop above if it is still in `GetMessageW`.
-            unsafe { PostQuitMessage(0) };
-            LRESULT(0)
-        }
+        // `WM_DESTROY` is deliberately **not** handled here, and that is the
+        // whole of a bug worth remembering. Posting `WM_QUIT` from it left
+        // one sitting in the worker thread's queue after the sheet came
+        // down — the loop had already returned, so nobody took it. The next
+        // Ctrl+Shift+E then had its `GetMessageW` answered with that stale
+        // quit and returned before the sheet was even drawn, so the gesture
+        // worked exactly once per launch and every press after it did
+        // nothing. Shipped in 0.3.0; fixed in 0.3.1.
+        //
+        // Nothing needs posting. The loop ends on `FINISHED`, which the
+        // button and the keys above set, and the window is destroyed by the
+        // caller once the loop is done rather than from inside it.
+        //
         // SAFETY: the default handler, for everything not spoken for.
         _ => unsafe { DefWindowProcW(window, message, wparam, lparam) },
     }
@@ -564,40 +571,64 @@ mod tests {
             unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
         }
 
-        let picked = std::thread::spawn(select_region);
+        fn drag(from: (i32, i32), to: (i32, i32)) {
+            unsafe { SetCursorPos(from.0, from.1) }.unwrap();
+            std::thread::sleep(Duration::from_millis(120));
+            button(MOUSEEVENTF_LEFTDOWN);
 
-        // The overlay has to exist before it can be dragged on.
-        std::thread::sleep(Duration::from_millis(600));
-
-        let (from, to) = ((200, 200), (900, 520));
-        unsafe { SetCursorPos(from.0, from.1) }.unwrap();
-        std::thread::sleep(Duration::from_millis(120));
-        button(MOUSEEVENTF_LEFTDOWN);
-
-        // In steps, because one jump is a teleport rather than a drag, and a
-        // drag is what the overlay is watching for.
-        for step in 1..=10 {
-            let x = from.0 + (to.0 - from.0) * step / 10;
-            let y = from.1 + (to.1 - from.1) * step / 10;
-            unsafe { SetCursorPos(x, y) }.unwrap();
-            std::thread::sleep(Duration::from_millis(40));
+            // In steps, because one jump is a teleport rather than a drag,
+            // and a drag is what the overlay is watching for.
+            for step in 1..=10 {
+                let x = from.0 + (to.0 - from.0) * step / 10;
+                let y = from.1 + (to.1 - from.1) * step / 10;
+                unsafe { SetCursorPos(x, y) }.unwrap();
+                std::thread::sleep(Duration::from_millis(40));
+            }
+            button(MOUSEEVENTF_LEFTUP);
         }
-        button(MOUSEEVENTF_LEFTUP);
 
-        let region = picked
-            .join()
-            .expect("the overlay thread should not panic")
-            .expect("letting go after a drag should give a region");
+        // Twice, and on **one** thread, which is the point.
+        //
+        // 0.3.0 shipped a gesture that worked exactly once per launch: the
+        // overlay posted `WM_QUIT` as it came down, nobody took it, and the
+        // next `GetMessageW` on that same thread was answered with the stale
+        // quit and returned before the sheet was drawn. In the app that
+        // thread is the engine's, which lives as long as the process and
+        // calls this over and over — so a test that spawned a fresh thread
+        // per drag would hand each one a clean queue and never see it.
+        let gestures = [((200, 200), (900, 520)), ((300, 260), (760, 600))];
 
-        println!("picked: {region:?}");
-        assert_eq!(region.x, from.0);
-        assert_eq!(region.y, from.1);
-        assert_eq!(region.width, to.0 - from.0);
-        assert_eq!(region.height, to.1 - from.1);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            for _ in 0..gestures.len() {
+                let _ = tx.send(select_region());
+            }
+        });
 
-        match super::super::ocr::recognize(region) {
-            Some(text) => println!("--- {} chars read ---\n{text}", text.chars().count()),
-            None => println!("(nothing readable was under the rectangle)"),
+        for (attempt, (from, to)) in gestures.into_iter().enumerate() {
+            // The overlay has to exist before it can be dragged on.
+            std::thread::sleep(Duration::from_millis(700));
+            drag(from, to);
+
+            let region = rx
+                .recv_timeout(Duration::from_secs(10))
+                .unwrap_or_else(|_| panic!("drag {} never came back", attempt + 1))
+                .unwrap_or_else(|| {
+                    panic!("drag {} gave no region: the gesture went dead", attempt + 1)
+                });
+
+            println!("drag {}: {region:?}", attempt + 1);
+            assert_eq!(region.x, from.0);
+            assert_eq!(region.y, from.1);
+            assert_eq!(region.width, to.0 - from.0);
+            assert_eq!(region.height, to.1 - from.1);
+
+            match super::super::ocr::recognize(region) {
+                Some(text) => println!("  {} chars read", text.chars().count()),
+                None => println!("  (nothing readable under it)"),
+            }
         }
+
+        worker.join().expect("the overlay thread should not panic");
     }
 }

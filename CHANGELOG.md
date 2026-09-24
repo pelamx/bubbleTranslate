@@ -13,6 +13,14 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## 0.3.1 — 2026-09-24
+
+**Reading the screen works every time, not just the first. (Windows)** Pressing
+Ctrl+Shift+E a second time did nothing at all — no dimmed screen, no crosshair,
+nothing — and the only way to get it back was to quit bubbleTranslate and start
+it again. One reading per launch is not something anyone can use, and it was
+there from the moment 0.3.0 was published.
+
 ## 0.3.0 — 2026-09-24
 
 **Translate text that cannot be selected, by drawing a box around it.
