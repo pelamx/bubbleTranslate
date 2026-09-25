@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.3.7 — 2026-09-25
 
 **The daily usage ping now also says when the free allowance runs out.** On
 the free plan, the first time in a day that the ten translations are used up,
