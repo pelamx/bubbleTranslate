@@ -638,21 +638,34 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
   // anyone happens to run: the platforms are released separately. Only
   // versions somebody runs get a row; the published one is named in each
   // column's header, so a release nobody has installed yet is still visible.
-  const versionList = [...new Set(vers.map((v) => v.app))].sort(compareVersions);
+  //
+  // Every version anyone runs gets a row, the operator's own machines
+  // included, and so does every version a platform is offered now: a release
+  // shows up here the moment it is published and fills in as copies update,
+  // rather than only once a real user has reached it.
+  const versionList = [
+    ...new Set([...vers.map((v) => v.app), ...Object.values(pub ?? {})]),
+  ].sort(compareVersions);
   const versionRows = versionList
     .map((app) => {
       const n = (os: string) => vers.filter((v) => v.app === app && v.os === os).reduce((a, v) => a + v.n, 0);
+      const mineOn = (os: string) =>
+        vers.filter((v) => v.app === app && v.os === os).reduce((a, v) => a + v.mine, 0);
       const all = vers.filter((v) => v.app === app).reduce((a, v) => a + v.n, 0);
+      // Your own machines are named beside the count, never added to it.
+      const yours = (os: string) =>
+        mineOn(os) ? ` <span class="muted" title="Your own machines, left out of the count">+${mineOn(os)} you</span>` : "";
       // No "latest" on the row itself: a version can be current on one
       // platform and behind on another, and a row-wide label reads as if it
       // were about the users in it. The cell says it, per platform.
       return `<tr><td>${escapeHtml(app)}</td>
         ${PLATFORMS.map((os) => {
           const count = n(os) || `<span class="muted">0</span>`;
-          // Marked only where somebody is on it; an empty cell needs no label.
-          return pub?.[os] === app && n(os) > 0
-            ? `<td class="num" title="The latest ${escapeHtml(osLabel(os))} version"><b class="ok">${count}</b> <span class="badge on">latest</span></td>`
-            : `<td class="num">${count}</td>`;
+          // Marked wherever it is the version offered now, even before anyone
+          // has updated to it: that is the row everyone is expected to reach.
+          return pub?.[os] === app
+            ? `<td class="num" title="The latest ${escapeHtml(osLabel(os))} version"><b class="ok">${count}</b> <span class="badge on">latest</span>${yours(os)}</td>`
+            : `<td class="num">${count}${yours(os)}</td>`;
         }).join("")}
         <td class="num"><b>${all}</b></td></tr>`;
     })

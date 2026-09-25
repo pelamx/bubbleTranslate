@@ -122,14 +122,21 @@ export async function providerHealth(env: Env): Promise<ProviderHealthRow[]> {
   return results ?? [];
 }
 
-export async function versions(env: Env): Promise<{ app: string; os: string; n: number }[]> {
+/** Installs per version and OS over the last 30 days. `n` counts real users
+ *  only; `mine` counts the operator's own machines beside it, so a version
+ *  only they run yet still gets a row without being counted as adoption. */
+export async function versions(
+  env: Env,
+): Promise<{ app: string; os: string; n: number; mine: number }[]> {
   const { results } = await env.DB.prepare(
-    `SELECT COALESCE(app, '?') AS app, COALESCE(os, 'unknown') AS os, COUNT(*) AS n
-       FROM installs WHERE last_seen > ?1 AND ${NOT_MINE_INSTALL}
+    `SELECT COALESCE(app, '?') AS app, COALESCE(os, 'unknown') AS os,
+            SUM(CASE WHEN ${NOT_MINE_INSTALL} THEN 1 ELSE 0 END) AS n,
+            SUM(CASE WHEN ${NOT_MINE_INSTALL} THEN 0 ELSE 1 END) AS mine
+       FROM installs WHERE last_seen > ?1
       GROUP BY app, os`,
   )
     .bind(now() - 30 * DAY, null, null, null, null, null, null, null, await mineInstalls(env))
-    .all<{ app: string; os: string; n: number }>();
+    .all<{ app: string; os: string; n: number; mine: number }>();
   return results ?? [];
 }
 
