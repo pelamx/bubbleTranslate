@@ -789,8 +789,6 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
 
      ${backendsCard(backends)}
 
-     ${revenueCard(money, share)}
-
      <section class="card">
        <p class="label">Growth &amp; health</p>
        <div class="scroll"><table>
@@ -891,6 +889,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
      </details>
 
      ${historyCard(log)}
+
+     ${revenueCard(money, share)}
 
      <p class="muted foot">
        Refunds and cancellations should normally be done in Paddle — its
