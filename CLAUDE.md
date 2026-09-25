@@ -95,10 +95,16 @@ notice for every copy already out there. Keeping the two apart is what lets
 this repository be made private again without taking the downloads with it.
 
 They lived in `bubbleTranslate/downloads` until 0.3.6, under a second GitHub
-account that only that account could publish to. That repository is frozen now
-and read-only to us; its assets stay where they are because copies of 0.3.5 and
-older ask it for `latest.json` and will go on doing so for as long as they are
-running. Point nothing new at it.
+account. That repository is frozen — point nothing new at it — but its assets
+and its `latest.json` stay where they are, because copies of 0.3.5 and older ask
+it for the manifest and will go on doing so for as long as they are running.
+Its manifest was pointed at `pelamx/downloads` on 2026-09-25, which is what
+tells those copies an update exists and where to get it; leaving it at 0.3.6
+keeps answering them correctly, so it needs no upkeep.
+
+`pelamx` is a collaborator there with write access since 2026-09-25, so it can
+be corrected from any release machine without the second account's token. That
+is for repairs, not for releases: a release goes to `pelamx/downloads` only.
 
 Copies of 0.2.7 and older read the manifest from a third address —
 `latest.json` at the root of **this** repository. That file is a copy kept by
