@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.3.6 — 2026-09-25
 
 **It starts by itself when you log in.** (Windows, Linux) Until now the app
 stopped with every restart and stayed stopped until you remembered to open it
