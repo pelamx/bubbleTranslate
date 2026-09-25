@@ -13,6 +13,17 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**The daily usage ping now also says when the free allowance runs out.** On
+the free plan, the first time in a day that the ten translations are used up,
+the app sends one more ping saying so — the same anonymous values as the daily
+one, nothing about what you translated. It is how we learn whether ten a day is
+the right number, which is worth knowing before changing it for everybody.
+Setting `usage_ping = false` turns this off along with the rest. The privacy
+policy lists it, along with the country the service now keeps for each
+installation.
+
 ## 0.3.6 — 2026-09-25
 
 **It starts by itself when you log in.** (Windows, Linux) Until now the app

@@ -569,6 +569,32 @@ pub fn ping(agent: &ureq::Agent, pro: bool) {
         );
 }
 
+/// Tells the service this install ran out of today's free allowance. Sent at
+/// most once a day, by the engine, the moment it first refuses; the same
+/// install id, OS, version and plan as the daily ping and nothing more. It
+/// leaves out the backends' tallies, which the daily ping already carries and
+/// which the service adds up, so sending them here would count them twice.
+pub fn ping_capped(agent: &ureq::Agent) {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("BUBBLETRANSLATE_LICENSE_API").is_none() {
+        return;
+    }
+    let _ = agent
+        .post(format!("{}/v1/ping", api_base()))
+        .header("Content-Type", "application/json")
+        .send(
+            serde_json::json!({
+                "install": install_id(),
+                "os": std::env::consts::OS,
+                "app": env!("CARGO_PKG_VERSION"),
+                "plan": "free",
+                "capped": true,
+            })
+            .to_string()
+            .as_str(),
+        );
+}
+
 fn api_base() -> String {
     #[cfg(debug_assertions)]
     {

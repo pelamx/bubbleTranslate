@@ -94,18 +94,47 @@ function pageContext(request: Request, url: URL, formLang?: unknown): PageContex
 /** The daily "in use" ping. Upserts one row per install; answers 204 whatever
  *  it was sent, because the app ignores the reply and a junk ping is not worth
  *  an error path. */
-async function ping(env: Env, body: any) {
+async function ping(env: Env, body: any, request: Request) {
   const install = String(body.install ?? "");
   if (!/^[0-9a-f]{32}$/.test(install)) return new Response(null, { status: 204 });
   const plan = body.plan === "pro" ? "pro" : "free";
   const t = now();
+  // The country Cloudflare already worked out from the address, and only
+  // that: the address itself is not kept. Absent in tests and local dev.
+  const cf = (request as { cf?: { country?: unknown } }).cf;
+  const country =
+    typeof cf?.country === "string" && /^[A-Z0-9]{2}$/.test(cf.country) ? cf.country : null;
   await env.DB.prepare(
-    `INSERT INTO installs (install, os, app, plan, first_seen, last_seen)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?5)
-     ON CONFLICT (install) DO UPDATE SET os = ?2, app = ?3, plan = ?4, last_seen = ?5`,
+    `INSERT INTO installs (install, os, app, plan, first_seen, last_seen, country)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)
+     ON CONFLICT (install) DO UPDATE SET os = ?2, app = ?3, plan = ?4, last_seen = ?5,
+       country = COALESCE(?6, country)`,
   )
-    .bind(install, String(body.os ?? "").slice(0, 16), String(body.app ?? "").slice(0, 32), plan, t)
+    .bind(
+      install,
+      String(body.os ?? "").slice(0, 16),
+      String(body.app ?? "").slice(0, 32),
+      plan,
+      t,
+      country,
+    )
     .run();
+  // Sent by the app the first time in a day the free allowance runs out. The
+  // first time is kept, and each new day adds one, so a copy restarted twice
+  // on a capped day still counts that day once.
+  if (body.capped === true) {
+    await env.DB.prepare(
+      `UPDATE installs SET
+         first_capped = COALESCE(first_capped, ?2),
+         capped_days = capped_days + CASE
+           WHEN last_capped IS NULL OR date(last_capped, 'unixepoch') <> date(?2, 'unixepoch')
+           THEN 1 ELSE 0 END,
+         last_capped = ?2
+       WHERE install = ?1`,
+    )
+      .bind(install, t)
+      .run();
+  }
   await recordProviderHealth(env, body.providers, t);
   // The privacy policy promises that an install silent for 13 months is
   // forgotten. Done here rather than in the cron, so the promise holds even
@@ -826,7 +855,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     const body = await request.json().catch(() => ({}));
     switch (pathname) {
       case "/v1/ping":
-        return await ping(env, body);
+        return await ping(env, body, request);
       case "/v1/activate":
         return await activate(env, body);
       case "/v1/refresh":

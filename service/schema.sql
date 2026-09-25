@@ -146,13 +146,26 @@ CREATE INDEX IF NOT EXISTS paddle_subscriptions_by_customer
 -- One row per install that has sent the daily usage ping (see
 -- `license::ping` in the client). `install` is a salted hash that cannot be
 -- joined to `seats.device`. Holds no text, no languages and no licence.
+--
+-- `country` is the two-letter code Cloudflare works out from the request's
+-- address; the address itself is never stored. The `capped` columns record
+-- when the free allowance ran out: the first time, and on how many different
+-- days. The four were added on 2026-09-25 to a live table, with
+--   ALTER TABLE installs ADD COLUMN country TEXT;
+--   ALTER TABLE installs ADD COLUMN first_capped INTEGER;
+--   ALTER TABLE installs ADD COLUMN last_capped INTEGER;
+--   ALTER TABLE installs ADD COLUMN capped_days INTEGER NOT NULL DEFAULT 0;
 CREATE TABLE IF NOT EXISTS installs (
-  install     TEXT PRIMARY KEY,
-  os          TEXT,
-  app         TEXT,
-  plan        TEXT,
-  first_seen  INTEGER NOT NULL,
-  last_seen   INTEGER NOT NULL
+  install      TEXT PRIMARY KEY,
+  os           TEXT,
+  app          TEXT,
+  plan         TEXT,
+  first_seen   INTEGER NOT NULL,
+  last_seen    INTEGER NOT NULL,
+  country      TEXT,
+  first_capped INTEGER,
+  last_capped  INTEGER,
+  capped_days  INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS installs_by_last_seen ON installs (last_seen);

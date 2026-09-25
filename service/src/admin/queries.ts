@@ -140,6 +140,74 @@ export async function versions(
   return results ?? [];
 }
 
+export interface CountryRow {
+  country: string;
+  n: number;
+  week: number;
+}
+
+/** Real installs seen in the last 30 days, by the country their pings came
+ *  from, with how many of them were seen in the last eight days. Installs
+ *  that have not pinged since the country was first recorded are `?`. */
+export async function countries(env: Env): Promise<CountryRow[]> {
+  const t = now();
+  const { results } = await env.DB.prepare(
+    `SELECT COALESCE(country, '?') AS country, COUNT(*) AS n,
+            SUM(CASE WHEN last_seen > ?2 THEN 1 ELSE 0 END) AS week
+       FROM installs WHERE last_seen > ?1 AND ${NOT_MINE_INSTALL}
+      GROUP BY COALESCE(country, '?')
+      ORDER BY n DESC, country`,
+  )
+    .bind(t - 30 * DAY, t - 8 * DAY, null, null, null, null, null, null, await mineInstalls(env))
+    .all<CountryRow>();
+  return results ?? [];
+}
+
+export interface CappedRow {
+  install: string;
+  os: string | null;
+  app: string | null;
+  plan: string | null;
+  country: string | null;
+  first_seen: number;
+  first_capped: number;
+  last_capped: number;
+  capped_days: number;
+}
+
+export interface LimitHits {
+  /** Real installs that could have reported it: first seen since reporting began. */
+  base: number;
+  capped: CappedRow[];
+}
+
+/** Real installs that have run out of the free allowance, most days first.
+ *  The base is installs on a build that reports it at all: anything seen
+ *  since the first capped report arrived, which is the best available stand-in
+ *  for "running 0.3.7 or newer" without a version compare in SQL. */
+export async function limitHits(env: Env): Promise<LimitHits> {
+  const mine = await mineInstalls(env);
+  const { results } = await env.DB.prepare(
+    `SELECT install, os, app, plan, country, first_seen, first_capped, last_capped, capped_days
+       FROM installs WHERE first_capped IS NOT NULL AND ${NOT_MINE_INSTALL}
+      ORDER BY capped_days DESC, last_capped DESC`,
+  )
+    .bind(null, null, null, null, null, null, null, null, mine)
+    .all<CappedRow>();
+  const capped = results ?? [];
+  const since = capped.reduce((a, r) => Math.min(a, r.first_capped), Infinity);
+  const base = Number.isFinite(since)
+    ? ((
+        await env.DB.prepare(
+          `SELECT COUNT(*) AS n FROM installs WHERE last_seen >= ?1 AND ${NOT_MINE_INSTALL}`,
+        )
+          .bind(since, null, null, null, null, null, null, null, mine)
+          .first<{ n: number }>()
+      )?.n ?? 0)
+    : 0;
+  return { base, capped };
+}
+
 /** Newest version first: "0.2.10" after "0.2.9". */
 export function compareVersions(a: string, b: string): number {
   const pa = a.split(".").map(Number);

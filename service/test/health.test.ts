@@ -112,3 +112,54 @@ it("shows the backends in the admin panel, and warns when the fallbacks are winn
   html = await dash();
   expect(html).toContain("is refusing more than it should");
 });
+
+it("records the day the free allowance ran out, once per day", async () => {
+  const id = install("d");
+  const row = async () =>
+    await env.DB.prepare("SELECT first_capped, last_capped, capped_days FROM installs WHERE install = ?")
+      .bind(id)
+      .first<{ first_capped: number | null; last_capped: number | null; capped_days: number }>();
+
+  await ping({ install: id, os: "windows", app: "0.3.7" });
+  expect(await row()).toMatchObject({ first_capped: null, capped_days: 0 });
+
+  // A second capped ping the same day, from a restart, is the same day.
+  await ping({ install: id, os: "windows", app: "0.3.7", capped: true });
+  await ping({ install: id, os: "windows", app: "0.3.7", capped: true });
+  const first = await row();
+  expect(first?.capped_days).toBe(1);
+  expect(first?.first_capped).not.toBeNull();
+
+  // A later day adds one and leaves the first time alone.
+  await env.DB.prepare("UPDATE installs SET last_capped = last_capped - 86400 WHERE install = ?")
+    .bind(id)
+    .run();
+  await ping({ install: id, os: "windows", app: "0.3.7", capped: true });
+  const later = await row();
+  expect(later?.capped_days).toBe(2);
+  expect(later?.first_capped).toBe(first?.first_capped);
+});
+
+it("takes the country from the request and nothing else", async () => {
+  const id = install("e");
+  const req = (country: string | undefined) => {
+    const r = new Request("https://api.bubbletranslate.app/v1/ping", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ install: id, os: "linux", app: "0.3.7" }),
+    });
+    Object.defineProperty(r, "cf", { value: country ? { country } : undefined });
+    return r;
+  };
+  await worker.fetch(req("TR"), env);
+  const country = async () =>
+    (await env.DB.prepare("SELECT country FROM installs WHERE install = ?").bind(id).first<{ country: string | null }>())
+      ?.country;
+  expect(await country()).toBe("TR");
+  // A request that arrives without one keeps the last known country.
+  await worker.fetch(req(undefined), env);
+  expect(await country()).toBe("TR");
+  // Nonsense is not stored.
+  await worker.fetch(req("<script>"), env);
+  expect(await country()).toBe("TR");
+});

@@ -156,6 +156,20 @@ fn run(
             .user_agent(concat!("bubbleTranslate/", env!("CARGO_PKG_VERSION")))
             .build(),
     );
+    // The local day the "ran out of the allowance" report last went out, so
+    // it goes at most once a day however many refusals follow.
+    let mut capped_reported: Option<i64> = None;
+    let mut report_capped = |config: &Arc<Mutex<Config>>| {
+        let day = crate::quota::local_day();
+        if capped_reported == Some(day) || !config.lock().unwrap().usage_ping {
+            return;
+        }
+        capped_reported = Some(day);
+        let agent = licence_agent.clone();
+        // Off this thread: the refusal has to reach the bubble now, not after
+        // a round trip whose answer nobody reads.
+        std::thread::spawn(move || license::ping_capped(&agent));
+    };
     let mut last_text = String::new();
     let mut last_at = None;
     let mut last_via = CaptureSource::PrimarySelection;
@@ -196,6 +210,7 @@ fn run(
                 let entitlement = licensing.license.lock().unwrap().entitlement.clone();
                 let verdict = licensing.quota.lock().unwrap().verdict(&text, &entitlement);
                 let event = if let Verdict::Capped { used, limit } = verdict {
+                    report_capped(&config);
                     UiEvent::ManualCapped { used, limit }
                 } else {
                     match translator.translate(&text, &cfg) {
@@ -393,6 +408,7 @@ fn run(
             match gate(verdict, at) {
                 Gate::Translate { charge } => chargeable = charge,
                 Gate::Refuse(event) => {
+                    report_capped(&config);
                     let _ = ui.send(event);
                     wake_ui();
                     continue;

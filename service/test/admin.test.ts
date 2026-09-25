@@ -132,3 +132,20 @@ it("counts the operator's own machines, by platform, apart from everyone else's"
   const everyone = html.slice(html.indexOf("Installs ever seen"));
   expect(everyone.slice(0, everyone.indexOf("</div></div>"))).toContain("macOS 0");
 });
+
+it("shows who ran out of the free allowance, and where installs are", async () => {
+  const t = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    `INSERT OR REPLACE INTO installs
+       (install, os, app, plan, first_seen, last_seen, country, first_capped, last_capped, capped_days)
+     VALUES (?1, 'windows', '0.3.7', 'free', ?2, ?3, 'DE', ?4, ?3, 4)`,
+  )
+    .bind("f".repeat(32), t - 6 * 86400, t, t - 4 * 86400)
+    .run();
+  const html = await (await get("/admin")).text();
+  expect(html).toContain("Hitting the free limit");
+  expect(html).toContain("ffffffff");
+  expect(html).toContain("median <b>2</b>");
+  expect(html).toContain("Installs by country");
+  expect(html).toContain("Germany");
+});

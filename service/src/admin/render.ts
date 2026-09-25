@@ -26,6 +26,10 @@ import {
   webhookEvents,
   UserRow,
   compareVersions,
+  countries,
+  type CountryRow,
+  type LimitHits,
+  limitHits,
   downloads,
   health,
   ignoreList,
@@ -459,6 +463,90 @@ function backendsCard(rows: ProviderHealthRow[]): string {
      </section>`;
 }
 
+/** A country code as its flag and English name, or the code alone where the
+ *  runtime has no name for it. `?` is installs not seen since it was recorded. */
+function countryLabel(code: string): string {
+  if (code === "?") return `<span class="muted">not recorded yet</span>`;
+  let name = code;
+  try {
+    name = new Intl.DisplayNames(["en"], { type: "region" }).of(code) ?? code;
+  } catch {
+    // Codes Cloudflare invents (T1 for Tor, XX for unknown) have no name.
+  }
+  const flag = /^[A-Z]{2}$/.test(code)
+    ? String.fromCodePoint(...[...code].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65))
+    : "";
+  return `${flag} ${escapeHtml(name)} <span class="muted">${escapeHtml(code)}</span>`;
+}
+
+function countriesCard(rows: CountryRow[]): string {
+  const body = rows.length
+    ? rows
+        .map(
+          (r) => `<tr><td>${countryLabel(r.country)}</td>
+            <td class="num"><b>${r.n}</b></td><td class="num">${r.week}</td></tr>`,
+        )
+        .join("")
+    : `<tr><td colspan="3" class="muted">No installs this month.</td></tr>`;
+  return `<section class="card">
+       <p class="label">Installs by country, last 30 days</p>
+       <div class="scroll"><table>
+         <tr><th>Country</th><th class="num">Installs</th><th class="num">Seen this week</th></tr>
+         ${body}
+       </table></div>
+       <p class="muted foot">From the country Cloudflare reads off each ping's address; the address
+         itself is not stored. Recorded from 25 September 2026, so an install that has not pinged
+         since shows as not recorded yet. Your own machines are left out.</p>
+     </section>`;
+}
+
+function limitCard(hits: LimitHits): string {
+  const { base, capped } = hits;
+  if (capped.length === 0) {
+    return `<section class="card">
+       <p class="label">Hitting the free limit</p>
+       <p class="sub">Nobody has run out of the free allowance yet — or nobody on a build that says
+         so. Copies older than 0.3.7 do not report it.</p>
+     </section>`;
+  }
+  const days = capped.map((r) => Math.max(0, Math.floor((r.first_capped - r.first_seen) / DAY))).sort((a, b) => a - b);
+  const median = days[Math.floor((days.length - 1) / 2)];
+  const heavy = capped.filter((r) => r.capped_days >= 3).length;
+  const pro = capped.filter((r) => r.plan === "pro").length;
+  const rows = capped
+    .slice(0, 25)
+    .map(
+      (r) => `<tr><td><code>${escapeHtml(r.install.slice(0, 8))}</code></td>
+        <td>${escapeHtml(osLabel(r.os ?? "unknown"))} ${escapeHtml(r.app ?? "")}</td>
+        <td>${r.country ? countryLabel(r.country) : `<span class="muted">—</span>`}</td>
+        <td class="num">${Math.max(0, Math.floor((r.first_capped - r.first_seen) / DAY))}</td>
+        <td class="num"><b>${r.capped_days}</b></td>
+        <td>${ago(r.last_capped)}</td>
+        <td>${r.plan === "pro" ? `<span class="badge on">pro now</span>` : `<span class="muted">free</span>`}</td></tr>`,
+    )
+    .join("");
+  return `<section class="card">
+       <p class="label">Hitting the free limit</p>
+       <div class="scroll"><table>
+         <tr><th>Ran out at least once</th><th>Days until the first time</th>
+             <th>On 3 or more days</th><th>Of those who ran out, on Pro now</th></tr>
+         <tr><td>${ratio(capped.length, base)}</td>
+             <td class="num">median <b>${median}</b></td>
+             <td class="num"><b>${heavy}</b></td>
+             <td>${ratio(pro, capped.length)}</td></tr>
+       </table></div>
+       <div class="scroll" style="margin-top:14px"><table>
+         <tr><th>Install</th><th>Version</th><th>Country</th><th class="num">Days to first</th>
+             <th class="num">Days capped</th><th>Last</th><th>Plan</th></tr>
+         ${rows}
+       </table></div>
+       <p class="muted foot">Reported by the app the first time on a day that the ten free
+         translations run out; copies older than 0.3.7 do not send it. A free install that keeps
+         running out is someone the app is useful to who has not bought — the people pricing is for.
+         Your own machines are left out.</p>
+     </section>`;
+}
+
 export function revenueCard(m: Revenue, share: { pro: number; active: number }): string {
   const rows = m.months
     .map(
@@ -592,7 +680,7 @@ export function delta(today: number, yesterday: number): string {
 }
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends] = await Promise.all([
+  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -612,6 +700,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     revenue(env),
     proShare(env),
     providerHealth(env),
+    countries(env),
+    limitHits(env),
   ]);
   const dl = downloadsNow?.total ?? null;
 
@@ -822,6 +912,10 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
        <p class="label" style="margin-top:22px">Downloads per release</p>
        ${releasesTable(downloadsNow)}
      </section>
+
+     ${limitCard(hits)}
+
+     ${countriesCard(byCountry)}
 
      <section class="card" id="users">
        <p class="label">Users, last 30 days — ${real} real${own ? ` · ${own} yours` : ""}</p>
