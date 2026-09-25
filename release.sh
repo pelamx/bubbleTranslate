@@ -166,7 +166,7 @@ fi
 # making it before uploading leaves a window -- minutes, if the upload is slow
 # or fails -- where every installed copy is told about a version it would get a
 # 404 for.
-REPO="bubbleTranslate/downloads"
+REPO="pelamx/downloads"
 if gh release view "v$VERSION" -R "$REPO" >/dev/null 2>&1; then
     gh release upload "v$VERSION" -R "$REPO" "$DMG" --clobber
 else

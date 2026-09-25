@@ -1,5 +1,5 @@
 # Keeps latest.json at the root of this repository a copy of the one in
-# bubbleTranslate/downloads.
+# pelamx/downloads.
 #
 # 0.2.7 and every version before it look for updates here, at
 # raw.githubusercontent.com/pelamx/bubbleTranslate/main/latest.json. Without
@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Copy the manifest from the downloads repository
         run: |
-          curl -fsSL https://raw.githubusercontent.com/bubbleTranslate/downloads/main/latest.json -o latest.next
+          curl -fsSL https://raw.githubusercontent.com/pelamx/downloads/main/latest.json -o latest.next
           # Refuse anything that is not a manifest, so an error page never
           # replaces the file old copies read.
           jq -e '.linux.version and .macos.version and .windows.version' latest.next >/dev/null
@@ -34,5 +34,5 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Mirror latest.json from bubbleTranslate/downloads" -- latest.json
+          git commit -m "Mirror latest.json from pelamx/downloads" -- latest.json
           git push

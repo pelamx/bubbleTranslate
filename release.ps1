@@ -109,7 +109,7 @@ Compress-Archive -Path $OUT -DestinationPath $ZIP -CompressionLevel Optimal
 # than beside the source, so it is fetched, patched and put back through the
 # API. Only the Windows line is touched: the other platforms are released on
 # their own machines.
-$repo = 'bubbleTranslate/downloads'
+$repo = 'pelamx/downloads'
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw "gh is not installed; latest.json was not published. Install it, or edit latest.json in $repo by hand."
 }

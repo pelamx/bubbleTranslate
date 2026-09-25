@@ -10,7 +10,7 @@
 #   publish-manifest.sh <linux|macos|windows> <version> <asset-file-name>
 set -euo pipefail
 
-REPO="bubbleTranslate/downloads"
+REPO="pelamx/downloads"
 # Some shells wrap gh in a version manager that greets on stdout; this quiets
 # the common one, and the answer is read from its first `{` either way.
 export MISE_QUIET=1

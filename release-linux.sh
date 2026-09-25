@@ -79,7 +79,7 @@ echo "    needs glibc $NEEDED at most"
 # Started from the newest release's copy rather than whatever is lying here,
 # which is only as fresh as the last Linux release and would put the other
 # platforms' old checksums back.
-gh release download -R bubbleTranslate/downloads -p "$SUMS" -O "$SUMS" --clobber 2>/dev/null || true
+gh release download -R pelamx/downloads -p "$SUMS" -O "$SUMS" --clobber 2>/dev/null || true
 touch "$SUMS"
 grep -v "  $OUT\$" "$SUMS" > "$SUMS.new" || true
 sha256sum "$OUT" >> "$SUMS.new"
@@ -93,7 +93,7 @@ rm -f "$SUMS.new"
 # making it before uploading leaves a window where every installed copy is told
 # about a version it would get a 404 for. The same order release.sh keeps.
 
-REPO="bubbleTranslate/downloads"
+REPO="pelamx/downloads"
 if gh release view "v$VERSION" -R "$REPO" >/dev/null 2>&1; then
     gh release upload "v$VERSION" -R "$REPO" "$OUT" "$SUMS" --clobber
 else

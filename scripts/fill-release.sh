@@ -2,7 +2,7 @@
 #
 # Copies the *other* platforms' current downloads into a release.
 #
-# `https://github.com/bubbleTranslate/downloads/releases/latest/download/<file>`
+# `https://github.com/pelamx/downloads/releases/latest/download/<file>`
 # is one pointer per repository, and it follows whichever release was published
 # last. The three platforms are released separately, on three machines, so the
 # newest release is routinely the only one — and the two platforms missing from
@@ -30,7 +30,7 @@ set -euo pipefail
 
 TAG="${1:-}"
 MINE="${2:-}"
-REPO="bubbleTranslate/downloads"
+REPO="pelamx/downloads"
 
 if [[ -z "$TAG" || -z "$MINE" ]]; then
     echo "usage: $(basename "$0") <tag> <macos|linux|windows>" >&2

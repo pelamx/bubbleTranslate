@@ -99,6 +99,16 @@ correctly, and the status panel and `--check` then showed a permanent failure on
 a backend that was working fine. The phrase is now chosen to differ from the
 language being translated into.
 
+**The downloads have moved.** Every release so far was published under a second
+account, which could no longer be published to; they now live alongside
+everything else, and this is the first release in the new place. The buttons on
+the website point at it, so a fresh install notices nothing.
+
+A copy already running 0.3.5 or older is the one to watch: it looks for new
+versions at the old address. If yours goes quiet and the website shows a
+version newer than the one you have, download it once from there — after that
+the notices come through as usual.
+
 ## 0.3.5 — 2026-09-24
 
 **The headings in the window are bold now.** They were meant to be, and on

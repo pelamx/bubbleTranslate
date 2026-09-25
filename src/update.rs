@@ -19,7 +19,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 const MANIFEST_URL: &str =
-    "https://raw.githubusercontent.com/bubbleTranslate/downloads/main/latest.json";
+    "https://raw.githubusercontent.com/pelamx/downloads/main/latest.json";
 
 /// A build newer than the one running.
 #[derive(Debug, Clone, PartialEq, Eq)]

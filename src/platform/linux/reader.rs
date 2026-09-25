@@ -50,7 +50,7 @@ const MODELS: [Model; 2] = [
 /// repository, marked as a pre-release so it never becomes the one
 /// `/releases/latest/` points at.
 const BASE_URL: &str =
-    "https://github.com/bubbleTranslate/downloads/releases/download/ocr-models-1";
+    "https://github.com/pelamx/downloads/releases/download/ocr-models-1";
 
 /// Where this reader stands on this machine.
 #[derive(Debug, Clone, PartialEq)]

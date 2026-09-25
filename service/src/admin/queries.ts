@@ -165,7 +165,7 @@ export interface Downloads {
  *  calls an hour, and a Worker's outbound address is shared. Null when GitHub
  *  cannot be reached, so the panel says so rather than showing zeros. */
 export async function downloads(env: Env): Promise<Downloads | null> {
-  const url = "https://api.github.com/repos/bubbleTranslate/downloads/releases?per_page=100";
+  const url = "https://api.github.com/repos/pelamx/downloads/releases?per_page=100";
   const cache = caches.default;
   const key = new Request(url);
   let res = await cache.match(key);
@@ -222,7 +222,7 @@ export async function downloads(env: Env): Promise<Downloads | null> {
  *  downloads repository says -- the same file installed copies read, so this
  *  is what "latest" means to them. Null when it cannot be read. */
 export async function published(): Promise<Record<string, string> | null> {
-  const url = "https://raw.githubusercontent.com/bubbleTranslate/downloads/main/latest.json";
+  const url = "https://raw.githubusercontent.com/pelamx/downloads/main/latest.json";
   try {
     // Short-lived: a release should show up here within a minute or two.
     const res = await fetch(url, { cf: { cacheTtl: 60 } } as RequestInit);

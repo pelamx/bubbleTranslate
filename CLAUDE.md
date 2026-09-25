@@ -87,13 +87,20 @@ archive is the signed executable. `latest.json` and every download link point
 at `bubbleTranslate-windows-x64.zip`; the bare `.exe` is uploaded beside it for
 anyone who wants it, and nothing links to it as the primary download.
 
-**The downloads live in `bubbleTranslate/downloads`, not here.** This
-repository holds the source and is private; that one is public, and it is
-where every release asset and `latest.json` are published. An installed copy
-reads `latest.json` from it on startup, so anything that takes it offline or
-renames it stops the update notice for every copy already out there.
+**The downloads live in `pelamx/downloads`, not here.** This repository holds
+the source; that one is public and is where every release asset and
+`latest.json` are published. An installed copy reads `latest.json` from it on
+startup, so anything that takes it offline or renames it stops the update
+notice for every copy already out there. Keeping the two apart is what lets
+this repository be made private again without taking the downloads with it.
 
-Copies of 0.2.7 and older read it from the old address instead —
+They lived in `bubbleTranslate/downloads` until 0.3.6, under a second GitHub
+account that only that account could publish to. That repository is frozen now
+and read-only to us; its assets stay where they are because copies of 0.3.5 and
+older ask it for `latest.json` and will go on doing so for as long as they are
+running. Point nothing new at it.
+
+Copies of 0.2.7 and older read the manifest from a third address —
 `latest.json` at the root of **this** repository. That file is a copy kept by
 `.github/workflows/mirror-manifest.yml`, which follows the downloads
 repository every 15 minutes. Never edit it by hand and never delete it: it
