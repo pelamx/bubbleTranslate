@@ -156,6 +156,8 @@ fn main() -> eframe::Result<()> {
     let background =
         args.iter().any(|a| a == "--background") || config.lock().unwrap().start_in_background;
 
+    platform::set_start_at_login(config.lock().unwrap().start_at_login);
+
     // Asked up front because the answer shapes the whole session: on macOS
     // this is what pops the permission dialog, at most once, and on Linux it
     // is where the compositor's protocols are probed.

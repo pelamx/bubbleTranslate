@@ -36,6 +36,10 @@ pub fn has_indicator() -> bool {
     true
 }
 
+/// Not done on macOS yet: a login item there goes through the bundle and
+/// needs trying on a Mac before it ships. The switch is saved either way.
+pub fn set_start_at_login(_on: bool) {}
+
 /// Opens a URL in whatever the user's browser is.
 ///
 /// The one outward link the app has. Buying happens in a browser and nowhere

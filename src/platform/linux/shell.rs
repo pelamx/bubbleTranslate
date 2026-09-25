@@ -55,6 +55,56 @@ pub fn has_indicator() -> bool {
     INDICATOR.load(Ordering::SeqCst)
 }
 
+/// Marks the autostart entry as ours, so switching it off never deletes a
+/// file the user wrote by hand under the same name.
+const AUTOSTART_MARK: &str = "X-bubbleTranslate-Autostart=true";
+
+/// Writes or removes `~/.config/autostart/bubbleTranslate.desktop`, the
+/// freedesktop way to start at login, which GNOME, KDE, XFCE and most
+/// compositors' session tools honour.
+///
+/// `--background` because a login is not a request for the window; where
+/// there turns out to be no tray the app opens the window anyway, so this can
+/// never start something unreachable.
+pub fn set_start_at_login(on: bool) {
+    let Some(dir) = dirs::config_dir().map(|d| d.join("autostart")) else {
+        return;
+    };
+    let path = dir.join("bubbleTranslate.desktop");
+    let ours = std::fs::read_to_string(&path).is_ok_and(|text| text.contains(AUTOSTART_MARK));
+    if !on {
+        if ours {
+            let _ = std::fs::remove_file(&path);
+        }
+        return;
+    }
+    if path.exists() && !ours {
+        // Someone wrote their own; theirs wins.
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let entry = format!(
+        "[Desktop Entry]\n\
+         Type=Application\n\
+         Name=bubbleTranslate\n\
+         Comment=Select text anywhere and a bubble appears with the translation\n\
+         Exec=\"{}\" --background\n\
+         Icon=bubbleTranslate\n\
+         Terminal=false\n\
+         X-GNOME-Autostart-enabled=true\n\
+         {AUTOSTART_MARK}\n",
+        exe.display()
+    );
+    if std::fs::read_to_string(&path).is_ok_and(|text| text == entry) {
+        return;
+    }
+    if let Err(err) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, entry)) {
+        crate::trace!("autostart: could not write {}: {err}", path.display());
+    }
+}
+
 /// Opens a URL in whatever the user's browser is, and brings it forward.
 ///
 /// The one outward link the app has. Buying happens in a browser and nowhere

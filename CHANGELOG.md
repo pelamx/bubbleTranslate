@@ -13,6 +13,28 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**It starts by itself when you log in.** (Windows, Linux) Until now the app
+stopped with every restart and stayed stopped until you remembered to open it
+again, which most people did not — so the next time there was something to
+translate, nothing happened. It now starts in the background at login, with
+just its tray icon. "Start when I log in" in the window turns it off.
+
+**The bubble tells you when a new version is out.** The notice used to be only
+in the window, and someone who uses the app from the tray never opens it — so
+they stayed on an old version without knowing. Once per session, the first
+bubble now carries a line with the new version and a download link.
+
+**You see the free allowance running out before it does.** With three or fewer
+free translations left for the day, the bubble says how many remain, so the
+limit is no longer a surprise in the middle of reading.
+
+**A first run shows how to use it.** The app does nothing visible until you
+select text somewhere else, which made a first run look like one that did not
+work. Until your first translation, the window opens with a short card saying
+what to do.
+
 ## 0.3.5 — 2026-09-24
 
 **The headings in the window are bold now.** They were meant to be, and on

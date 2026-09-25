@@ -182,6 +182,9 @@ pub fn draw(
             header(ui, &state, &mut cfg, &mut dirty);
             ui.add_space(10.0);
             update_banner(ui);
+            if !cfg.onboarded && state.readiness.ok {
+                first_run_card(ui);
+            }
 
             section(ui, t("Translate", "Çevir", "Traducir"), |ui| {
                 translate_box(ui, &mut state, &cfg)
@@ -388,6 +391,54 @@ fn update_banner(ui: &mut egui::Ui) {
             if ui.button(t("Download", "İndir", "Descargar")).clicked() {
                 crate::shell::open_url(&newer.url);
             }
+        });
+    ui.add_space(14.0);
+}
+
+/// How to use it, until it has been used once. The app shows nothing until
+/// text is selected in another application, so without this a first run can
+/// look like one that did not work.
+fn first_run_card(ui: &mut egui::Ui) {
+    let shortcut = if cfg!(target_os = "macos") {
+        "⌘⇧E"
+    } else {
+        "Ctrl+Shift+E"
+    };
+    egui::Frame::new()
+        .fill(egui::Color32::from_rgb(38, 48, 62))
+        .corner_radius(8.0)
+        .inner_margin(egui::Margin::same(12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(
+                egui::RichText::new(t(
+                    "Try it: select some text in another app",
+                    "Dene: başka bir uygulamada bir metin seç",
+                    "Pruébalo: selecciona un texto en otra app",
+                ))
+                .size(13.0)
+                .color(TEXT_PRIMARY)
+                .strong(),
+            );
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} {shortcut} {}",
+                    t(
+                        "A bubble with the translation appears next to the pointer. For text \
+                         that cannot be selected, press",
+                        "Çeviri, imlecin yanında bir baloncukta çıkar. Seçilemeyen yazı için",
+                        "La traducción aparece en una burbuja junto al puntero. Para texto \
+                         que no se puede seleccionar, pulsa",
+                    ),
+                    t(
+                        "and draw a box around it.",
+                        "tuşlarına bas ve etrafına bir kutu çiz.",
+                        "y dibuja un recuadro alrededor.",
+                    ),
+                ))
+                .size(12.0)
+                .color(TEXT_SECONDARY),
+            );
         });
     ui.add_space(14.0);
 }

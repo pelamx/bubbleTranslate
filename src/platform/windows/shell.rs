@@ -264,6 +264,47 @@ pub fn open_url(url: &str) {
     }
 }
 
+/// Adds this executable to the current user's Run key with `--background`,
+/// or takes it off.
+///
+/// HKCU rather than HKLM, so it needs no administrator and follows only the
+/// user who chose it. The path is rewritten on every start, which is what
+/// keeps the entry right after the exe was moved out of Downloads.
+pub fn set_start_at_login(on: bool) {
+    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::System::Registry::{
+        HKEY_CURRENT_USER, REG_SZ, RegDeleteKeyValueW, RegSetKeyValueW,
+    };
+
+    let key = w!(r"Software\Microsoft\Windows\CurrentVersion\Run");
+    let name = w!("bubbleTranslate");
+    if !on {
+        // Absent is the goal, so "there was nothing to delete" is fine.
+        let _ = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, key, name) };
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let command: Vec<u16> = format!("\"{}\" --background", exe.display())
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let written = unsafe {
+        RegSetKeyValueW(
+            HKEY_CURRENT_USER,
+            key,
+            name,
+            REG_SZ.0,
+            Some(command.as_ptr() as *const std::ffi::c_void),
+            (command.len() * 2) as u32,
+        )
+    };
+    if written != ERROR_SUCCESS {
+        crate::trace!("autostart: could not write the Run key ({written:?})");
+    }
+}
+
 /// Installs the notification area icon.
 pub fn install(ctx: eframe::egui::Context) {
     let _ = WAKE.set(ctx);

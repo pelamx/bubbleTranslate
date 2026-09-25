@@ -32,6 +32,23 @@ mod windows;
 #[cfg(target_os = "windows")]
 pub use windows::{capture, monitor, shell};
 
+/// Makes the app start at login, or stops it doing so. Called at every
+/// startup rather than only when the switch is flipped, so an app that was
+/// moved since keeps pointing its entry at where it is now.
+///
+/// Never from a run with its own home (the integration tests), and never from
+/// a development build unless `BUBBLETRANSLATE_AUTOSTART` asks for it: either
+/// would leave the login pointing at a binary in `target/`.
+pub fn set_start_at_login(on: bool) {
+    if std::env::var_os("BUBBLETRANSLATE_HOME").is_some() {
+        return;
+    }
+    if cfg!(debug_assertions) && std::env::var_os("BUBBLETRANSLATE_AUTOSTART").is_none() {
+        return;
+    }
+    shell::set_start_at_login(on);
+}
+
 /// How the selected text was obtained.
 ///
 /// Worth carrying into the UI: a capture that borrowed the clipboard behaves

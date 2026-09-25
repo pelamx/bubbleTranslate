@@ -439,6 +439,32 @@ pub(super) fn behaviour(ui: &mut egui::Ui, cfg: &mut Config) -> bool {
             .changed();
     }
 
+    // Not offered on macOS until a login item there has been tried on a Mac.
+    if !cfg!(target_os = "macos") {
+        let changed = ui
+            .checkbox(
+                &mut cfg.start_at_login,
+                t(
+                    "Start when I log in",
+                    "Bilgisayar açılınca başlat",
+                    "Iniciar al encender el equipo",
+                ),
+            )
+            .on_hover_text(t(
+                "Starts in the background when you log in, so the bubble is there \
+                     without having to remember to open the app.",
+                "Oturum açınca arka planda başlar; baloncuk, uygulamayı açmayı \
+                     hatırlamana gerek kalmadan hazır olur.",
+                "Arranca en segundo plano al iniciar sesión, así la burbuja está \
+                     lista sin tener que acordarse de abrir la app.",
+            ))
+            .changed();
+        if changed {
+            crate::platform::set_start_at_login(cfg.start_at_login);
+            dirty = true;
+        }
+    }
+
     ui.add_space(8.0);
     let mut scale = cfg.ui_scale * 100.0;
     if slider(

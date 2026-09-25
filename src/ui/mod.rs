@@ -54,6 +54,10 @@ enum State {
     },
     Done {
         result: Translation,
+        /// Free translations left today, when few enough to be worth saying.
+        left: Option<u32>,
+        /// Whether this bubble carries the "new version" line.
+        update: bool,
     },
     Failed {
         errors: Vec<(Provider, TranslateError)>,
@@ -119,6 +123,10 @@ pub struct BubbleApp {
     /// off at the bubble's edge, so this is what buys it room.
     lang_popup_open: bool,
     copied_at: Option<Instant>,
+    /// Set once a bubble has said a new version is out. Once a session is
+    /// enough: it is for someone who never opens the window, which is the only
+    /// other place it is said, and repeating it on every bubble would be a nag.
+    update_announced: bool,
     /// Why selections cannot be watched, when they cannot. Shown in the
     /// bubble's settings panel; the same problem is spelled out at length in
     /// the main window.
@@ -142,6 +150,21 @@ pub struct BubbleApp {
 }
 
 impl BubbleApp {
+    /// Free translations left today when there are few enough (three or
+    /// fewer) that running out is near, so it is no surprise when it comes.
+    /// `None` on Pro, and while there are plenty.
+    fn few_left(&self) -> Option<u32> {
+        // One lock after the other, in the order the engine takes them.
+        let entitlement = self.licensing.license.lock().unwrap().entitlement.clone();
+        let left = self
+            .licensing
+            .quota
+            .lock()
+            .unwrap()
+            .remaining(&entitlement)?;
+        (left <= 3).then_some(left)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         cc: &eframe::CreationContext<'_>,
@@ -182,6 +205,7 @@ impl BubbleApp {
             settings_open: false,
             lang_popup_open: false,
             copied_at: None,
+            update_announced: false,
             readiness_warning,
             readiness_checked: Instant::now(),
             reopen_hooked: false,
@@ -209,7 +233,23 @@ impl BubbleApp {
                         result.text.clone(),
                         result.provider,
                     );
-                    self.state = State::Done { result };
+                    // The first translation retires the window's how-to card.
+                    // Saved here rather than by the window, which may never
+                    // be open to notice.
+                    {
+                        let mut cfg = self.config.lock().unwrap();
+                        if !cfg.onboarded {
+                            cfg.onboarded = true;
+                            let _ = cfg.save();
+                        }
+                    }
+                    let update = !self.update_announced && crate::update::available().is_some();
+                    self.update_announced |= update;
+                    self.state = State::Done {
+                        result,
+                        left: self.few_left(),
+                        update,
+                    };
                     self.shown_at = Instant::now();
                 }
                 UiEvent::Failed { errors } => {

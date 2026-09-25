@@ -258,6 +258,18 @@ pub struct Config {
     /// exists. Ignored where nothing can bring the window back: starting
     /// invisible with no indicator would be starting unreachable.
     pub start_in_background: bool,
+    /// Start when the user logs in, in the background.
+    ///
+    /// A translator is only useful if it is already running when the text
+    /// turns up, and one that has to be remembered after every restart mostly
+    /// is not. On by default for that reason; the switch is in the window.
+    /// Honoured on Windows and Linux; see `platform::set_start_at_login`.
+    pub start_at_login: bool,
+    /// Set after the first translation. Until then the window opens with a
+    /// short "how to use it" card, because the app does nothing visible until
+    /// text is selected somewhere else, and a first run that shows no sign of
+    /// working is where most people stop.
+    pub onboarded: bool,
     /// Seconds of no interaction before the bubble hides itself. 0 keeps it up
     /// until it is closed or replaced. The countdown pauses while the pointer
     /// is over the bubble.
@@ -300,6 +312,8 @@ impl Default for Config {
             clipboard_fallback: true,
             watch_clipboard: false,
             start_in_background: false,
+            start_at_login: true,
+            onboarded: false,
             auto_hide_secs: 12,
             font_size: 16.0,
             // The type scale here was drawn against macOS, whose system

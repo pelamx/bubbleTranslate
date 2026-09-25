@@ -169,6 +169,54 @@ impl BubbleApp {
         ui.add_space(4.0);
         dismiss |= self.draw_footer(ui);
 
+        if let State::Done { left, update, .. } = &self.state {
+            if let Some(left) = *left {
+                ui.add_space(2.0);
+                ui.label(
+                    egui::RichText::new(match crate::i18n::lang() {
+                        crate::i18n::UiLang::En if left == 1 => {
+                            "1 free translation left today".to_string()
+                        }
+                        crate::i18n::UiLang::En => format!("{left} free translations left today"),
+                        crate::i18n::UiLang::Tr => format!("Bugün {left} ücretsiz çeviri kaldı"),
+                        crate::i18n::UiLang::Es if left == 1 => {
+                            "Queda 1 traducción gratis hoy".to_string()
+                        }
+                        crate::i18n::UiLang::Es => {
+                            format!("Quedan {left} traducciones gratis hoy")
+                        }
+                    })
+                    .size(11.5)
+                    .color(pal().text_muted),
+                );
+            }
+            if *update && let Some(newer) = crate::update::available() {
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} {}",
+                            t("New version:", "Yeni sürüm:", "Versión nueva:"),
+                            newer.version
+                        ))
+                        .size(11.5)
+                        .color(pal().text_secondary),
+                    );
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(t("Download", "İndir", "Descargar")).size(12.0),
+                            )
+                            .frame(false),
+                        )
+                        .clicked()
+                    {
+                        shell::open_url(&newer.url);
+                    }
+                });
+            }
+        }
+
         if self.settings_open {
             ui.add_space(6.0);
             self.draw_settings(ui);
