@@ -106,10 +106,6 @@ pub enum UiEvent {
     },
 }
 
-/// Phrase used to probe the backends. Short, unambiguously non-English, and
-/// cheap against every provider's quota.
-const PROBE_TEXT: &str = "Merhaba dünya";
-
 pub struct Engine {
     tx: Sender<Request>,
 }
@@ -257,11 +253,12 @@ fn run(
                 continue;
             }
             Request::TestProviders => {
-                let statuses = [Provider::Google, Provider::MyMemory, Provider::DeepL]
-                    .into_iter()
+                let statuses = Provider::ALL
+                    .iter()
+                    .copied()
                     .map(|provider| {
                         let outcome = translator
-                            .translate_with(provider, PROBE_TEXT, &cfg)
+                            .translate_with(provider, crate::translate::probe_text(&cfg.target_lang), &cfg)
                             .map(|t| t.text)
                             .map_err(|e| e.to_string());
                         (provider, outcome)

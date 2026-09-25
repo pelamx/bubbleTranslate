@@ -15,14 +15,32 @@ pub enum Provider {
     Google,
     MyMemory,
     DeepL,
+    /// A language model rather than a phrase translator, asked with the user's
+    /// own API key.
+    ///
+    /// It is in the chain for the cases the other three are worst at: idiom,
+    /// text whose meaning depends on the sentence around it, and above all
+    /// text that came out of the screen reader, where a word missing its
+    /// accents makes a phrase translator confidently wrong. It also has no
+    /// length limit worth worrying about, which is where MyMemory gives up.
+    Claude,
 }
 
 impl Provider {
+    /// Every provider, in the order a fresh install tries them.
+    pub const ALL: &'static [Provider] = &[
+        Provider::Google,
+        Provider::MyMemory,
+        Provider::DeepL,
+        Provider::Claude,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
             Provider::Google => "Google",
             Provider::MyMemory => "MyMemory",
             Provider::DeepL => "DeepL",
+            Provider::Claude => "Claude",
         }
     }
 }
@@ -221,6 +239,9 @@ pub struct Config {
     /// DeepL API key. Free keys end in ":fx"; the endpoint is chosen from that
     /// suffix. Without a key DeepL is skipped even if listed in `providers`.
     pub deepl_api_key: String,
+    /// Anthropic API key. Without one Claude is skipped even if listed in
+    /// `providers`, exactly as DeepL is.
+    pub anthropic_api_key: String,
     /// Optional contact address for MyMemory. Anonymous use is capped at ~5k
     /// chars/day; supplying an address raises it to ~50k.
     pub mymemory_email: String,
@@ -315,8 +336,18 @@ impl Default for Config {
             // turns the flip off by itself rather than needing a second value
             // meaning "off".
             alt_lang: "en".to_string(),
-            providers: vec![Provider::Google, Provider::MyMemory, Provider::DeepL],
+            providers: vec![
+                Provider::Google,
+                Provider::MyMemory,
+                Provider::DeepL,
+                // Last, so adding a key never quietly starts spending it:
+                // reaching Claude means the free providers all failed. Someone
+                // who wants it answering first moves it up in the window, which
+                // is what the arrows beside the list are for.
+                Provider::Claude,
+            ],
             deepl_api_key: String::new(),
+            anthropic_api_key: String::new(),
             mymemory_email: String::new(),
             license_key: String::new(),
             auto_translate: true,
@@ -384,8 +415,8 @@ impl Config {
             let _ = cfg.save();
             return cfg;
         };
-        match toml::from_str(&raw) {
-            Ok(cfg) => cfg,
+        match toml::from_str::<Config>(&raw) {
+            Ok(cfg) => cfg.with_every_provider(),
             Err(err) => {
                 eprintln!(
                     "bubbleTranslate: {} is invalid ({err}); using defaults",
@@ -394,6 +425,24 @@ impl Config {
                 Config::default()
             }
         }
+    }
+
+    /// Appends any provider this version knows about that the stored `providers`
+    /// list does not mention.
+    ///
+    /// The list is written out in full, so a config saved before a provider
+    /// existed pins the old set forever — and the window only offers what is in
+    /// the list, so a new backend would be unreachable for everyone who had
+    /// already run the app. Appended rather than inserted: a user's own order is
+    /// theirs, and the addition goes last where it changes nothing until it is
+    /// moved or keyed.
+    fn with_every_provider(mut self) -> Self {
+        for provider in Provider::ALL {
+            if !self.providers.contains(provider) {
+                self.providers.push(*provider);
+            }
+        }
+        self
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
@@ -411,7 +460,11 @@ impl Config {
         self.providers
             .iter()
             .copied()
-            .filter(|p| *p != Provider::DeepL || !self.deepl_api_key.trim().is_empty())
+            .filter(|p| match p {
+                Provider::DeepL => !self.deepl_api_key.trim().is_empty(),
+                Provider::Claude => !self.anthropic_api_key.trim().is_empty(),
+                _ => true,
+            })
             .collect()
     }
 }
@@ -488,5 +541,32 @@ mod tests {
             let back: Config = toml::from_str(&toml::to_string_pretty(&cfg).unwrap()).unwrap();
             assert_eq!(back.theme, *theme);
         }
+    }
+    /// The trap a new provider walks into: the list is written out in full, so
+    /// a config saved by an older version pins the old set, and the window only
+    /// offers what the list holds. Without this, nobody who had already run the
+    /// app could ever reach a newly added backend.
+    #[test]
+    fn a_provider_added_later_reaches_an_older_config() {
+        let old = Config {
+            providers: vec![Provider::MyMemory, Provider::Google],
+            ..Config::default()
+        }
+        .with_every_provider();
+
+        // Their order is theirs; the addition goes last.
+        assert_eq!(
+            old.providers,
+            vec![
+                Provider::MyMemory,
+                Provider::Google,
+                Provider::DeepL,
+                Provider::Claude
+            ]
+        );
+
+        // And it is idempotent, because it runs on every load.
+        let again = old.clone().with_every_provider();
+        assert_eq!(again.providers, old.providers);
     }
 }

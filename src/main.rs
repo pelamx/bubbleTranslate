@@ -463,13 +463,13 @@ fn translate_once(text: &str) -> i32 {
     }
 }
 
-/// `bubbleTranslate --check`: probes each backend independently with a fixed phrase
-/// and reports which ones answer. Exits non-zero if none do.
+/// `bubbleTranslate --check`: probes each backend independently and reports
+/// which ones answer. Exits non-zero if none do.
 fn check_providers() -> i32 {
-    const PROBE: &str = "Merhaba dünya";
     // Same reason as in `translate_once`: this command writes the config, so
     // it must write the counter too.
     let (cfg, _quota) = load_state();
+    let probe = translate::probe_text(&cfg.target_lang);
     let translator = translate::Translator::new();
     let mut healthy = 0;
 
@@ -477,12 +477,8 @@ fn check_providers() -> i32 {
     // something is wrong, and the answer is no use without knowing which
     // build produced it.
     println!(concat!("bubbleTranslate ", env!("CARGO_PKG_VERSION")));
-    println!("probe: \"{PROBE}\" → {}\n", cfg.target_lang);
-    for provider in [
-        config::Provider::Google,
-        config::Provider::MyMemory,
-        config::Provider::DeepL,
-    ] {
+    println!("probe: \"{probe}\" → {}\n", cfg.target_lang);
+    for provider in config::Provider::ALL.iter().copied() {
         // "FAILED" is reserved for a provider the chain would actually have
         // used; one that is off or unconfigured is merely skipped.
         let in_chain = cfg.active_providers().contains(&provider);
@@ -493,7 +489,7 @@ fn check_providers() -> i32 {
             .map(|i| format!("#{}", i + 1))
             .unwrap_or_else(|| "off".to_string());
 
-        match translator.translate_with(provider, PROBE, &cfg) {
+        match translator.translate_with(provider, probe, &cfg) {
             Ok(result) => {
                 healthy += 1;
                 println!(

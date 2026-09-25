@@ -166,9 +166,14 @@ pub(super) fn providers(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Conf
                     .color(TEXT_PRIMARY),
             );
 
-            // DeepL without a key never reaches the network, so say so here
-            // rather than letting it look like a silent failure.
-            if *provider == Provider::DeepL && cfg.deepl_api_key.trim().is_empty() {
+            // A keyed provider without its key never reaches the network, so
+            // say so here rather than letting it look like a silent failure.
+            let unkeyed = match provider {
+                Provider::DeepL => cfg.deepl_api_key.trim().is_empty(),
+                Provider::Claude => cfg.anthropic_api_key.trim().is_empty(),
+                _ => false,
+            };
+            if unkeyed {
                 ui.label(
                     egui::RichText::new(t(
                         "(skipped — no API key)",
@@ -228,6 +233,52 @@ pub(super) fn providers(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Conf
             dirty = true;
         }
     });
+
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(t(
+                "Anthropic API key",
+                "Anthropic API anahtarı",
+                "Clave API de Anthropic",
+            ))
+            .size(12.5)
+            .color(TEXT_SECONDARY),
+        );
+        if ui
+            .add(
+                egui::TextEdit::singleline(&mut cfg.anthropic_api_key)
+                    .password(true)
+                    .hint_text(t(
+                        "optional — billed to your own account",
+                        "isteğe bağlı — kendi hesabınızdan ücretlenir",
+                        "opcional — se cobra a tu propia cuenta",
+                    ))
+                    .desired_width(220.0),
+            )
+            .lost_focus()
+        {
+            dirty = true;
+        }
+    });
+    ui.label(
+        egui::RichText::new(t(
+            "Claude reads a sentence rather than a phrase, which is what the others \
+             get wrong — idiom, and text read off the screen with its accents missing. \
+             It is last in the list, so it only answers when the free ones fail; move \
+             it to the top to have it answer first.",
+            "Claude cümleyi bir bütün olarak okur; diğerlerinin yanıldığı yer de burası \
+             — deyimler ve ekrandan okunup harfleri eksik kalan metinler. Listede son \
+             sırada, yani yalnızca ücretsiz olanlar başarısız olduğunda yanıtlar; ilk \
+             sırada yanıtlamasını isterseniz yukarı taşıyın.",
+            "Claude lee la frase completa, que es donde los demás fallan: modismos y \
+             texto leído de la pantalla al que le faltan los acentos. Está al final de \
+             la lista, así que solo responde cuando fallan los gratuitos; súbelo para \
+             que responda primero.",
+        ))
+        .size(11.0)
+        .color(TEXT_MUTED),
+    );
 
     ui.add_space(6.0);
     ui.horizontal(|ui| {

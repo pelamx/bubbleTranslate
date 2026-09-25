@@ -50,6 +50,34 @@ starts as English, so this works without changing anything.
 Set it to *Leave it alone* and the old behaviour returns — except that the
 round trip is no longer charged for, because nothing was translated.
 
+**Claude can now do the translating, with your own API key.** The three
+backends that ship are phrase translators, and they are weakest exactly where
+this app now spends much of its time: idiom, a sentence whose meaning depends on
+the one before it, and text read off the screen with its accents missing, which
+a phrase translator renders confidently wrong. A language model reads the
+sentence instead.
+
+Paste an Anthropic key into the window and Claude joins the list. It sits last,
+so it only answers when the free ones fail — including when a selection is too
+long for MyMemory, which until now left long text with no fallback at all. Move
+it to the top with the arrows to have it answer first. Nothing is sent anywhere
+new without a key, and the cost is billed to your own account, not through
+bubbleTranslate.
+
+**Providers added in an update now reach people who already had the app.** The
+list of backends is stored in full, so a settings file written by an earlier
+version pinned the old set — and since the window only offers what the list
+holds, a newly added backend would have been invisible to everyone but fresh
+installs. Anything missing is now added to the end of the list, leaving an order
+you chose yourself alone.
+
+**The provider test no longer reports MyMemory as broken when you translate into
+Turkish.** It probed with a Turkish phrase whatever the target language was, so
+for Turkish it was asking for Turkish-to-Turkish — which MyMemory refuses,
+correctly, and the status panel and `--check` then showed a permanent failure on
+a backend that was working fine. The phrase is now chosen to differ from the
+language being translated into.
+
 ## 0.3.5 — 2026-09-24
 
 **The headings in the window are bold now.** They were meant to be, and on
