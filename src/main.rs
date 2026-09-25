@@ -448,7 +448,7 @@ fn translate_once(text: &str) -> i32 {
                 "[{}] {} → {}",
                 result.provider.label(),
                 result.source_lang,
-                cfg.target_lang
+                result.target_lang
             );
             println!("{}", result.text);
             0

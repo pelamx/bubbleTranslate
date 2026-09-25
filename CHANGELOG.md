@@ -35,6 +35,21 @@ select text somewhere else, which made a first run look like one that did not
 work. Until your first translation, the window opens with a short card saying
 what to do.
 
+**Selecting a word in your own language now translates it into the other one.**
+Until now, if you translate into Turkish and selected Turkish text, the bubble
+handed you back the same words — the providers were asked for Turkish-to-Turkish
+and answered, correctly and uselessly, with the input. Worse, it counted against
+the ten free translations a day, so reading in two languages quietly spent the
+allowance on nothing.
+
+There is now a second language, set in the window under the target language:
+*…but if it is already that language*. Set it to English and a Turkish selection
+comes back in English, while English selections keep coming back in Turkish. It
+starts as English, so this works without changing anything.
+
+Set it to *Leave it alone* and the old behaviour returns — except that the
+round trip is no longer charged for, because nothing was translated.
+
 ## 0.3.5 — 2026-09-24
 
 **The headings in the window are bold now.** They were meant to be, and on

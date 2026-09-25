@@ -37,6 +37,54 @@ pub(super) fn languages(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Conf
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.label(
+            egui::RichText::new(t(
+                "…but if it is already that language",
+                "…ama zaten o dildeyse",
+                "…pero si ya está en ese idioma",
+            ))
+            .size(12.5)
+            .color(TEXT_SECONDARY),
+        );
+        let current = cfg.alt_lang.clone();
+        let off = t("Leave it alone", "Dokunma", "Dejarlo así");
+        // Pointing this at the target language is the same as turning it off,
+        // so it is shown as off rather than as a language that does nothing.
+        let label = if current.trim().is_empty() || current.trim() == cfg.target_lang.trim() {
+            off.to_string()
+        } else {
+            language_name(&current).to_string()
+        };
+        let mut picked: Option<String> = None;
+        egui::ComboBox::from_id_salt("main-alt")
+            .selected_text(label)
+            .width(170.0)
+            .show_ui(ui, |ui| {
+                if ui.selectable_label(current.is_empty(), off).clicked() {
+                    picked = Some(String::new());
+                }
+                for (code, name) in LANGUAGES {
+                    // The target itself would mean "flip to the language it is
+                    // already in", which is the case this exists to answer.
+                    if *code == cfg.target_lang.trim() {
+                        continue;
+                    }
+                    if ui.selectable_label(*code == current, *name).clicked() {
+                        picked = Some((*code).to_string());
+                    }
+                }
+            });
+        if let Some(code) = picked
+            && code != cfg.alt_lang
+        {
+            cfg.alt_lang = code;
+            dirty = true;
+            let _ = state.requests.send(Request::Retranslate);
+        }
+    });
+
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.label(
             egui::RichText::new(t("Source language", "Kaynak dil", "Idioma de origen"))
                 .size(12.5)
                 .color(TEXT_SECONDARY),

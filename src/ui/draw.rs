@@ -240,7 +240,10 @@ impl BubbleApp {
                     "{} · {} → {}",
                     result.provider.label(),
                     language_name(&result.source_lang),
-                    language_name(&target),
+                    // The result's own target, not the configured one: the two
+                    // differ when the selection was already in the target
+                    // language and the alternative was used instead.
+                    language_name(&result.target_lang),
                 ),
                 _ => format!("→ {}", language_name(&target)),
             };

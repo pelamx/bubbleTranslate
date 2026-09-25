@@ -17,7 +17,22 @@ pub struct Translation {
     /// Language the backend believed the input was in. "auto" when it did not
     /// say and we could not infer one.
     pub source_lang: String,
+    /// Language it was actually translated *into*.
+    ///
+    /// Carried rather than read back off the config because the two can
+    /// differ: a selection already in the target language is translated into
+    /// [`Config::alt_lang`] instead, and a bubble captioned from the config
+    /// would name the language the text is not in.
+    pub target_lang: String,
     pub provider: Provider,
+    /// The text came back in the language it went out in, and there was no
+    /// second language to fall back to — so nothing was translated.
+    ///
+    /// The providers are not wrong to do this: asked for tr→tr they answer
+    /// with the input, which is the correct answer to the question. It is the
+    /// question that was pointless, and the engine reads this to keep such a
+    /// round trip from spending the day's allowance. See [`Config::alt_lang`].
+    pub echoed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -86,7 +101,7 @@ impl Translator {
 
         for provider in cfg.active_providers() {
             match self.translate_with(provider, text, cfg) {
-                Ok(translation) => return Ok(translation),
+                Ok(translation) => return Ok(self.resolve_echo(translation, text, cfg)),
                 Err(err) => failures.push((provider, err)),
             }
         }
@@ -98,6 +113,46 @@ impl Translator {
             ));
         }
         Err(failures)
+    }
+
+    /// Answers the case where the selection was already in the target
+    /// language, by asking for [`Config::alt_lang`] instead.
+    ///
+    /// Done here rather than before the first request because nothing knows
+    /// the language until a provider says so: `source_lang` defaults to
+    /// "auto", and detection is the providers\' job. The cost is one wasted
+    /// round trip in this case only, which is cheaper than asking every
+    /// selection to be detected twice.
+    fn resolve_echo(&self, first: Translation, text: &str, cfg: &Config) -> Translation {
+        let target = cfg.target_lang.trim();
+        if !same_language(&first.source_lang, target) {
+            return first;
+        }
+        let alt = cfg.alt_lang.trim();
+        if alt.is_empty() || same_language(alt, target) {
+            return Translation {
+                echoed: true,
+                ..first
+            };
+        }
+        // The chain is walked again from the top rather than re-asking the
+        // provider that just answered: this is a different language pair, and
+        // the one that serves it best is not necessarily the same one.
+        let flipped = Config {
+            target_lang: alt.to_string(),
+            ..cfg.clone()
+        };
+        for provider in flipped.active_providers() {
+            if let Ok(translation) = self.translate_with(provider, text, &flipped)
+                && !same_language(&translation.source_lang, alt)
+            {
+                return translation;
+            }
+        }
+        Translation {
+            echoed: true,
+            ..first
+        }
     }
 
     /// Asks one specific backend, bypassing the chain. Used by `--check` to
@@ -154,6 +209,8 @@ impl Translator {
                 Ok(body) => match parse_google(&body) {
                     Ok((translated, detected)) => {
                         return Ok(Translation {
+                            target_lang: target.to_string(),
+                            echoed: false,
                             text: translated,
                             source_lang: if detected.is_empty() {
                                 sl.to_string()
@@ -176,6 +233,8 @@ impl Translator {
                             && let Ok((translated, detected)) = parse_google(&body)
                         {
                             return Ok(Translation {
+                                target_lang: target.to_string(),
+                                echoed: false,
                                 text: translated,
                                 source_lang: if detected.is_empty() {
                                     sl.to_string()
@@ -286,6 +345,8 @@ impl Translator {
         }
 
         Ok(Translation {
+            target_lang: target.to_string(),
+            echoed: false,
             text: decode_html_entities(&translated),
             source_lang: json
                 .pointer("/responseData/detectedLanguage")
@@ -383,6 +444,8 @@ impl Translator {
         }
 
         Ok(Translation {
+            target_lang: target.to_string(),
+            echoed: false,
             text: translated,
             source_lang: first
                 .get("detected_source_language")
@@ -462,6 +525,23 @@ fn parse_google(body: &str) -> Result<(String, String), TranslateError> {
 }
 
 /// DeepL wants uppercase codes and is picky about the ones with variants.
+/// Whether two language codes name the same language.
+///
+/// Compared by base subtag and case-insensitively, so "tr", "TR" and "tr-TR"
+/// are one language. "auto" matches nothing: a provider that did not detect
+/// anything must not be read as agreeing with the target.
+fn same_language(a: &str, b: &str) -> bool {
+    let base = |code: &str| {
+        code.trim()
+            .split(['-', '_'])
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase()
+    };
+    let (a, b) = (base(a), base(b));
+    !a.is_empty() && a != "auto" && a == b
+}
+
 fn deepl_target(code: &str) -> Option<String> {
     let base = code.split('-').next().unwrap_or(code).to_ascii_lowercase();
     let mapped = match base.as_str() {
@@ -667,5 +747,73 @@ mod tests {
         );
         // `&amp;lt;` is a literal "&lt;" in the source text, not a "<".
         assert_eq!(decode_html_entities("&amp;lt;"), "&lt;");
+    }
+    /// A code with a region, a different case and the same language are one
+    /// language; "auto" is not a language at all.
+    #[test]
+    fn language_codes_compare_by_their_base_subtag() {
+        assert!(same_language("tr", "tr"));
+        assert!(same_language("TR", "tr"));
+        assert!(same_language("tr-TR", "tr"));
+        assert!(same_language("pt_BR", "pt"));
+        assert!(!same_language("tr", "en"));
+        // The provider did not detect anything. Reading that as "it matches"
+        // would send every undetected selection down the flip path.
+        assert!(!same_language("auto", "auto"));
+        assert!(!same_language("auto", "en"));
+        assert!(!same_language("", "en"));
+    }
+
+    fn answered(source_lang: &str) -> Translation {
+        Translation {
+            text: "whatever came back".into(),
+            source_lang: source_lang.into(),
+            target_lang: "tr".into(),
+            provider: Provider::Google,
+            echoed: false,
+        }
+    }
+
+    /// The ordinary case: nothing to reconsider, and no second request.
+    #[test]
+    fn a_real_translation_is_left_alone() {
+        let cfg = Config {
+            target_lang: "tr".into(),
+            alt_lang: "en".into(),
+            ..Config::default()
+        };
+        let out = Translator::new().resolve_echo(answered("en"), "hello", &cfg);
+        assert!(!out.echoed);
+        assert_eq!(out.text, "whatever came back");
+    }
+
+    /// The defect this exists for: tr→tr answered with the input, and no other
+    /// language to ask for, so it is marked as not a translation. The engine
+    /// reads that and does not charge — see `charges` there.
+    #[test]
+    fn the_same_language_with_no_alternative_is_not_a_translation() {
+        for alt in ["", "   ", "tr", "TR", "tr-TR"] {
+            let cfg = Config {
+                target_lang: "tr".into(),
+                alt_lang: alt.into(),
+                ..Config::default()
+            };
+            let out = Translator::new().resolve_echo(answered("tr"), "merhaba", &cfg);
+            assert!(out.echoed, "alt_lang {alt:?} should leave nothing translated");
+        }
+    }
+
+    /// An undetected language must not be mistaken for the target and sent
+    /// down the flip path, which would cost a second round trip on every
+    /// selection a provider declined to identify.
+    #[test]
+    fn an_undetected_language_is_not_treated_as_the_target() {
+        let cfg = Config {
+            target_lang: "auto".into(),
+            alt_lang: "en".into(),
+            ..Config::default()
+        };
+        let out = Translator::new().resolve_echo(answered("auto"), "?", &cfg);
+        assert!(!out.echoed);
     }
 }

@@ -412,7 +412,7 @@ fn run(
             Ok(result) => {
                 // Counted here rather than above: a translation nobody
                 // received is not one the user should have paid for.
-                if chargeable {
+                if charges(chargeable, &result) {
                     licensing.quota.lock().unwrap().record(&text);
                 }
                 crate::trace!(
@@ -557,6 +557,18 @@ fn gate(verdict: Verdict, at: Option<(f64, f64)>) -> Gate {
     }
 }
 
+/// Whether a finished translation moves the day's counter.
+///
+/// Two things have to hold. The request has to be a metered one — switching
+/// the target language on a selection already translated is the same
+/// translation, not another. And something has to have actually been
+/// translated: a provider asked for tr→tr answers with the input, and
+/// charging for that spends someone's day on their own words. See
+/// [`Translation::echoed`].
+fn charges(chargeable: bool, result: &Translation) -> bool {
+    chargeable && !result.echoed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -685,5 +697,32 @@ mod tests {
             Duration::from_millis(100),
         );
         assert!(matches!(settled, Settled::Superseded(Request::Retranslate)));
+    }
+    fn came_back(echoed: bool) -> Translation {
+        Translation {
+            text: "sonuç".into(),
+            source_lang: "en".into(),
+            target_lang: "tr".into(),
+            provider: Provider::Google,
+            echoed,
+        }
+    }
+
+    /// The whole charging matrix, which had no test of its own: the quota
+    /// module was well covered, but *when the engine calls it* was not, and
+    /// that is the half that decides whether someone's day gets spent.
+    #[test]
+    fn only_a_real_translation_on_a_metered_request_is_charged() {
+        // The ordinary paid case.
+        assert!(charges(true, &came_back(false)));
+
+        // Already in the target language and no second language to try: the
+        // user got their own words back, so the day must not move.
+        assert!(!charges(true, &came_back(true)));
+
+        // Re-reading the same selection in another language is the same
+        // translation, and never costs a second one.
+        assert!(!charges(false, &came_back(false)));
+        assert!(!charges(false, &came_back(true)));
     }
 }

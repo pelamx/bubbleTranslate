@@ -205,6 +205,17 @@ pub struct Config {
     pub target_lang: String,
     /// Source language, or "auto" to let the provider detect it.
     pub source_lang: String,
+    /// Where to translate to when the text is *already* in `target_lang`.
+    ///
+    /// Without this, selecting a word in your own language spends a
+    /// translation to hand you back the same words: the providers are asked
+    /// for tr→tr and answer, correctly and uselessly, with the input. Someone
+    /// who reads in two languages wants the other one, and which one that is
+    /// cannot be guessed from the selection.
+    ///
+    /// Empty, or equal to `target_lang`, turns the flip off; the translation
+    /// is then not charged for, because nothing was translated.
+    pub alt_lang: String,
     /// Failover order. Google first by default: no key, no quota to register.
     pub providers: Vec<Provider>,
     /// DeepL API key. Free keys end in ":fx"; the endpoint is chosen from that
@@ -299,6 +310,11 @@ impl Default for Config {
         Self {
             target_lang: "en".to_string(),
             source_lang: "auto".to_string(),
+            // English, which is the other language for most of the people this
+            // is for: the default target is already English, and that case
+            // turns the flip off by itself rather than needing a second value
+            // meaning "off".
+            alt_lang: "en".to_string(),
             providers: vec![Provider::Google, Provider::MyMemory, Provider::DeepL],
             deepl_api_key: String::new(),
             mymemory_email: String::new(),
