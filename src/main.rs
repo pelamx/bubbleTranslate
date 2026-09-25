@@ -20,6 +20,7 @@
 
 mod config;
 mod engine;
+mod health;
 mod i18n;
 mod ipc;
 mod license;
@@ -106,6 +107,9 @@ fn main() -> eframe::Result<()> {
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!(concat!("bubbleTranslate ", env!("CARGO_PKG_VERSION")));
         std::process::exit(0);
+    }
+    if args.iter().any(|a| a == "--health") {
+        std::process::exit(show_health());
     }
     if args.iter().any(|a| a == "--check") {
         std::process::exit(check_providers());
@@ -461,6 +465,30 @@ fn translate_once(text: &str) -> i32 {
             1
         }
     }
+}
+
+/// `bubbleTranslate --health`: what each backend actually did today.
+///
+/// Distinct from `--check`, which asks them right now. This is the record of
+/// real translations, and it is the one that answers "has the default provider
+/// been failing?" — a question a live probe cannot, because it passes the
+/// moment the endpoint recovers.
+fn show_health() -> i32 {
+    let today = health::Health::load().today();
+    if today.is_empty() {
+        println!("no translations yet today");
+        return 0;
+    }
+    println!("today, per backend:\n");
+    for (provider, tally) in today {
+        println!(
+            "  {:<9} {:>4} answered   {:>4} failed",
+            provider.label(),
+            tally.ok,
+            tally.failed
+        );
+    }
+    0
 }
 
 /// `bubbleTranslate --check`: probes each backend independently and reports

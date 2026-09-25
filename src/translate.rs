@@ -278,11 +278,32 @@ impl Translator {
         target: &str,
         email: &str,
     ) -> Result<Translation, TranslateError> {
+        // Over the per-query limit, this asks once per piece and joins the
+        // answers. Line breaks inside the selection are not preserved by the
+        // join, which is the right trade for a fallback: the alternative was
+        // no translation at all.
         if text.len() > MYMEMORY_MAX_BYTES {
-            return Err(TranslateError::Unavailable(format!(
-                "selection is {} bytes, MyMemory accepts {MYMEMORY_MAX_BYTES}",
-                text.len()
-            )));
+            let pieces = chunks(text, MYMEMORY_MAX_BYTES);
+            if pieces.len() < 2 {
+                return Err(TranslateError::Unavailable(format!(
+                    "selection is {} bytes and cannot be split for MyMemory",
+                    text.len()
+                )));
+            }
+            let mut parts = Vec::with_capacity(pieces.len());
+            let mut detected = None;
+            for piece in pieces {
+                let part = self.mymemory(piece, source, target, email)?;
+                detected.get_or_insert(part.source_lang);
+                parts.push(part.text);
+            }
+            return Ok(Translation {
+                text: parts.join(" "),
+                source_lang: detected.unwrap_or_else(|| "auto".to_string()),
+                target_lang: target.to_string(),
+                provider: Provider::MyMemory,
+                echoed: false,
+            });
         }
         let sl = if source.is_empty() || source == "auto" {
             MYMEMORY_AUTODETECT
@@ -650,6 +671,43 @@ fn parse_google(body: &str) -> Result<(String, String), TranslateError> {
 }
 
 /// DeepL wants uppercase codes and is picky about the ones with variants.
+/// Splits text into pieces of at most `max` bytes, breaking at a sentence end
+/// where there is one, at a space otherwise, and at a character boundary only
+/// as a last resort.
+///
+/// Exists so MyMemory can still answer for a long selection. Its limit is per
+/// query rather than per day, so a selection over it used to take the whole
+/// fallback out: above 500 bytes, with no key for the other two, the chain was
+/// Google and nothing behind it.
+fn chunks(text: &str, max: usize) -> Vec<&str> {
+    let mut pieces = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        if rest.len() <= max {
+            pieces.push(rest);
+            break;
+        }
+        // The widest prefix that fits, ending on a character boundary.
+        let mut end = max;
+        while end > 0 && !rest.is_char_boundary(end) {
+            end -= 1;
+        }
+        let window = &rest[..end];
+        let cut = window
+            .rfind(['.', '!', '?', '\n'])
+            .map(|i| i + 1)
+            .or_else(|| window.rfind(' ').map(|i| i + 1))
+            .unwrap_or(end);
+        let (piece, tail) = rest.split_at(cut);
+        let piece = piece.trim();
+        if !piece.is_empty() {
+            pieces.push(piece);
+        }
+        rest = tail.trim_start();
+    }
+    pieces
+}
+
 /// A short phrase to probe a provider with, in a language that is not the one
 /// being translated into.
 ///
@@ -819,12 +877,17 @@ mod tests {
         let cfg = Config {
             providers: vec![Provider::MyMemory, Provider::DeepL],
             deepl_api_key: "abc:fx".into(),
+            // Persian: a language MyMemory will not pair with itself and DeepL
+            // does not offer as a target at all.
+            source_lang: "fa".into(),
             target_lang: "fa".into(),
             ..Config::default()
         };
-        let long = "x".repeat(MYMEMORY_MAX_BYTES + 1);
-
-        let failures = Translator::new().translate(&long, &cfg).unwrap_err();
+        // Both refusals are decided before either provider is asked, so this
+        // walks the chain without touching the network. It used to lean on
+        // MyMemory's length limit, which no longer refuses -- a long selection
+        // is split and sent in pieces.
+        let failures = Translator::new().translate("anything", &cfg).unwrap_err();
         let order: Vec<Provider> = failures.iter().map(|(p, _)| *p).collect();
         assert_eq!(order, vec![Provider::MyMemory, Provider::DeepL]);
         assert!(
@@ -832,7 +895,12 @@ mod tests {
                 .iter()
                 .all(|(_, e)| matches!(e, TranslateError::Unavailable(_)))
         );
-        assert!(failures[0].1.to_string().contains("MyMemory accepts 500"));
+        assert!(
+            failures[0]
+                .1
+                .to_string()
+                .contains("source and target are the same language")
+        );
         assert!(
             failures[1]
                 .1
@@ -1073,5 +1141,52 @@ mod tests {
                 "probing a {code} target with {phrase_lang} text asks for {code}->{code}"
             );
         }
+    }
+    #[test]
+    fn short_text_is_one_piece() {
+        assert_eq!(chunks("merhaba dünya", 500), vec!["merhaba dünya"]);
+    }
+
+    #[test]
+    fn long_text_breaks_at_sentence_ends() {
+        let text = "One two three. Four five six. Seven eight nine.";
+        let pieces = chunks(text, 20);
+        assert!(
+            pieces.iter().all(|p| p.len() <= 20),
+            "every piece must fit: {pieces:?}"
+        );
+        assert_eq!(pieces[0], "One two three.");
+    }
+
+    /// Splitting must never land inside a character, or the pieces are not
+    /// valid text and the provider is handed nonsense.
+    #[test]
+    fn multibyte_text_is_never_cut_through_a_character() {
+        // Every character here is two bytes, so a naive byte split lands
+        // mid-character on every other position.
+        let text = "çğşüöı ".repeat(80);
+        let pieces = chunks(&text, 25);
+        assert!(pieces.len() > 1);
+        for piece in &pieces {
+            assert!(piece.len() <= 25, "{piece:?} is {} bytes", piece.len());
+            // Re-parsing proves the boundaries held.
+            assert_eq!(std::str::from_utf8(piece.as_bytes()).unwrap(), *piece);
+        }
+        // Nothing is dropped: every character survives somewhere.
+        let rejoined: String = pieces.concat();
+        assert_eq!(
+            rejoined.chars().filter(|c| !c.is_whitespace()).count(),
+            text.chars().filter(|c| !c.is_whitespace()).count()
+        );
+    }
+
+    /// A single unbroken run with nowhere to break still has to be split, or a
+    /// URL or a long word would hang the loop.
+    #[test]
+    fn an_unbreakable_run_is_still_split() {
+        let text = "a".repeat(120);
+        let pieces = chunks(&text, 50);
+        assert_eq!(pieces.len(), 3);
+        assert_eq!(pieces.concat(), text);
     }
 }

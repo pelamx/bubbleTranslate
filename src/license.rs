@@ -527,8 +527,13 @@ fn post(agent: &ureq::Agent, route: &str, body: serde_json::Value) -> Result<Gra
 }
 
 /// Tells the service this install is in use today: an opaque install id, the
-/// OS, the app version and whether it is on Pro. Nothing else — no text, no
-/// language, no licence. Best effort and silent; the answer is ignored.
+/// OS, the app version, whether it is on Pro, and how each backend fared today.
+/// Nothing else — no text, no language, no licence. Best effort and silent; the
+/// answer is ignored.
+///
+/// The backend tallies are here because the leading provider is an undocumented
+/// endpoint that can start refusing at any time (see [`crate::health`]). Without
+/// them, a day when it breaks for everyone looks exactly like a quiet day.
 pub fn ping(agent: &ureq::Agent, pro: bool) {
     #[cfg(debug_assertions)]
     if std::env::var_os("BUBBLETRANSLATE_LICENSE_API").is_none() {
@@ -545,6 +550,19 @@ pub fn ping(agent: &ureq::Agent, pro: bool) {
                 "os": std::env::consts::OS,
                 "app": env!("CARGO_PKG_VERSION"),
                 "plan": if pro { "pro" } else { "free" },
+                // Counts only, keyed by the backend's name: which of them
+                // answered, and which were asked and could not. Nothing about
+                // what was translated.
+                "providers": crate::health::Health::load()
+                    .today()
+                    .into_iter()
+                    .map(|(provider, tally)| {
+                        (
+                            provider.label().to_string(),
+                            serde_json::json!({ "ok": tally.ok, "failed": tally.failed }),
+                        )
+                    })
+                    .collect::<serde_json::Map<_, _>>(),
             })
             .to_string()
             .as_str(),

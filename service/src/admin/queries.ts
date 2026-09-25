@@ -94,6 +94,34 @@ export async function health(env: Env): Promise<HealthRow[]> {
 }
 
 /** Which version each install in use this month is on, by OS. */
+export type ProviderHealthRow = {
+  provider: string;
+  ok: number;
+  failed: number;
+  reports: number;
+};
+
+/// How each translation backend has fared over the last week, newest day first.
+///
+/// This is the answer to the one thing the app cannot tell us by itself: the
+/// backend it leads with is an undocumented endpoint, and a day when it starts
+/// refusing for everybody would otherwise be indistinguishable from a quiet day.
+/// The tell is not the failure count -- it is the fallbacks winning anything at
+/// all, because normally they win nothing.
+export async function providerHealth(env: Env): Promise<ProviderHealthRow[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT provider,
+            SUM(ok)      AS ok,
+            SUM(failed)  AS failed,
+            SUM(reports) AS reports
+       FROM provider_health
+      WHERE day >= date('now', '-7 day')
+   GROUP BY provider
+   ORDER BY ok DESC, provider`,
+  ).all<ProviderHealthRow>();
+  return results ?? [];
+}
+
 export async function versions(env: Env): Promise<{ app: string; os: string; n: number }[]> {
   const { results } = await env.DB.prepare(
     `SELECT COALESCE(app, '?') AS app, COALESCE(os, 'unknown') AS os, COUNT(*) AS n

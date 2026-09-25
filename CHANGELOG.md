@@ -71,6 +71,27 @@ holds, a newly added backend would have been invisible to everyone but fresh
 installs. Anything missing is now added to the end of the list, leaving an order
 you chose yourself alone.
 
+**Long selections have a fallback again.** MyMemory refuses anything over 500
+characters in one go, so a long selection had Google in front of it and nothing
+behind: if Google would not answer, there was no translation at all. Long text is
+now sent to MyMemory in sentence-sized pieces and joined back together. Line
+breaks inside the selection are not preserved that way, which is the right trade
+for a fallback — the alternative was nothing.
+
+**The app now keeps a record of which backend answered.** `bubbleTranslate
+--health` prints, for today, how many translations each backend produced and how
+many times it was asked and could not answer. It is the counterpart to `--check`:
+that one asks how the backends are right now, and says nothing about the ones
+that were failing all morning.
+
+The same counts ride along on the daily usage ping, which the privacy policy now
+describes. They are counts only — never the text, never the languages — and they
+are added into a daily total across all installations rather than stored against
+yours. They exist because the backend the app leads with is an undocumented
+endpoint that can begin refusing at any time, and without them a day when it
+breaks for everybody looks exactly like a quiet day. `usage_ping = false` turns
+the whole ping off as before, and `--health` keeps working either way.
+
 **The provider test no longer reports MyMemory as broken when you translate into
 Turkish.** It probed with a Turkish phrase whatever the target language was, so
 for Turkish it was asking for Turkish-to-Turkish — which MyMemory refuses,

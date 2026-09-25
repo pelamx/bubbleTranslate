@@ -314,7 +314,7 @@ pub fn path() -> PathBuf {
 ///
 /// Stored as a number rather than a date string so that comparing two of them
 /// is unambiguous no matter how the date would have been formatted.
-fn local_day() -> i64 {
+pub(crate) fn local_day() -> i64 {
     let unix = now() as i64;
     (unix + local_offset(unix)) / 86_400
 }

@@ -106,11 +106,53 @@ async function ping(env: Env, body: any) {
   )
     .bind(install, String(body.os ?? "").slice(0, 16), String(body.app ?? "").slice(0, 32), plan, t)
     .run();
+  await recordProviderHealth(env, body.providers, t);
   // The privacy policy promises that an install silent for 13 months is
   // forgotten. Done here rather than in the cron, so the promise holds even
   // when no cron runs; the index on last_seen keeps it cheap.
   await env.DB.prepare("DELETE FROM installs WHERE last_seen < ?").bind(t - 396 * 86_400).run();
   return new Response(null, { status: 204 });
+}
+
+/// Adds one install's per-backend tallies into the day's totals.
+///
+/// Anything unrecognised is dropped rather than rejected: this rides along on a
+/// ping whose answer is ignored, so a malformed field must never cost the caller
+/// the install count it came for. Provider names are capped and counts clamped,
+/// because the body is whatever was posted.
+async function recordProviderHealth(env: Env, reported: unknown, t: number) {
+  if (!reported || typeof reported !== "object" || Array.isArray(reported)) return;
+  const day = new Date(t * 1000).toISOString().slice(0, 10);
+
+  const rows = Object.entries(reported as Record<string, unknown>)
+    .slice(0, 16)
+    .flatMap(([name, tally]) => {
+      if (!tally || typeof tally !== "object") return [];
+      const provider = name.trim().slice(0, 24);
+      if (!provider) return [];
+      const count = (value: unknown) => {
+        const n = Number((tally as Record<string, unknown>)[value as string]);
+        return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), 1_000_000) : 0;
+      };
+      const ok = count("ok");
+      const failed = count("failed");
+      if (ok === 0 && failed === 0) return [];
+      return [{ provider, ok, failed }];
+    });
+  if (rows.length === 0) return;
+
+  await env.DB.batch(
+    rows.map((row) =>
+      env.DB.prepare(
+        `INSERT INTO provider_health (day, provider, ok, failed, reports)
+         VALUES (?1, ?2, ?3, ?4, 1)
+         ON CONFLICT (day, provider) DO UPDATE SET
+           ok      = ok + ?3,
+           failed  = failed + ?4,
+           reports = reports + 1`,
+      ).bind(day, row.provider, row.ok, row.failed),
+    ),
+  );
 }
 
 async function activate(env: Env, body: any) {

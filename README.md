@@ -331,11 +331,27 @@ written to disk, not even hashed — an app that reads whatever you highlight ha
 business leaving a record of it behind.
 
 Once a day while it runs, the app tells the licence service it is in use: a
-hashed install id, the OS, the version, and free or Pro. That is the whole
-message — never the text, never the languages, never the licence key. It is
-how we count the installs that are alive — actually in use — on free and on
-Pro, which downloads cannot show. It is used only as totals, never to identify
-anyone. Set `usage_ping = false` in the config to turn it off.
+hashed install id, the OS, the version, free or Pro, and how each translation
+backend fared that day. That is the whole message — never the text, never the
+languages, never the licence key. It is how we count the installs that are
+alive — actually in use — on free and on Pro, which downloads cannot show. It
+is used only as totals, never to identify anyone. Set `usage_ping = false` in
+the config to turn it off.
+
+The backend counts are there because the provider the chain leads with is an
+undocumented endpoint that can begin refusing at any time; without them a day
+when it breaks for everyone looks exactly like a quiet day. They are added into
+a daily total across all installs rather than stored per install, and the same
+numbers for this machine alone are readable locally:
+
+```sh
+./bubbleTranslate --health
+```
+
+which prints, for today, how many translations each backend produced and how
+many times it could not answer. It is the record `--check` cannot give: that
+one asks the backends how they are right now, and passes the moment a broken
+endpoint recovers.
 
 To see where an install stands without opening a window:
 

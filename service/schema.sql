@@ -157,6 +157,26 @@ CREATE TABLE IF NOT EXISTS installs (
 
 CREATE INDEX IF NOT EXISTS installs_by_last_seen ON installs (last_seen);
 
+-- How each translation backend fared, per day, added up across every install.
+--
+-- Totals only: no install id, so this says "Google failed 400 times yesterday"
+-- and can never say who it failed for. It exists because the leading backend is
+-- an undocumented endpoint that may start refusing at any time, and without
+-- this the day it breaks for everyone looks like a quiet day.
+--
+-- An install reports the running total for its own day once per ping, so the
+-- figures are a close sum rather than an exact one -- a copy that pings either
+-- side of midnight contributes twice. Good enough to see a backend fall over,
+-- which is all it is for.
+CREATE TABLE IF NOT EXISTS provider_health (
+  day       TEXT    NOT NULL,
+  provider  TEXT    NOT NULL,
+  ok        INTEGER NOT NULL DEFAULT 0,
+  failed    INTEGER NOT NULL DEFAULT 0,
+  reports   INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, provider)
+);
+
 -- Installs the operator marked as their own from the admin panel. Left out of
 -- every admin count, so the panel shows real users only.
 CREATE TABLE IF NOT EXISTS ignored_installs (

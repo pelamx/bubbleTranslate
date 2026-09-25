@@ -32,6 +32,8 @@ import {
   licenceOs,
   mineInstalls,
   mineBreakdown,
+  type ProviderHealthRow,
+  providerHealth,
   osBreakdown,
   osLabel,
   published,
@@ -421,6 +423,42 @@ const usd = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
 
 /** Recurring revenue, what is set to renew, and six months of new against
  *  lost. List prices in USD, as the weekly report counts them. */
+function backendsCard(rows: ProviderHealthRow[]): string {
+  if (rows.length === 0) {
+    return `<section class="card">
+       <p class="label">Translation backends, last 7 days</p>
+       <p class="sub">Nothing reported yet. Copies running a build older than 0.3.6 do not send this.</p>
+     </section>`;
+  }
+  const total = rows.reduce((a, r) => a + r.ok, 0);
+  // The fallbacks answering at all is the tell: when the first backend is
+  // healthy they win nothing, so a share worth noticing means it is refusing.
+  const leader = rows[0]?.provider ?? "";
+  const fallback = rows.slice(1).reduce((a, r) => a + r.ok, 0);
+  const worry = total > 0 && fallback / total > 0.1;
+  return `<section class="card">
+       <p class="label">Translation backends, last 7 days</p>
+       <div class="scroll"><table>
+         <tr><th>Backend</th><th class="num">Answered</th><th class="num">Failed</th>
+             <th class="num">Share</th><th class="num">Reports</th></tr>
+         ${rows
+           .map(
+             (r) => `<tr><td>${escapeHtml(r.provider)}</td>
+               <td class="num">${r.ok}</td>
+               <td class="num">${r.failed > 0 ? `<b>${r.failed}</b>` : "0"}</td>
+               <td class="num">${total > 0 ? Math.round((r.ok / total) * 100) : 0}%</td>
+               <td class="num">${r.reports}</td></tr>`,
+           )
+           .join("")}
+       </table></div>
+       <p class="sub"${worry ? ' style="color:#b45309"' : ""}>${
+         worry
+           ? `The fallbacks are answering ${Math.round((fallback / total) * 100)}% of translations — ${escapeHtml(leader)} is refusing more than it should.`
+           : `${escapeHtml(leader)} is answering ${Math.round(((rows[0]?.ok ?? 0) / Math.max(total, 1)) * 100)}% of translations, which is what a healthy chain looks like.`
+       }</p>
+     </section>`;
+}
+
 export function revenueCard(m: Revenue, share: { pro: number; active: number }): string {
   const rows = m.months
     .map(
@@ -554,7 +592,7 @@ export function delta(today: number, yesterday: number): string {
 }
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share] = await Promise.all([
+  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -573,6 +611,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     endingSoon(env),
     revenue(env),
     proShare(env),
+    providerHealth(env),
   ]);
   const dl = downloadsNow?.total ?? null;
 
@@ -734,6 +773,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
        <div class="bars">${bars}</div>
        <div class="bars-axis"><span>14 days ago</span><span>today</span></div>
      </section>
+
+     ${backendsCard(backends)}
 
      ${revenueCard(money, share)}
 

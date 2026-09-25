@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::capture;
+use crate::health::Health;
 use crate::config::{Config, Provider};
 use crate::license::{self, Licensing};
 use crate::platform::{CaptureSource, Trigger};
@@ -142,6 +143,9 @@ fn run(
     wake_ui: impl Fn(),
 ) {
     let translator = Translator::new();
+    // Rolled over by the day like the counter, and written beside it. Loaded
+    // once here rather than per translation: this thread is the only writer.
+    let mut health = Health::load();
     // Separate from the translator's agent: licence calls are rare, want a
     // longer timeout, and have no business sharing a connection pool or a
     // browser user-agent with the scraped Google endpoint.
@@ -412,6 +416,7 @@ fn run(
                 if charges(chargeable, &result) {
                     licensing.quota.lock().unwrap().record(&text);
                 }
+                health.answered(result.provider);
                 crate::trace!(
                     "translate [{}] {} -> {:?}",
                     result.provider.label(),
@@ -427,6 +432,7 @@ fn run(
                 for (provider, err) in &errors {
                     crate::trace!("translate {} FAILED: {err}", provider.label());
                 }
+                health.refused(errors.iter().map(|(provider, _)| *provider));
                 UiEvent::Failed { errors }
             }
         };
