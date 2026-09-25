@@ -614,7 +614,7 @@ fn translate_box(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
             .button(t("Upgrade to Pro", "Pro'ya geç", "Pasar a Pro"))
             .clicked()
         {
-            crate::shell::open_url(&format!("{}?src=window", license::BUY_URL));
+            license::open_buy("window");
         }
     }
 

@@ -153,6 +153,13 @@ pub fn selected_text(allow_clipboard: bool, clipboard_before: Option<isize>) -> 
         }
     }
 
+    // The App Store build runs sandboxed, and a sandboxed app is not allowed to
+    // type into other applications. Apps that only answer to Cmd+C read
+    // nothing there; drawing a box over the text still reads them.
+    if crate::license::APP_STORE {
+        return None;
+    }
+
     clipboard_selection().map(|text| Capture {
         text,
         via: CaptureSource::Clipboard,

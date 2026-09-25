@@ -60,3 +60,7 @@ Thumbs.db
 # GitHub release beside the binaries they describe, not tracked -- the binaries
 # themselves are release assets too.
 SHA256SUMS.txt
+
+# The App Store build: the provisioning profile is per account, the package is output.
+appstore/embedded.provisionprofile
+bubbleTranslate-appstore.pkg

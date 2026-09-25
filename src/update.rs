@@ -44,6 +44,11 @@ pub fn available() -> Option<Available> {
 /// Checks now and then once a day, off the calling thread. `found` runs when a
 /// check turns something up, so the window can be redrawn to show it.
 pub fn spawn(found: impl Fn() + Send + 'static) {
+    // The App Store updates what it installed, and does not allow an app to
+    // point at a download of its own.
+    if crate::license::APP_STORE {
+        return;
+    }
     #[cfg(debug_assertions)]
     if std::env::var_os("BUBBLETRANSLATE_UPDATE_URL").is_none() {
         // A development build is always "out of date" against the published

@@ -17,6 +17,13 @@ BUNDLE_ID="com.pelamx.bubbleTranslate"
 # so the plist reads it from there rather than keeping a second copy to forget.
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 
+# APPSTORE=1 builds the Mac App Store flavour: the `appstore` feature, and the
+# keys App Store Connect asks for in the plist. Signing it is left to
+# release-appstore.sh, which has the App Store certificate and entitlements.
+APPSTORE="${APPSTORE:-0}"
+FEATURES=()
+[[ "$APPSTORE" == 1 ]] && FEATURES=(--features appstore)
+
 STAGE_BIN="$(mktemp -t bubbleTranslate-bin)"
 trap 'rm -f "$STAGE_BIN"' EXIT
 
@@ -35,13 +42,13 @@ trap 'rm -f "$STAGE_BIN"' EXIT
 ARM="aarch64-apple-darwin"
 INTEL="x86_64-apple-darwin"
 
-cargo build --release --target "$ARM"
+cargo build --release --target "$ARM" "${FEATURES[@]}"
 
 # Intel is best-effort: without its std the build still produces a working
 # Apple Silicon app, which is better than failing the release outright. The
 # warning is loud because shipping that DMG excludes every Intel Mac.
 if rustup target list --installed 2>/dev/null | grep -qx "$INTEL"; then
-    cargo build --release --target "$INTEL"
+    cargo build --release --target "$INTEL" "${FEATURES[@]}"
     lipo -create -output "$STAGE_BIN" \
         "target/$ARM/release/bubbleTranslate" \
         "target/$INTEL/release/bubbleTranslate"
@@ -55,6 +62,14 @@ fi
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$STAGE_BIN" "$APP/Contents/MacOS/bubbleTranslate"
+
+STORE_KEYS=""
+if [[ "$APPSTORE" == 1 ]]; then
+    # A category, and the export-compliance answer: the only encryption is
+    # HTTPS, which is exempt, so every upload stops asking.
+    STORE_KEYS="<key>LSApplicationCategoryType</key> <string>public.app-category.productivity</string>
+    <key>ITSAppUsesNonExemptEncryption</key> <false/>"
+fi
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -74,9 +89,15 @@ cat > "$APP/Contents/Info.plist" <<PLIST
          never pulls focus away from whatever is being read. -->
     <key>LSUIElement</key>             <true/>
     <key>NSHighResolutionCapable</key> <true/>
+    $STORE_KEYS
 </dict>
 </plist>
 PLIST
+
+if [[ "$APPSTORE" == 1 ]]; then
+    echo "Built $APP for the App Store (unsigned; release-appstore.sh signs it)"
+    exit 0
+fi
 
 # Sign with the self-signed certificate from ./setup-signing.sh when it exists.
 #

@@ -51,6 +51,29 @@ pub const PRICE_YEARLY: &str = "$20/year";
 pub const BUY_URL: &str = "https://api.bubbletranslate.app/buy";
 pub const MANAGE_URL: &str = "https://api.bubbletranslate.app/account";
 
+/// Whether this is the Mac App Store build.
+///
+/// The App Store has three rules the direct download does not: the app runs
+/// in a sandbox, anything that unlocks Pro is bought through the App Store
+/// rather than a link to our own checkout, and updates arrive through the
+/// App Store rather than a notice of our own. Everything that differs keys
+/// off this one switch, so the two builds cannot disagree about which one
+/// they are.
+pub const APP_STORE: bool = cfg!(feature = "appstore");
+
+/// Sends someone who wants Pro to where they can buy it. `src` is the surface
+/// the click came from, for the same funnel `BUY_URL` measures.
+///
+/// In the App Store build a link to our own checkout is not allowed; buying
+/// happens through the App Store's own sheet instead.
+pub fn open_buy(src: &str) {
+    if APP_STORE {
+        crate::store::purchase(src);
+    } else {
+        crate::shell::open_url(&format!("{BUY_URL}?src={src}"));
+    }
+}
+
 /// The licence service. Overridable in debug builds so the client can be
 /// developed against a local server.
 const LICENSE_API: &str = "https://api.bubbletranslate.app";
@@ -610,7 +633,7 @@ fn machine_id() -> Option<String> {
     hostname()
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(feature = "appstore")))]
 fn machine_id() -> Option<String> {
     // IOPlatformUUID, read through ioreg rather than linking IOKit for one
     // string. The line looks like:
@@ -626,6 +649,54 @@ fn machine_id() -> Option<String> {
         .and_then(|line| line.split('=').nth(1))
         .map(|value| value.trim().trim_matches('"').to_string())
         .filter(|value| !value.is_empty());
+    id.or_else(hostname)
+}
+
+/// The same IOPlatformUUID, asked of IOKit directly. The sandbox the App
+/// Store build runs in does not let it start `ioreg`, and the value has to be
+/// the same one so a machine keeps its seat whichever build it runs.
+#[cfg(all(target_os = "macos", feature = "appstore"))]
+fn machine_id() -> Option<String> {
+    use core_foundation::base::{CFType, TCFType};
+    use core_foundation::string::CFString;
+    use std::ffi::{c_char, c_void};
+
+    #[link(name = "IOKit", kind = "framework")]
+    unsafe extern "C" {
+        fn IOServiceMatching(name: *const c_char) -> *mut c_void;
+        fn IOServiceGetMatchingService(main_port: u32, matching: *mut c_void) -> u32;
+        fn IORegistryEntryCreateCFProperty(
+            entry: u32,
+            key: *const c_void,
+            allocator: *const c_void,
+            options: u32,
+        ) -> *const c_void;
+        fn IOObjectRelease(object: u32) -> i32;
+    }
+
+    let id = unsafe {
+        // The matching dictionary is consumed by the lookup, so it is not
+        // released here. Port 0 is the default main port.
+        let service =
+            IOServiceGetMatchingService(0, IOServiceMatching(c"IOPlatformExpertDevice".as_ptr()));
+        if service == 0 {
+            None
+        } else {
+            let key = CFString::from_static_string("IOPlatformUUID");
+            let value = IORegistryEntryCreateCFProperty(
+                service,
+                key.as_concrete_TypeRef() as *const c_void,
+                std::ptr::null(),
+                0,
+            );
+            IOObjectRelease(service);
+            (!value.is_null())
+                .then(|| CFType::wrap_under_create_rule(value as _))
+                .and_then(|value| value.downcast::<CFString>())
+                .map(|value| value.to_string())
+                .filter(|value| !value.is_empty())
+        }
+    };
     id.or_else(hostname)
 }
 

@@ -3,6 +3,12 @@ name = "bubbleTranslate"
 version = "0.3.5"
 edition = "2024"
 
+# `appstore` is the Mac App Store build: sandboxed, sold through the App Store,
+# updated by it. Off everywhere else; see `license::APP_STORE` for what it
+# turns off and why.
+[features]
+appstore = []
+
 # Platform-neutral: the translation engine, config, and the egui interface.
 [dependencies]
 anyhow = "1.0.104"
