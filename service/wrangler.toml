@@ -71,10 +71,14 @@ PADDLE_CLIENT_TOKEN = "live_b16bde0d516696e5290039b41e4"
 
 # -- Ad conversion attribution ------------------------------------------------
 #
-# No tag id here, on purpose. Nothing advertises the app, so the success page
-# loads no Google tag, sets no third-party cookie, and the marketing site needs
-# no consent banner for one. The reporting code in ads.ts and pages.ts stays
-# dark until an id is configured, which is the day a campaign actually starts.
+# The Google Ads tag and the "Purchase" conversion's label, from the event
+# snippet's `send_to`. Both are publishable -- they are in the marketing site's
+# page source too. With them set, the success page loads the Google tag under
+# the visitor's `bt_consent` choice and reports the sale once the order shows
+# as paid. The server-side upload in ads.ts needs the API secrets below as
+# well and stays off until they exist; the success-page tag works without it.
+GOOGLE_ADS_TAG_ID = "AW-18451580938"
+GOOGLE_ADS_PURCHASE_LABEL = "wk05CK_52vkcEIqQs95E"
 
 # Secrets, set with `wrangler secret put` and never written here:
 #
