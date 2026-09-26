@@ -13,6 +13,14 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**Buying Pro now emails you the licence key.** Until now the key was shown
+once, on the page you land on after paying, and anyone who closed that page
+before copying it had to write to support to get it back. It now also arrives
+by email from support@bubbletranslate.app, so it is in your inbox for the next
+machine. Replying to that email reaches support.
+
 ## 0.3.7 — 2026-09-25
 
 **The daily usage ping now also says when the free allowance runs out.** On
