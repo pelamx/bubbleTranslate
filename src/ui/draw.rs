@@ -278,6 +278,29 @@ impl BubbleApp {
                         capture::set_clipboard(ui.ctx(), &result.text);
                         self.copied_at = Some(Instant::now());
                     }
+
+                    // Read in the language it was translated into, which is
+                    // also the voice that is looked for.
+                    // Asked first: it is what notices a language that turned
+                    // out to have no voice, before the button is offered again.
+                    let speaking = crate::speech::speaking();
+                    if crate::speech::available(&result.target_lang) {
+                        let label = if speaking {
+                            t("Stop", "Durdur", "Detener")
+                        } else {
+                            t("Listen", "Dinle", "Escuchar")
+                        };
+                        if ui
+                            .add(egui::Button::new(egui::RichText::new(label).size(12.0)).frame(false))
+                            .clicked()
+                        {
+                            if speaking {
+                                crate::speech::stop();
+                            } else {
+                                crate::speech::speak(&result.text, &result.target_lang);
+                            }
+                        }
+                    }
                 }
 
                 // Language switching lives in the settings panel rather than a

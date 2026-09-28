@@ -27,6 +27,7 @@ pub mod capture;
 pub mod cursor;
 pub mod monitor;
 pub mod shell;
+pub mod speech;
 
 mod borrow;
 mod compositor;

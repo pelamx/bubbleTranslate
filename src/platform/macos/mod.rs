@@ -5,6 +5,7 @@ pub mod capture;
 pub mod monitor;
 pub mod ocr;
 pub mod shell;
+pub mod speech;
 
 use std::path::PathBuf;
 use std::process::Command;

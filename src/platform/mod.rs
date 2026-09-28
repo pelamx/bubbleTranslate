@@ -18,19 +18,19 @@
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
-pub use macos::{capture, monitor, shell};
+pub use macos::{capture, monitor, shell, speech as speech_command};
 #[cfg(target_os = "macos")]
 pub use macos::{on_screen_region_request, read_screen_region};
 
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-pub use linux::{capture, monitor, shell};
+pub use linux::{capture, monitor, shell, speech as speech_command};
 
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
-pub use windows::{capture, monitor, shell};
+pub use windows::{capture, monitor, shell, speech as speech_command};
 
 /// Makes the app start at login, or stops it doing so. Called at every
 /// startup rather than only when the switch is flipped, so an app that was

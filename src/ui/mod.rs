@@ -222,6 +222,7 @@ impl BubbleApp {
                     self.state = State::Working { via };
                     self.settings_open = false;
                     self.copied_at = None;
+                    crate::speech::stop();
                     self.show(ctx);
                 }
                 UiEvent::Done {
@@ -336,6 +337,7 @@ impl BubbleApp {
         }
         self.state = State::Hidden;
         self.settings_open = false;
+        crate::speech::stop();
         monitor::set_paused(false);
     }
 
@@ -721,9 +723,10 @@ impl eframe::App for BubbleApp {
         ctx.request_repaint_after(HOVER_POLL);
 
         // Auto-dismiss, paused while the pointer is inside so a bubble being
-        // read never vanishes mid-sentence.
+        // read never vanishes mid-sentence — and while it is being read aloud,
+        // for the same reason.
         let auto_hide = self.config.lock().unwrap().auto_hide_secs;
-        if hovered {
+        if hovered || crate::speech::speaking() {
             self.shown_at = Instant::now();
         } else if auto_hide > 0 && !self.settings_open {
             let elapsed = self.shown_at.elapsed();

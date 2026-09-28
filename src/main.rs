@@ -27,6 +27,7 @@ mod license;
 mod main_window;
 mod platform;
 mod quota;
+mod speech;
 mod trace;
 mod translate;
 mod ui;

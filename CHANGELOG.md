@@ -15,6 +15,16 @@ days before the others.
 
 ## Unreleased
 
+**The bubble can read the translation aloud.** A Listen button sits next to
+Copy. It uses a voice that is already on your computer, so it helps with
+pronunciation, and it lets you listen instead of reading. Pressing it again
+stops the voice, and the bubble does not close by itself while it is reading.
+The button only appears when a voice for that language is installed, so it
+never reads Turkish in an English voice. On Linux it needs Speech Dispatcher
+or eSpeak, which many desktops already have. (Windows) Windows cannot tell in
+advance which voices exist, so for a language with no voice the first press
+does nothing and the button then goes away.
+
 **Buying Pro now emails you the licence key.** Until now the key was shown
 once, on the page you land on after paying, and anyone who closed that page
 before copying it had to write to support to get it back. It now also arrives

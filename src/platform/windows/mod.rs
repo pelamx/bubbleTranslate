@@ -27,6 +27,7 @@ pub mod monitor;
 pub mod ocr;
 pub mod overlay;
 pub mod shell;
+pub mod speech;
 
 use std::sync::atomic::{AtomicIsize, Ordering};
 
