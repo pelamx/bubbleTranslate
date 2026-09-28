@@ -450,7 +450,8 @@ impl Config {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        std::fs::write(&path, toml::to_string_pretty(self)?)?;
+        // Private to its owner: it holds the licence key and any API keys.
+        crate::license::write_private(&path, toml::to_string_pretty(self)?.as_bytes())?;
         Ok(())
     }
 

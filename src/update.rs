@@ -87,13 +87,19 @@ fn manifest_url() -> String {
     MANIFEST_URL.to_string()
 }
 
+/// Where every download lives. See CLAUDE.md for why it is this repository.
+const DOWNLOADS: &str = "https://github.com/pelamx/downloads/releases/";
+
 /// This platform's entry in the manifest, if it is newer than `running`. A
 /// manifest that cannot be read, or has no line for this platform, is "nothing
 /// new" rather than an error: the app works exactly as before without it.
 fn newer_in(json: &str, os: &str, running: &str) -> Option<Available> {
     let manifest: std::collections::HashMap<String, Entry> = serde_json::from_str(json).ok()?;
     let entry = manifest.get(os)?;
-    if !entry.url.starts_with("https://") {
+    // Only ever a download from our own releases. The notice is a link the
+    // user is invited to click, so a manifest edited by anyone who got hold of
+    // a token must not be able to send every installed copy somewhere else.
+    if !entry.url.starts_with(DOWNLOADS) {
         return None;
     }
     (parse(&entry.version)? > parse(running)?).then(|| Available {
@@ -127,16 +133,16 @@ mod tests {
     use super::*;
 
     const MANIFEST: &str = r#"{
-        "linux":   { "version": "0.2.0",  "url": "https://example.com/linux" },
-        "macos":   { "version": "0.1.0",  "url": "https://example.com/dmg" },
-        "windows": { "version": "0.10.0", "url": "https://example.com/exe" }
+        "linux":   { "version": "0.2.0",  "url": "https://github.com/pelamx/downloads/releases/download/v0.2.0/linux" },
+        "macos":   { "version": "0.1.0",  "url": "https://github.com/pelamx/downloads/releases/download/v0.1.0/dmg" },
+        "windows": { "version": "0.10.0", "url": "https://github.com/pelamx/downloads/releases/download/v0.10.0/exe" }
     }"#;
 
     #[test]
     fn a_newer_build_for_this_platform_is_reported() {
         let found = newer_in(MANIFEST, "linux", "0.1.0").unwrap();
         assert_eq!(found.version, "0.2.0");
-        assert_eq!(found.url, "https://example.com/linux");
+        assert_eq!(found.url, "https://github.com/pelamx/downloads/releases/download/v0.2.0/linux");
     }
 
     #[test]
@@ -181,5 +187,17 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn a_link_anywhere_but_our_releases_is_ignored() {
+        for url in [
+            "https://evil.example/bubbleTranslate",
+            "https://github.com/someone/downloads/releases/download/v9.0.0/x",
+            "https://github.com/pelamx/downloads.evil.example/releases/x",
+        ] {
+            let json = format!(r#"{{"linux":{{"version":"9.0.0","url":"{url}"}}}}"#);
+            assert_eq!(newer_in(&json, "linux", "0.1.0"), None, "{url}");
+        }
     }
 }

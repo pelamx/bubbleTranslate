@@ -190,6 +190,28 @@ CREATE TABLE IF NOT EXISTS provider_health (
   PRIMARY KEY (day, provider)
 );
 
+-- Paddle transactions already acted on, one row each. Webhooks are delivered
+-- at least once, and a repeated `transaction.completed` for a subscription the
+-- licence already knows looks exactly like a renewal: without this, every
+-- redelivery would add another free month or year. Claimed before the work is
+-- done and released if it fails, so a retry after an error still goes through.
+CREATE TABLE IF NOT EXISTS paddle_transactions (
+  transaction_id TEXT PRIMARY KEY,
+  at             INTEGER NOT NULL
+);
+
+-- Machines added to a licence, kept so the number of *new* machines in a month
+-- can be capped. Seats alone cannot do it: a seat that is removed frees its
+-- slot, but the token that machine already holds works offline for its whole
+-- lifetime, so activating and removing in turn would put one key on any number
+-- of machines. Emptied along with the seats when the operator frees them.
+CREATE TABLE IF NOT EXISTS activations (
+  licence_id  TEXT NOT NULL,
+  device      TEXT NOT NULL,
+  at          INTEGER NOT NULL,
+  PRIMARY KEY (licence_id, device)
+);
+
 -- Installs the operator marked as their own from the admin panel. Left out of
 -- every admin count, so the panel shows real users only.
 CREATE TABLE IF NOT EXISTS ignored_installs (

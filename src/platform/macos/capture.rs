@@ -260,7 +260,10 @@ fn clipboard_selection() -> Option<String> {
     if pasteboard.changeCount() != before_count
         && let Some(previous) = previous
     {
-        write_pasteboard_string(&pasteboard, &previous);
+        // Marked so clipboard managers leave it alone: putting something back
+        // is not the user copying it again, and what was there may well be a
+        // password a password manager had marked the same way.
+        write_pasteboard_string(&pasteboard, &previous, true);
     }
 
     copied
@@ -353,11 +356,20 @@ fn read_pasteboard_string(pasteboard: &NSPasteboard) -> Option<String> {
     }
 }
 
-fn write_pasteboard_string(pasteboard: &NSPasteboard, value: &str) {
+/// `private` adds the nspasteboard.org markers that password managers use and
+/// clipboard managers honour: concealed (do not show or keep it) and transient
+/// (do not record it at all).
+fn write_pasteboard_string(pasteboard: &NSPasteboard, value: &str, private: bool) {
     unsafe {
         pasteboard.clearContents();
         let ns = NSString::from_str(value);
         pasteboard.setString_forType(&ns, NSPasteboardTypeString);
+        if private {
+            let empty = NSString::from_str("");
+            for marker in ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"] {
+                pasteboard.setString_forType(&empty, &NSString::from_str(marker));
+            }
+        }
     }
 }
 
@@ -367,7 +379,7 @@ fn write_pasteboard_string(pasteboard: &NSPasteboard, value: &str) {
 /// is what the Linux side needs on an X11 session, so the signature is shared.
 pub fn set_clipboard(_ctx: &eframe::egui::Context, text: &str) {
     let pasteboard = NSPasteboard::generalPasteboard();
-    write_pasteboard_string(&pasteboard, text);
+    write_pasteboard_string(&pasteboard, text, false);
 }
 
 /// Whether an event came from our own synthetic copy.

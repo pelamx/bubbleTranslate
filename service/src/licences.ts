@@ -214,6 +214,26 @@ export async function rotateKey(env: Env, licence: Licence): Promise<string> {
 /** Ends a licence. `refunded` cuts the term immediately, because the money has
  *  gone back; `cancelled` leaves the term alone, because it has been paid for
  *  and the subscriber is entitled to the rest of it. */
+/** Claims a Paddle transaction for handling. False when it was handled (or
+ *  is being handled) already, which is what makes a redelivered payment a
+ *  no-op instead of another term. */
+export async function claimTransaction(env: Env, transactionId: string): Promise<boolean> {
+  const { meta } = await env.DB.prepare(
+    "INSERT OR IGNORE INTO paddle_transactions (transaction_id, at) VALUES (?, ?)",
+  )
+    .bind(transactionId, now())
+    .run();
+  return (meta?.changes ?? 0) > 0;
+}
+
+/** Gives a claim back after handling failed, so Paddle's retry is not
+ *  mistaken for a duplicate. */
+export async function releaseTransaction(env: Env, transactionId: string): Promise<void> {
+  await env.DB.prepare("DELETE FROM paddle_transactions WHERE transaction_id = ?")
+    .bind(transactionId)
+    .run();
+}
+
 export async function endLicence(env: Env, licence: Licence, status: "cancelled" | "refunded") {
   if (status === "refunded") {
     await env.DB.prepare("UPDATE licences SET status = ?, expires_at = ? WHERE id = ?")

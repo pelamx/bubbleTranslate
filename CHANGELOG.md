@@ -15,6 +15,23 @@ days before the others.
 
 ## Unreleased
 
+**A copied password no longer ends up in clipboard history.** (Windows,
+macOS) Sometimes the app has to copy your selection to read it, and it then
+puts back what you had on the clipboard. That restore was not marked as
+private, so Windows clipboard history (Win+V), cloud clipboard sync or a
+clipboard manager on the Mac could record it — including a password you had
+just copied from a password manager. The restore now carries the same "keep
+this private" markers password managers use.
+
+**Your settings file is private to you.** (macOS, Linux) It holds your licence
+key and any DeepL or Anthropic key you entered. Until now other accounts on
+the same computer could read it. It is now readable by you alone, from the
+next time the settings are saved.
+
+**The update notice only links to our own downloads.** It used to accept any
+secure web address. It now only accepts a download from our releases page, so
+a tampered update file cannot point you somewhere else.
+
 ## 0.3.8 — 2026-09-28
 
 **The bubble can read the translation aloud.** A Listen button sits next to

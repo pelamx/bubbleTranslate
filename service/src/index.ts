@@ -27,6 +27,9 @@ import {
   DEFAULT_SEATS,
   type Licence,
   claimOrderAndIssue,
+  claimTransaction,
+  TOKEN_TTL,
+  releaseTransaction,
   createOrder,
   deliverKey,
   endLicence,
@@ -184,11 +187,19 @@ async function recordProviderHealth(env: Env, reported: unknown, t: number) {
   );
 }
 
+/** New machines a licence may take in a month beyond its seat limit. */
+const NEW_MACHINE_ALLOWANCE = 3;
+
 async function activate(env: Env, body: any) {
   const key = String(body.key ?? "").trim().toUpperCase();
   const device = String(body.device ?? "").trim();
   if (!key) return refuse("Enter your licence key first.");
   if (!device) return refuse("This copy could not identify the machine it is running on.");
+  // The device goes into every token, and all three into the database; a
+  // real client sends a hash, an OS name and a version.
+  if (device.length > 128) return refuse("This copy could not identify the machine it is running on.");
+  const os = String(body.os ?? "").slice(0, 32);
+  const app = String(body.app ?? "").slice(0, 32);
 
   const licence = await licenceByKey(env, key);
   if (!licence) return refuse("That licence key was not recognised. Check it for typos.", 404);
@@ -205,6 +216,24 @@ async function activate(env: Env, body: any) {
       .bind(seen, licence.id, device)
       .run();
   } else {
+    // New machines are capped per month, not only at once: a removed seat's
+    // token keeps working offline until it expires, so without this, adding
+    // and removing machines in turn would spread one key over any number of
+    // them. The allowance above the seat limit is for real moves — a new
+    // laptop, a reinstall — and support can reset it by freeing the seats.
+    const recent = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM activations WHERE licence_id = ? AND device != ? AND at > ?",
+    )
+      .bind(licence.id, device, seen - TOKEN_TTL)
+      .first<{ n: number }>();
+    if ((recent?.n ?? 0) >= licence.seat_limit + NEW_MACHINE_ALLOWANCE) {
+      return refuse(
+        "This licence has been added to too many new machines this month. " +
+          "Write to support and we will reset it.",
+        429,
+      );
+    }
+
     // One statement decides, rather than count-then-insert: two activations
     // racing for the last free slot would both pass a separate count check
     // and both insert, and the seat limit would be whatever the racing made
@@ -218,8 +247,8 @@ async function activate(env: Env, body: any) {
       .bind(
         licence.id,
         device,
-        String(body.os ?? ""),
-        String(body.app ?? ""),
+        os,
+        app,
         seen,
         seen,
         licence.seat_limit,
@@ -232,6 +261,12 @@ async function activate(env: Env, body: any) {
         409,
       );
     }
+    await env.DB.prepare(
+      `INSERT INTO activations (licence_id, device, at) VALUES (?, ?, ?)
+       ON CONFLICT (licence_id, device) DO UPDATE SET at = excluded.at`,
+    )
+      .bind(licence.id, device, seen)
+      .run();
   }
 
   return json(await grantToken(env, licence, device));
@@ -503,48 +538,16 @@ async function handlePaddleEvent(env: Env, event: Verified): Promise<Response> {
 
   switch (event.eventType) {
     case "transaction.completed": {
-      const cycle = cycleFromItems(env, data.items ?? []) ?? "monthly";
-      const subscriptionId = data.subscription_id ? String(data.subscription_id) : null;
-      const ref = data?.custom_data?.ref ? String(data.custom_data.ref) : null;
-      const email = await customerEmail(env, data);
-      await noteCustomer(env, data?.customer_id ? String(data.customer_id) : null, email);
-
-      // A renewal has the same shape as a first payment, minus our ref: the
-      // subscription already exists, so this extends it rather than selling
-      // another licence.
-      if (subscriptionId) {
-        const existing = await licenceByProviderRef(env, "paddle", subscriptionId);
-        if (existing) {
-          const until = await extendTerm(env, existing, cycle);
-          console.log(`extended licence ${existing.id} to ${until}`);
-          return json({ ok: true });
-        }
+      const transactionId = data.id ? String(data.id) : null;
+      if (transactionId && !(await claimTransaction(env, transactionId))) {
+        return json({ ok: true, ignored: "already handled" });
       }
-
-      if (!ref) {
-        console.error("Paddle transaction with no order ref and no known subscription");
-        return json({ ok: true, ignored: "no ref" });
+      try {
+        return await transactionCompleted(env, data, eventAt);
+      } catch (err) {
+        if (transactionId) await releaseTransaction(env, transactionId);
+        throw err;
       }
-      const newlyPaid = await fulfil(env, ref, {
-        provider: "paddle",
-        cycle,
-        email,
-        providerRef: subscriptionId,
-      });
-      // First payment only: renewals return above and a retried webhook finds
-      // the order already paid, so the conversion is pushed exactly once.
-      if (newlyPaid) {
-        await pushConversions(env, {
-          clickIds: readClickIds(data?.custom_data),
-          cycle,
-          orderRef: ref,
-          email,
-          // occurredAt is in seconds; ads want ms, and a missing stamp (0)
-          // falls back to now rather than 1970.
-          eventTimeMs: eventAt ? eventAt * 1000 : Date.now(),
-        });
-      }
-      return json({ ok: true });
     }
 
     case "subscription.created":
@@ -574,9 +577,20 @@ async function handlePaddleEvent(env: Env, event: Verified): Promise<Response> {
       return json({ ok: true });
     }
 
-    case "adjustment.created": {
-      // Refunds arrive as adjustments. Only a refund cuts the term short.
-      if (String(data.action ?? "") !== "refund") return json({ ok: true, ignored: data.action });
+    case "adjustment.created":
+    case "adjustment.updated": {
+      // Refunds and chargebacks arrive as adjustments, and only the money
+      // actually going back cuts the term short. A refund is created as
+      // `pending_approval` and may yet be rejected, so it counts once it is
+      // approved — which is why the update is listened to as well. A partial
+      // refund is a goodwill credit, not the purchase undone, and leaves the
+      // licence alone. A chargeback is the buyer taking the money back without
+      // asking, and ends it the same as a refund.
+      const action = String(data.action ?? "");
+      const status = String(data.status ?? "");
+      const ends = (action === "refund" && data.type !== "partial") || action === "chargeback";
+      if (!ends) return json({ ok: true, ignored: data.type === "partial" ? "partial refund" : action });
+      if (status !== "approved") return json({ ok: true, ignored: `${action} ${status}` });
       const subscriptionId = data.subscription_id ? String(data.subscription_id) : null;
       if (!subscriptionId) return json({ ok: true, ignored: "no subscription" });
       const licence = await licenceByProviderRef(env, "paddle", subscriptionId);
@@ -587,6 +601,52 @@ async function handlePaddleEvent(env: Env, event: Verified): Promise<Response> {
     default:
       return json({ ok: true, ignored: event.eventType });
   }
+}
+
+/** A payment: the first one sells a licence, every later one renews it. */
+async function transactionCompleted(env: Env, data: any, eventAt: number): Promise<Response> {
+  const cycle = cycleFromItems(env, data.items ?? []) ?? "monthly";
+  const subscriptionId = data.subscription_id ? String(data.subscription_id) : null;
+  const ref = data?.custom_data?.ref ? String(data.custom_data.ref) : null;
+  const email = await customerEmail(env, data);
+  await noteCustomer(env, data?.customer_id ? String(data.customer_id) : null, email);
+
+  // A renewal has the same shape as a first payment, minus our ref: the
+  // subscription already exists, so this extends it rather than selling
+  // another licence.
+  if (subscriptionId) {
+    const existing = await licenceByProviderRef(env, "paddle", subscriptionId);
+    if (existing) {
+      const until = await extendTerm(env, existing, cycle);
+      console.log(`extended licence ${existing.id} to ${until}`);
+      return json({ ok: true });
+    }
+  }
+
+  if (!ref) {
+    console.error("Paddle transaction with no order ref and no known subscription");
+    return json({ ok: true, ignored: "no ref" });
+  }
+  const newlyPaid = await fulfil(env, ref, {
+    provider: "paddle",
+    cycle,
+    email,
+    providerRef: subscriptionId,
+  });
+  // First payment only: renewals return above and a retried webhook finds
+  // the order already paid, so the conversion is pushed exactly once.
+  if (newlyPaid) {
+    await pushConversions(env, {
+      clickIds: readClickIds(data?.custom_data),
+      cycle,
+      orderRef: ref,
+      email,
+      // occurredAt is in seconds; ads want ms, and a missing stamp (0)
+      // falls back to now rather than 1970.
+      eventTimeMs: eventAt ? eventAt * 1000 : Date.now(),
+    });
+  }
+  return json({ ok: true });
 }
 
 // -- managing it -------------------------------------------------------------

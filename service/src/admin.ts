@@ -229,9 +229,12 @@ async function act(env: Env, request: Request, action: string): Promise<Response
     }
 
     case "seats": {
-      const { meta } = await env.DB.prepare("DELETE FROM seats WHERE licence_id = ?")
-        .bind(licence.id)
-        .run();
+      const [{ meta }] = await env.DB.batch([
+        env.DB.prepare("DELETE FROM seats WHERE licence_id = ?").bind(licence.id),
+        // Freeing the seats also resets the monthly count of new machines, so
+        // this is also how support lets a customer past that limit.
+        env.DB.prepare("DELETE FROM activations WHERE licence_id = ?").bind(licence.id),
+      ]);
       await audit(env, "free seats", licence.id, `freed ${meta?.changes ?? 0} devices`);
       return dashboard(env, id, {
         message: `Freed ${meta?.changes ?? 0} device slots. The customer can activate again.`,
@@ -331,6 +334,7 @@ async function act(env: Env, request: Request, action: string): Promise<Response
       const batch = await env.DB.batch([
         env.DB.prepare("DELETE FROM seats WHERE licence_id = ?").bind(licence.id),
         env.DB.prepare("DELETE FROM licences WHERE id = ?").bind(licence.id),
+        env.DB.prepare("DELETE FROM activations WHERE licence_id = ?").bind(licence.id),
       ]);
       const freed = batch[0]?.meta?.changes ?? 0;
       await audit(

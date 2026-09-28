@@ -176,11 +176,56 @@ describe("POST /webhooks/paddle", () => {
     await deliver({
       event_type: "adjustment.created",
       occurred_at: new Date().toISOString(),
-      data: { action: "refund", subscription_id: "sub_1" },
+      data: { action: "refund", type: "full", status: "approved", subscription_id: "sub_1" },
     });
     const after = (await licenceById(env, before.id))!;
     expect(after.status).toBe("refunded");
     expect(after.expires_at).toBeLessThanOrEqual(now());
+  });
+
+  const adjustment = (event_type: string, data: object) => ({
+    event_type,
+    occurred_at: new Date().toISOString(),
+    data: { subscription_id: "sub_1", ...data },
+  });
+  const statusOfSub1 = async () => (await licenceByProviderRef(env, "paddle", "sub_1"))!.status;
+
+  it("waits for a refund to be approved, and ignores one that is rejected", async () => {
+    await order("r1");
+    await deliver(completed("r1", "sub_1"));
+    await deliver(adjustment("adjustment.created", { action: "refund", type: "full", status: "pending_approval" }));
+    expect(await statusOfSub1()).toBe("active");
+    await deliver(adjustment("adjustment.updated", { action: "refund", type: "full", status: "rejected" }));
+    expect(await statusOfSub1()).toBe("active");
+    await deliver(adjustment("adjustment.updated", { action: "refund", type: "full", status: "approved" }));
+    expect(await statusOfSub1()).toBe("refunded");
+  });
+
+  it("leaves the licence alone on a partial refund", async () => {
+    await order("r1");
+    await deliver(completed("r1", "sub_1"));
+    await deliver(adjustment("adjustment.created", { action: "refund", type: "partial", status: "approved" }));
+    expect(await statusOfSub1()).toBe("active");
+  });
+
+  it("ends the licence on a chargeback", async () => {
+    await order("r1");
+    await deliver(completed("r1", "sub_1"));
+    await deliver(adjustment("adjustment.created", { action: "chargeback", type: "full", status: "approved" }));
+    expect(await statusOfSub1()).toBe("refunded");
+  });
+
+  it("does not extend the term when the same payment is delivered twice", async () => {
+    await order("r1");
+    const event = { ...completed("r1", "sub_1"), data: { ...completed("r1", "sub_1").data, id: "txn_1" } };
+    await deliver(event);
+    const first = (await licenceByProviderRef(env, "paddle", "sub_1"))!;
+    await deliver(event);
+    await deliver(event);
+    expect((await licenceById(env, first.id))!.expires_at).toBe(first.expires_at);
+    // A genuine renewal is a different transaction, and still extends.
+    await deliver({ ...completed(null, "sub_1"), data: { ...completed(null, "sub_1").data, id: "txn_2" } });
+    expect((await licenceById(env, first.id))!.expires_at).toBe(first.expires_at + TERM_SECONDS.monthly);
   });
 
   it("does not end a licence on an adjustment that is not a refund", async () => {

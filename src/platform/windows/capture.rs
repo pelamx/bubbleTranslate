@@ -34,7 +34,7 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
-    IsClipboardFormatAvailable, OpenClipboard, SetClipboardData,
+    IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows::Win32::UI::Accessibility::{
@@ -266,7 +266,10 @@ fn clipboard_selection() -> Option<String> {
     if clipboard_sequence() != before
         && let Some(previous) = previous
     {
-        write_clipboard_string(&previous);
+        // Kept out of clipboard history and cloud sync: putting something back
+        // is not the user copying it again, and what was there may well be a
+        // password a password manager had marked the same way.
+        write_clipboard(&previous, true);
     }
 
     copied
@@ -438,7 +441,10 @@ fn read_clipboard_string() -> Option<String> {
     }
 }
 
-fn write_clipboard_string(value: &str) {
+/// Puts text on the clipboard. `private` marks it the way password managers
+/// do, so that Windows' clipboard history, cloud clipboard and clipboard
+/// monitors leave it alone.
+fn write_clipboard(value: &str, private: bool) {
     let mut utf16: Vec<u16> = value.encode_utf16().collect();
     utf16.push(0);
     let bytes = std::mem::size_of_val(utf16.as_slice());
@@ -468,6 +474,31 @@ fn write_clipboard_string(value: &str) {
         // under us between the two calls.
         if SetClipboardData(CF_UNICODETEXT, Some(HANDLE(global.0))).is_err() {
             crate::trace!("could not put text on the clipboard");
+            return;
+        }
+        if private {
+            // The documented markers: the first tells monitors to skip the
+            // content, the other two are read as a DWORD, zero meaning "no".
+            for name in [
+                windows::core::w!("ExcludeClipboardContentFromMonitorProcessing"),
+                windows::core::w!("CanIncludeInClipboardHistory"),
+                windows::core::w!("CanUploadToCloudClipboard"),
+            ] {
+                let format = RegisterClipboardFormatW(name);
+                if format == 0 {
+                    continue;
+                }
+                let Ok(block) = GlobalAlloc(GMEM_MOVEABLE, std::mem::size_of::<u32>()) else {
+                    continue;
+                };
+                let ptr = GlobalLock(block) as *mut u32;
+                if ptr.is_null() {
+                    continue;
+                }
+                *ptr = 0;
+                let _ = GlobalUnlock(block);
+                let _ = SetClipboardData(format, Some(HANDLE(block.0)));
+            }
         }
     }
 }
@@ -477,7 +508,7 @@ fn write_clipboard_string(value: &str) {
 /// The context goes unused here — Win32 owns the clipboard directly — but it
 /// is what the Linux side needs on an X11 session, so the signature is shared.
 pub fn set_clipboard(_ctx: &eframe::egui::Context, text: &str) {
-    write_clipboard_string(text);
+    write_clipboard(text, false);
 }
 
 /// Nothing to re-ask on Windows, where reading another application's

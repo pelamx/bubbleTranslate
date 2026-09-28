@@ -112,6 +112,25 @@ describe("activate / refresh", () => {
     expect(results.filter((r) => r.status === 409)).toHaveLength(2);
   });
 
+  it("caps new machines per month, even when each is removed again", async () => {
+    const { key } = await issueLicence(env, { provider: "paddle", cycle: "monthly", seats: 1 });
+    // Seat limit 1 plus the allowance of 3: four machines, one at a time.
+    for (const device of ["a", "b", "c", "d"]) {
+      const res = await post("/v1/activate", { key, device });
+      expect(res.status).toBe(200);
+      const { token } = (await res.json()) as any;
+      expect((await post("/v1/deactivate", { token, device })).status).toBe(200);
+    }
+    expect((await post("/v1/activate", { key, device: "e" })).status).toBe(429);
+    // A machine that was already added is not a new one.
+    expect((await post("/v1/activate", { key, device: "a" })).status).toBe(200);
+  });
+
+  it("refuses a device id no real client sends", async () => {
+    const { key } = await issueLicence(env, { provider: "paddle", cycle: "monthly" });
+    expect((await post("/v1/activate", { key, device: "x".repeat(129) })).status).toBe(400);
+  });
+
   it("refuses an unknown key", async () => {
     expect((await post("/v1/activate", { key: "BT-AAAAA-AAAAA-AAAAA", device: "m1" })).status).toBe(404);
   });
