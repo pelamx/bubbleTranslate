@@ -20,8 +20,10 @@ Copy. It uses a voice that is already on your computer, so it helps with
 pronunciation, and it lets you listen instead of reading. Pressing it again
 stops the voice, and the bubble does not close by itself while it is reading.
 The button only appears when a voice for that language is installed, so it
-never reads Turkish in an English voice. On Linux it needs Speech Dispatcher
-or eSpeak, which many desktops already have. (Windows) Windows cannot tell in
+never reads Turkish in an English voice. (Linux) It uses Piper when a Piper
+voice for that language is installed, and Piper sounds far more natural than
+the others. Otherwise it uses Speech Dispatcher or eSpeak, which many desktops
+already have. (Windows) Windows cannot tell in
 advance which voices exist, so for a language with no voice the first press
 does nothing and the button then goes away.
 
