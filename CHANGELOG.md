@@ -15,6 +15,8 @@ days before the others.
 
 ## Unreleased
 
+## 0.3.8 — 2026-09-28
+
 **The bubble can read the translation aloud.** A Listen button sits next to
 Copy. It uses a voice that is already on your computer, so it helps with
 pronunciation, and it lets you listen instead of reading. Pressing it again
