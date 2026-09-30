@@ -49,6 +49,16 @@ pub const PRICE_YEARLY: &str = "$20/year";
 /// already the thing sitting behind Cloudflare that gets told it. Checkout is
 /// Paddle everywhere — see `service/src/index.ts`.
 pub const BUY_URL: &str = "https://api.bubbletranslate.app/buy";
+
+/// The buy page for a click from `src`, in the language the app is showing,
+/// so someone reading the bubble in Spanish does not land on a page in
+/// English at the moment they are deciding to pay.
+pub fn buy_url(src: &str) -> String {
+    format!(
+        "{BUY_URL}?src={src}&lang={}",
+        crate::i18n::lang().code().to_ascii_lowercase()
+    )
+}
 pub const MANAGE_URL: &str = "https://api.bubbletranslate.app/account";
 
 /// The licence service. Overridable in debug builds so the client can be

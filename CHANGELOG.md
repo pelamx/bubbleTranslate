@@ -15,6 +15,12 @@ days before the others.
 
 ## Unreleased
 
+**The Pro page opens in your language.** Pressing "Upgrade to Pro" always
+opened the purchase page in English, even when you were using the app in
+Spanish or Turkish, right when you were deciding whether to pay. The page now
+follows your browser's language already, without an update. From this version
+on, it opens in whatever language the app is set to.
+
 **A copied password no longer ends up in clipboard history.** (Windows,
 macOS) Sometimes the app has to copy your selection to read it, and it then
 puts back what you had on the clipboard. That restore was not marked as

@@ -239,7 +239,7 @@ pub(super) fn account(
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             if ui.button(t("Get Pro", "Pro al", "Obtener Pro")).clicked() {
-                crate::shell::open_url(&format!("{}?src=window", license::BUY_URL));
+                crate::shell::open_url(&license::buy_url("window"));
             }
             ui.label(
                 egui::RichText::new(format!(

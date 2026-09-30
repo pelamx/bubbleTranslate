@@ -255,3 +255,18 @@ CREATE TABLE IF NOT EXISTS webhook_events (
 );
 
 CREATE INDEX IF NOT EXISTS webhook_events_by_at ON webhook_events (at);
+
+-- Every time the buy page is opened, and from where: the app's bubble when
+-- the free allowance runs out, the app's window, or anywhere else. Next to
+-- the orders table this is the funnel -- how many looked, how many started
+-- paying, how many finished. No address and no install id, only the country
+-- Cloudflare already worked out. Kept for 90 days.
+CREATE TABLE IF NOT EXISTS buy_visits (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  at       INTEGER NOT NULL,
+  src      TEXT NOT NULL,
+  lang     TEXT NOT NULL,
+  country  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS buy_visits_by_at ON buy_visits (at);

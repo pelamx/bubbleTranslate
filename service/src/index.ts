@@ -336,10 +336,11 @@ function visitorCountry(request: Request, url: URL): string | undefined {
   return raw;
 }
 
-function buy(env: Env, request: Request, url: URL): Response {
+async function buy(env: Env, request: Request, url: URL): Promise<Response> {
   const ctx = pageContext(request, url);
   const src = url.searchParams.get("src") ?? "direct";
   const base = baseUrl(env, request);
+  await logBuyVisit(env, request, src, ctx.lang);
 
   if (!paddleConfigured(env)) {
     return buyPage({
@@ -364,6 +365,32 @@ function buy(env: Env, request: Request, url: URL): Response {
     country: visitorCountry(request, url),
     successUrl: `${base}/welcome`,
   });
+}
+
+/** One row in `buy_visits` for the admin panel's funnel. Never fails the
+ *  page: a buyer must not be turned away because a counter could not be
+ *  written. */
+async function logBuyVisit(env: Env, request: Request, src: string, lang: string): Promise<void> {
+  try {
+    const t = now();
+    const cf = (request as { cf?: { country?: unknown } }).cf;
+    const country =
+      typeof cf?.country === "string" && /^[A-Z]{2}$/.test(cf.country) ? cf.country : null;
+    // The app sends `bubble` or `window`; anything else is a link somebody
+    // wrote, and the panel only needs to know it was not the app.
+    const from = /^[a-z]{1,16}$/.test(src) ? src : "other";
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO buy_visits (at, src, lang, country) VALUES (?, ?, ?, ?)`).bind(
+        t,
+        from,
+        lang,
+        country,
+      ),
+      env.DB.prepare("DELETE FROM buy_visits WHERE at < ?").bind(t - 90 * 86_400),
+    ]);
+  } catch (err) {
+    console.error("could not log a buy page visit", err);
+  }
 }
 
 async function checkoutPaddle(env: Env, request: Request): Promise<Response> {

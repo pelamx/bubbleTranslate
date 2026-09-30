@@ -1,10 +1,11 @@
 // The three languages the pages speak, and how one is chosen.
 //
 // Language and payment are two different questions. What a visitor *reads* is
-// theirs to pick, from the switcher at the top
-// right of every page. English is the default for everyone: the app itself is
-// in English, and a page that guesses a language from an IP address is wrong
-// for every traveller, expatriate and VPN user at once.
+// theirs to pick, from the switcher at the top right of every page. Before
+// they pick, the page follows what their browser says it prefers -- the
+// language they set, not where they happen to be. A page that guesses a
+// language from an IP address is wrong for every traveller, expatriate and
+// VPN user at once; `Accept-Language` is the visitor's own answer.
 //
 // The choice is carried three ways so it survives the whole journey: as
 // `?lang=` on links, as a hidden field in forms, and as a cookie for the
@@ -19,14 +20,35 @@ export const DEFAULT_LANG: Lang = "en";
 export const isLang = (value: unknown): value is Lang =>
   typeof value === "string" && (LANGS as readonly string[]).includes(value);
 
-/** `?lang=` wins, then the cookie, then English. Never the IP address. */
+/** `?lang=` wins, then the cookie, then the browser's own preference, then
+ *  English. Never the IP address. */
 export function pickLang(request: Request, url: URL): Lang {
   const fromQuery = url.searchParams.get("lang")?.toLowerCase();
   if (isLang(fromQuery)) return fromQuery;
   const cookie = request.headers.get("cookie") ?? "";
   const match = /(?:^|;\s*)lang=([a-z]{2})/.exec(cookie);
   if (match && isLang(match[1])) return match[1];
-  return DEFAULT_LANG;
+  return fromAcceptLanguage(request.headers.get("accept-language")) ?? DEFAULT_LANG;
+}
+
+/** The highest-weighted language in an `Accept-Language` header that the
+ *  pages speak. `es-CL` counts as `es`; `q=0` means "not this one". */
+export function fromAcceptLanguage(header: string | null): Lang | undefined {
+  if (!header) return undefined;
+  const ranked = header
+    .split(",")
+    .map((part, index) => {
+      const [tag, ...params] = part.trim().split(";");
+      const q = params.map((p) => /^\s*q=([\d.]+)\s*$/.exec(p)).find(Boolean);
+      return {
+        lang: (tag ?? "").trim().toLowerCase().split("-")[0],
+        weight: q ? Number(q[1]) : 1,
+        index,
+      };
+    })
+    .filter((e) => Number.isFinite(e.weight) && e.weight > 0)
+    .sort((a, b) => b.weight - a.weight || a.index - b.index);
+  return ranked.map((e) => e.lang).find(isLang);
 }
 
 /** A relative link with the language carried along. */

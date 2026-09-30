@@ -126,7 +126,7 @@ impl BubbleApp {
                         .button(t("Upgrade to Pro", "Pro'ya geç", "Pasar a Pro"))
                         .clicked()
                     {
-                        shell::open_url(&format!("{}?src=bubble", license::BUY_URL));
+                        shell::open_url(&license::buy_url("bubble"));
                         dismiss = true;
                     }
                     if ui

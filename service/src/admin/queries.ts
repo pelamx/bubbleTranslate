@@ -208,6 +208,43 @@ export async function limitHits(env: Env): Promise<LimitHits> {
   return { base, capped };
 }
 
+export interface BuyFunnel {
+  /** Buy page opened, by where the link was: `bubble`, `window`, `direct`… */
+  bySrc: { src: string; n: number }[];
+  byLang: { lang: string; n: number }[];
+  visits: number;
+  /** Pressed "Continue to payment": an order row exists. */
+  started: number;
+  paid: number;
+}
+
+/** The last 30 days from opening the buy page to paying. Visits are counted
+ *  per page load, not per person, and cannot tell your own visits apart. */
+export async function buyFunnel(env: Env): Promise<BuyFunnel> {
+  const since = now() - 30 * DAY;
+  const [src, lang, orders] = await env.DB.batch([
+    env.DB.prepare(
+      `SELECT src, COUNT(*) AS n FROM buy_visits WHERE at >= ? GROUP BY src ORDER BY n DESC`,
+    ).bind(since),
+    env.DB.prepare(
+      `SELECT lang, COUNT(*) AS n FROM buy_visits WHERE at >= ? GROUP BY lang ORDER BY n DESC`,
+    ).bind(since),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS started, COALESCE(SUM(status = 'paid'), 0) AS paid
+         FROM orders WHERE created_at >= ?`,
+    ).bind(since),
+  ]);
+  const bySrc = (src?.results ?? []) as { src: string; n: number }[];
+  const o = (orders?.results?.[0] ?? {}) as { started?: number; paid?: number };
+  return {
+    bySrc,
+    byLang: (lang?.results ?? []) as { lang: string; n: number }[],
+    visits: bySrc.reduce((a, r) => a + r.n, 0),
+    started: o.started ?? 0,
+    paid: o.paid ?? 0,
+  };
+}
+
 /** Newest version first: "0.2.10" after "0.2.9". */
 export function compareVersions(a: string, b: string): number {
   const pa = a.split(".").map(Number);

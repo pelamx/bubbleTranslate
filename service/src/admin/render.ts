@@ -30,6 +30,8 @@ import {
   type CountryRow,
   type LimitHits,
   limitHits,
+  type BuyFunnel,
+  buyFunnel,
   downloads,
   health,
   ignoreList,
@@ -547,6 +549,42 @@ function limitCard(hits: LimitHits): string {
      </section>`;
 }
 
+const SRC_LABEL: Record<string, string> = {
+  bubble: "App bubble, out of free translations",
+  window: "App window",
+  direct: "No source (website, typed, bookmarked)",
+};
+
+function funnelCard(f: BuyFunnel): string {
+  if (f.visits === 0 && f.started === 0) {
+    return `<section class="card">
+       <p class="label">Buy page, last 30 days</p>
+       <p class="sub">Nobody has opened the buy page yet since visits started being counted.</p>
+     </section>`;
+  }
+  const srcRows = f.bySrc
+    .map(
+      (r) => `<tr><td>${escapeHtml(SRC_LABEL[r.src] ?? r.src)}</td><td class="num"><b>${r.n}</b></td></tr>`,
+    )
+    .join("");
+  const langs = f.byLang.map((r) => `${escapeHtml(r.lang.toUpperCase())} ${r.n}`).join(" · ");
+  return `<section class="card">
+       <p class="label">Buy page, last 30 days</p>
+       <div class="scroll"><table>
+         <tr><th>Opened the page</th><th>Pressed “Continue to payment”</th><th>Paid</th></tr>
+         <tr><td class="num"><b>${f.visits}</b></td>
+             <td>${ratio(f.started, f.visits)}</td>
+             <td>${ratio(f.paid, f.started)}</td></tr>
+       </table></div>
+       <div class="scroll" style="margin-top:14px"><table>
+         <tr><th>Came from</th><th class="num">Visits</th></tr>
+         ${srcRows}
+       </table></div>
+       <p class="muted foot">Shown in: ${langs || "—"}. Every page load counts, including yours and
+         any crawler's, so a handful of visits with no payment is not yet a verdict.</p>
+     </section>`;
+}
+
 export function revenueCard(m: Revenue, share: { pro: number; active: number }): string {
   const rows = m.months
     .map(
@@ -680,7 +718,7 @@ export function delta(today: number, yesterday: number): string {
 }
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits] = await Promise.all([
+  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -702,6 +740,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     providerHealth(env),
     countries(env),
     limitHits(env),
+    buyFunnel(env),
   ]);
   const dl = downloadsNow?.total ?? null;
 
@@ -914,6 +953,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
      </section>
 
      ${limitCard(hits)}
+
+     ${funnelCard(funnel)}
 
      ${countriesCard(byCountry)}
 
