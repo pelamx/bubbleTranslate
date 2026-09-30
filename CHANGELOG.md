@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.3.9 — 2026-09-30
 
 **The Pro page opens in your language.** Pressing "Upgrade to Pro" always
 opened the purchase page in English, even when you were using the app in
