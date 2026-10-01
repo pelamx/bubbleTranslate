@@ -90,6 +90,12 @@ pub struct BubbleApp {
     /// The theme whose palette is currently installed, so a change made from
     /// any surface is noticed and applied exactly once.
     applied_theme: Option<BubbleTheme>,
+    /// The Omarchy theme the palette was last built from, and when that was
+    /// last checked. See [`BubbleTheme::Omarchy`].
+    #[cfg(target_os = "linux")]
+    omarchy_stamp: Option<String>,
+    #[cfg(target_os = "linux")]
+    omarchy_checked: Instant,
     /// Cleared once the window manager has been told what the bubble is.
     marking_pending: bool,
     /// Cleared once the bubble is set to appear on every workspace.
@@ -196,6 +202,10 @@ impl BubbleApp {
             startup_frames: 0,
             applied_zoom: None,
             applied_theme: Some(theme),
+            #[cfg(target_os = "linux")]
+            omarchy_stamp: crate::platform::omarchy::theme_stamp(),
+            #[cfg(target_os = "linux")]
+            omarchy_checked: Instant::now(),
             marking_pending: true,
             workspace_pending: true,
             pending_show: false,
@@ -244,6 +254,11 @@ impl BubbleApp {
                             let _ = cfg.save();
                         }
                     }
+                    // Put away while it was still working — Esc or ✕ — and
+                    // so not to be brought back by the answer arriving.
+                    if matches!(self.state, State::Hidden) {
+                        continue;
+                    }
                     let update = !self.update_announced && crate::update::available().is_some();
                     self.update_announced |= update;
                     self.state = State::Done {
@@ -254,6 +269,9 @@ impl BubbleApp {
                     self.shown_at = Instant::now();
                 }
                 UiEvent::Failed { errors } => {
+                    if matches!(self.state, State::Hidden) {
+                        continue;
+                    }
                     self.state = State::Failed { errors };
                     self.shown_at = Instant::now();
                 }
@@ -308,6 +326,7 @@ impl BubbleApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(Self::window_origin(
             pos,
         )));
+        crate::platform::set_bubble_shown(true);
         if !self.visible {
             self.pending_show = true;
             // Ask again for the bubble to be on every workspace. Not a
@@ -339,6 +358,7 @@ impl BubbleApp {
         self.settings_open = false;
         crate::speech::stop();
         monitor::set_paused(false);
+        crate::platform::set_bubble_shown(false);
     }
 
     /// Puts the bubble's window away at startup, once.
@@ -666,6 +686,12 @@ impl eframe::App for BubbleApp {
         self.apply_zoom(ctx);
         self.refresh_readiness();
 
+        // Esc, taken before the engine's events so a press can only ever
+        // close the bubble that was up when it happened, never the next one.
+        if crate::platform::take_escape() && !matches!(self.state, State::Hidden) {
+            self.hide(ctx);
+        }
+
         self.drain_events(ctx);
         self.drive_main_window(ctx);
 
@@ -689,6 +715,21 @@ impl eframe::App for BubbleApp {
             set_palette(theme);
             install_theme(ctx);
             ctx.request_repaint();
+        }
+        // Following Omarchy, the palette also has to turn over when the
+        // desktop's theme does. Looked at no more than once a second; a hidden
+        // bubble does not look at all, and catches up on the frame it is shown.
+        #[cfg(target_os = "linux")]
+        if theme == BubbleTheme::Omarchy && self.omarchy_checked.elapsed() >= Duration::from_secs(1)
+        {
+            self.omarchy_checked = Instant::now();
+            let stamp = crate::platform::omarchy::theme_stamp();
+            if stamp != self.omarchy_stamp {
+                self.omarchy_stamp = stamp;
+                set_palette(theme);
+                install_theme(ctx);
+                ctx.request_repaint();
+            }
         }
 
         if matches!(self.state, State::Hidden) {

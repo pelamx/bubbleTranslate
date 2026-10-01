@@ -25,7 +25,7 @@ pub use macos::{on_screen_region_request, read_screen_region};
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-pub use linux::{capture, monitor, shell, speech as speech_command};
+pub use linux::{capture, monitor, omarchy, shell, speech as speech_command};
 
 #[cfg(target_os = "windows")]
 mod windows;
@@ -263,6 +263,64 @@ pub use windows::{
     on_screen_region_request, pointer_over, preferred_zoom, read_screen_region, shape_bubble,
     to_points,
 };
+
+/// Esc, pressed while the bubble is up.
+///
+/// The bubble never takes keyboard focus — it would steal the selection from
+/// the application it is translating — so it never receives a key of its own.
+/// Each platform notices Esc where it already watches the keyboard and reports
+/// it here; the press still reaches the application underneath, which is what
+/// someone pressing Esc over it expects anyway.
+///
+/// A flag plus a wake-up rather than a message: only the bubble cares, and
+/// only about the latest press.
+static ESCAPE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static BUBBLE_SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static ON_ESCAPE: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
+
+/// Registers how to wake the interface when Esc is pressed.
+pub fn on_escape(wake: impl Fn() + Send + Sync + 'static) {
+    let _ = ON_ESCAPE.set(Box::new(wake));
+}
+
+/// Called by a platform's keyboard watcher on Esc. Ignored while the bubble
+/// is hidden, so Esc pressed anywhere else costs nothing.
+pub(crate) fn escape_pressed() {
+    if !BUBBLE_SHOWN.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    crate::trace!("key-down  esc -> dismiss");
+    ESCAPE.store(true, std::sync::atomic::Ordering::Relaxed);
+    if let Some(wake) = ON_ESCAPE.get() {
+        wake();
+    }
+}
+
+/// Whether Esc was pressed since the last time this was asked.
+pub fn take_escape() -> bool {
+    ESCAPE.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Told by the bubble when it comes up and goes away.
+///
+/// Where the keyboard can only be asked rather than listened to, this is what
+/// starts and stops the asking.
+pub fn set_bubble_shown(shown: bool) {
+    let was = BUBBLE_SHOWN.swap(shown, std::sync::atomic::Ordering::Relaxed);
+    if !shown {
+        ESCAPE.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+    #[cfg(target_os = "linux")]
+    if shown && !was {
+        linux::watch_escape();
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = was;
+}
+
+pub(crate) fn bubble_shown() -> bool {
+    BUBBLE_SHOWN.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 /// Whether selections can actually be watched here, and what to tell the user
 /// when they cannot.

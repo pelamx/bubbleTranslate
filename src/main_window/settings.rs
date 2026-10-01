@@ -388,7 +388,7 @@ pub(super) fn behaviour(ui: &mut egui::Ui, cfg: &mut Config) -> bool {
         egui::ComboBox::from_id_salt("bubble-theme-main")
             .selected_text(cfg.theme.label())
             .show_ui(ui, |ui| {
-                for theme in BubbleTheme::ALL {
+                for theme in &BubbleTheme::available() {
                     if ui
                         .selectable_label(*theme == cfg.theme, theme.label())
                         .clicked()

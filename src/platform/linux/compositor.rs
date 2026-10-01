@@ -64,6 +64,24 @@ pub fn key_held(key: TriggerKey) -> Option<bool> {
     }
 }
 
+/// Whether Esc is down right now, as the compositor sees it.
+///
+/// Asked over and over while the bubble is up, and only then: the compositor
+/// says what is held, never what was typed, so polling is the only way to
+/// notice a press without reading `/dev/input`.
+pub fn escape_down() -> Option<bool> {
+    let reply = hyprland_eval(
+        "if hl.is_key_down('Escape') then error('BT_HELD') else error('BT_FREE') end",
+    )?;
+    if reply.contains("BT_HELD") {
+        Some(true)
+    } else if reply.contains("BT_FREE") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 /// Sends Ctrl+C to whatever has keyboard focus, as the compositor itself.
 ///
 /// Not a virtual keyboard: on one of those the modifiers the user is still

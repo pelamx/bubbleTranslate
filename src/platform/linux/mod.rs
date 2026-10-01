@@ -26,6 +26,7 @@
 pub mod capture;
 pub mod cursor;
 pub mod monitor;
+pub mod omarchy;
 pub mod shell;
 pub mod speech;
 
@@ -241,6 +242,68 @@ pub fn pointer_over(
     let at = fresh?;
     let (x, y) = to_points(at, monitor_points);
     Some(rect.contains(eframe::egui::pos2(x as f32, y as f32)))
+}
+
+/// Notices Esc while the bubble is up, where nothing already does.
+///
+/// `/dev/input`, when it can be read, reports Esc by itself. Without it the
+/// keyboard can only be asked what is held, so it is asked — of Hyprland, or
+/// of the X server — on a thread that lives exactly as long as the bubble
+/// does. Elsewhere on Wayland nothing will say, and ✕ and the auto-hide are
+/// the ways to close it.
+pub(crate) fn watch_escape() {
+    /// Short enough that no press, however quick, falls between two looks.
+    const POLL: std::time::Duration = std::time::Duration::from_millis(20);
+
+    /// One watcher at most: a bubble that goes and comes back faster than
+    /// the last one noticed it went keeps the same thread.
+    static WATCHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    use std::sync::atomic::Ordering;
+
+    if evdev::available() || WATCHING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let ask: Box<dyn Fn() -> Option<bool> + Send> = if compositor::can_answer() {
+        Box::new(compositor::escape_down)
+    } else if matches!(backend(), Backend::X11Primary) {
+        match x11::EscapeWatch::open() {
+            Some(watch) => Box::new(move || watch.down()),
+            None => {
+                WATCHING.store(false, Ordering::Release);
+                return;
+            }
+        }
+    } else {
+        WATCHING.store(false, Ordering::Release);
+        return;
+    };
+    let _ = std::thread::Builder::new()
+        .name("escape-watch".into())
+        .spawn(move || {
+            // Down when the bubble came up is not a press: only a key seen
+            // going down while it is showing counts.
+            let mut was_down = true;
+            loop {
+                while crate::platform::bubble_shown() {
+                    let Some(down) = ask() else {
+                        // Stopped answering; asking again would only spin.
+                        WATCHING.store(false, Ordering::Release);
+                        return;
+                    };
+                    if down && !was_down {
+                        crate::platform::escape_pressed();
+                    }
+                    was_down = down;
+                    std::thread::sleep(POLL);
+                }
+                WATCHING.store(false, Ordering::Release);
+                // The bubble came back between the last look and the line
+                // above, and its own call found this thread still watching.
+                if !crate::platform::bubble_shown() || WATCHING.swap(true, Ordering::AcqRel) {
+                    return;
+                }
+            }
+        });
 }
 
 /// Who to tell when the key that reads the screen is pressed.

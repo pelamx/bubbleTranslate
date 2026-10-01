@@ -689,7 +689,16 @@ chosen before it is read.
   every machine cannot bet on the driver.
 - Restoring the clipboard after a synthetic copy only preserves text.
 - The bubble never takes keyboard focus (by design — otherwise the source app
-  would drop its selection), so it cannot be dismissed with Esc. Close it with
-  ✕, let it auto-hide, or just select something else.
+  would drop its selection), so Esc is noticed where the app already watches
+  the keyboard: everywhere on macOS and Windows, and on Linux through
+  `/dev/input`, Hyprland, or an X11 session. On any other Wayland desktop
+  without the `input` group, close it with ✕, let it auto-hide, or select
+  something else. Esc still reaches the application underneath too.
 - Keyboard-initiated selections anchor the bubble at the mouse pointer, not at
   the caret.
+
+## Licence
+
+All rights reserved. The source is public for transparency — so you can see
+exactly what happens to the text you select — not for reuse. See
+[LICENSE](LICENSE).

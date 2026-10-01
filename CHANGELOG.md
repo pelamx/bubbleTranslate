@@ -13,6 +13,28 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## 0.4.0 — 2026-10-01
+
+**Esc closes the bubble.** Press Esc and the bubble goes away, whichever
+window you are in. Until now the only ways to get rid of it early were
+reaching for the ✕ or waiting for it to fade. Esc still reaches the window you
+are working in, so a dialog or a menu there closes as it always did. On Linux
+it works on X11, on Hyprland, and wherever the app can read the keyboard (the
+`input` group); on other Wayland desktops, ✕ and the auto-hide remain.
+
+**The bubble can match your Omarchy theme.** (Linux) On Omarchy, the theme
+list has a new first choice, "Omarchy (follows the desktop)". With it, the
+bubble takes its colours from whatever theme the desktop is using and changes
+when you switch themes. Until now you had to pick the nearest built-in palette
+by hand and pick again after every theme change.
+
+**A bubbleTranslate button for the Omarchy bar.** (Linux) Run
+`bubbleTranslate --omarchy-install` once and a translate icon appears on the
+bar. Click it to stop bubbles from popping up on their own, for a presentation
+or a screen share, and click again to bring them back. The icon dims while
+they are off, and hovering it shows how many free translations are left today.
+`bubbleTranslate --omarchy-remove` takes it away again.
+
 ## 0.3.9 — 2026-09-30
 
 **The Pro page opens in your language.** Pressing "Upgrade to Pro" always

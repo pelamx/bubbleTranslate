@@ -172,6 +172,43 @@ fn held_on(conn: &RustConnection, screen_num: usize, mask: KeyButMask) -> Option
     Some(reply.mask.intersects(mask))
 }
 
+/// Asks the X server, again and again, whether Esc is down.
+///
+/// One connection for the life of the bubble rather than one per question:
+/// this is asked every few milliseconds while the bubble is up. `QueryKeymap`
+/// answers for the whole keyboard, and only Esc's bit is ever looked at.
+pub struct EscapeWatch {
+    conn: RustConnection,
+    keycode: u8,
+}
+
+impl EscapeWatch {
+    pub fn open() -> Option<Self> {
+        /// `XK_Escape`.
+        const ESCAPE: u32 = 0xff1b;
+        let (conn, _) = x11rb::connect(None).ok()?;
+        let setup = conn.setup();
+        let (min, max) = (setup.min_keycode, setup.max_keycode);
+        let map = conn
+            .get_keyboard_mapping(min, max - min + 1)
+            .ok()?
+            .reply()
+            .ok()?;
+        let per = map.keysyms_per_keycode.max(1) as usize;
+        let index = map.keysyms.chunks(per).position(|syms| syms.contains(&ESCAPE))?;
+        Some(Self {
+            keycode: min + index as u8,
+            conn,
+        })
+    }
+
+    pub fn down(&self) -> Option<bool> {
+        let keys = self.conn.query_keymap().ok()?.reply().ok()?.keys;
+        let code = self.keycode as usize;
+        Some(keys[code / 8] & (1 << (code % 8)) != 0)
+    }
+}
+
 /// Blocks while a mouse button is held down, so a selection being dragged out
 /// is not acted on until the user lets go.
 ///

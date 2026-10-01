@@ -180,6 +180,9 @@ pub enum BubbleTheme {
     /// The light pair, for a pale desktop — or for reading a bubble in daylight.
     CatppuccinLatte,
     RosePineDawn,
+    /// Whatever theme the Omarchy desktop is using, followed as it changes.
+    /// Offered only on Omarchy; anywhere else it draws as [`BubbleTheme::Slate`].
+    Omarchy,
 }
 
 impl BubbleTheme {
@@ -194,8 +197,26 @@ impl BubbleTheme {
         BubbleTheme::RosePineDawn,
     ];
 
+    /// The themes worth offering here: every built-in one, and on Omarchy the
+    /// one that follows the desktop, listed first because it is the one that
+    /// will look right.
+    pub fn available() -> Vec<BubbleTheme> {
+        let mut themes = Vec::with_capacity(Self::ALL.len() + 1);
+        #[cfg(target_os = "linux")]
+        if crate::platform::omarchy::present() {
+            themes.push(BubbleTheme::Omarchy);
+        }
+        themes.extend_from_slice(Self::ALL);
+        themes
+    }
+
     pub fn label(self) -> &'static str {
         match self {
+            BubbleTheme::Omarchy => t(
+                "Omarchy (follows the desktop)",
+                "Omarchy (masaüstünü izler)",
+                "Omarchy (sigue el escritorio)",
+            ),
             BubbleTheme::Slate => t("Slate (original)", "Slate (orijinal)", "Slate (original)"),
             BubbleTheme::TokyoNight => "Tokyo Night",
             BubbleTheme::Catppuccin => "Catppuccin",
@@ -534,7 +555,7 @@ mod tests {
     fn the_theme_survives_a_round_trip() {
         let old: Config = toml::from_str("target_lang = \"tr\"\n").unwrap();
         assert_eq!(old.theme, BubbleTheme::Slate);
-        for theme in BubbleTheme::ALL {
+        for theme in BubbleTheme::ALL.iter().chain([&BubbleTheme::Omarchy]) {
             let cfg = Config {
                 theme: *theme,
                 ..Config::default()

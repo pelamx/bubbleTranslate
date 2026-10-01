@@ -424,7 +424,7 @@ impl BubbleApp {
                 .width(150.0)
                 .height(LANG_POPUP_HEIGHT)
                 .show_ui(ui, |ui| {
-                    for theme in BubbleTheme::ALL {
+                    for theme in &BubbleTheme::available() {
                         if ui
                             .selectable_label(*theme == cfg.theme, theme.label())
                             .clicked()

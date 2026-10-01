@@ -28,7 +28,7 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::UI::HiDpi::GetDpiForSystem;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetDoubleClickTime, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey,
-    VIRTUAL_KEY, VK_A, VK_C, VK_CONTROL, VK_DOWN, VK_E,
+    VIRTUAL_KEY, VK_A, VK_C, VK_CONTROL, VK_DOWN, VK_E, VK_ESCAPE,
     VK_END, VK_HOME, VK_LEFT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RIGHT, VK_RWIN, VK_SHIFT,
     VK_UP,
 };
@@ -407,11 +407,22 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
     }
     let event = unsafe { *(lparam.0 as *const KBDLLHOOKSTRUCT) };
 
-    if is_ours(event.dwExtraInfo) || PAUSED.load(Ordering::Relaxed) {
+    if is_ours(event.dwExtraInfo) {
         return unsafe { CallNextHookEx(Some(HHOOK::default()), code, wparam, lparam) };
     }
 
     let key = VIRTUAL_KEY(event.vkCode as u16);
+
+    // Esc puts the bubble away. Ahead of the pause, because the pointer
+    // resting on the bubble is the likeliest moment to want it gone, and
+    // passed on, because the window underneath may want it too.
+    if key == VK_ESCAPE && wparam.0 as u32 == WM_KEYDOWN {
+        crate::platform::escape_pressed();
+    }
+
+    if PAUSED.load(Ordering::Relaxed) {
+        return unsafe { CallNextHookEx(Some(HHOOK::default()), code, wparam, lparam) };
+    }
 
     // Ctrl+Shift+E: read a rectangle of the screen instead of a selection.
     //

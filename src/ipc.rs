@@ -37,6 +37,22 @@ const TRANSLATE: &str = "translate-selection";
 const READ_SCREEN: &str = "read-screen";
 #[cfg(target_os = "windows")]
 const OPEN: &str = "open-window";
+/// Turn automatic bubbles on or off: what a click on the Omarchy bar widget
+/// asks for. The running copy owns the setting, so it is the one that flips it.
+#[cfg(target_os = "linux")]
+const TOGGLE_AUTO: &str = "toggle-auto";
+
+/// What the listener does with a [`TOGGLE_AUTO`]. Set once at startup by the
+/// code that holds the config; until then the request is ignored.
+#[cfg(target_os = "linux")]
+static ON_TOGGLE_AUTO: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> =
+    std::sync::OnceLock::new();
+
+/// Registers what a [`TOGGLE_AUTO`] request does.
+#[cfg(target_os = "linux")]
+pub fn on_toggle_auto(handler: impl Fn() + Send + Sync + 'static) {
+    let _ = ON_TOGGLE_AUTO.set(Box::new(handler));
+}
 
 /// What the listener answers an [`OPEN`] with: whether it is staying, and so
 /// whether the caller is the copy that gets out of the way.
@@ -62,7 +78,7 @@ fn split_request(message: &str) -> (&str, &str) {
 const MAX_MESSAGE: u64 = 64;
 
 #[cfg(target_os = "linux")]
-pub use unix::request_read_screen;
+pub use unix::{is_running, request_read_screen, request_toggle_auto};
 #[cfg(unix)]
 pub use unix::{listen, request_translate};
 
@@ -133,6 +149,13 @@ mod unix {
                         crate::trace!("ipc: asked to read the screen");
                         crate::platform::ask_for_screen_region();
                     }
+                    #[cfg(target_os = "linux")]
+                    if message.trim() == super::TOGGLE_AUTO {
+                        crate::trace!("ipc: asked to toggle automatic bubbles");
+                        if let Some(handler) = super::ON_TOGGLE_AUTO.get() {
+                            handler();
+                        }
+                    }
                 }
             })?;
         crate::trace!("ipc: listening on {}", path.display());
@@ -158,6 +181,23 @@ mod unix {
             return false;
         };
         stream.write_all(super::READ_SCREEN.as_bytes()).is_ok()
+    }
+
+    /// Asks the running instance to turn automatic bubbles on or off. The
+    /// whole of `--toggle`.
+    #[cfg(target_os = "linux")]
+    pub fn request_toggle_auto() -> bool {
+        let Ok(mut stream) = UnixStream::connect(socket_path()) else {
+            return false;
+        };
+        stream.write_all(super::TOGGLE_AUTO.as_bytes()).is_ok()
+    }
+
+    /// Whether a copy is running to answer. An empty connection is ignored by
+    /// the listener, so asking costs it nothing.
+    #[cfg(target_os = "linux")]
+    pub fn is_running() -> bool {
+        UnixStream::connect(socket_path()).is_ok()
     }
 }
 

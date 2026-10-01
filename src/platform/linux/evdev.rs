@@ -16,8 +16,9 @@
 //!     switches, power buttons and the rest of the event nodes;
 //!   * only the eight modifier keycodes, and only as a bitmask of what is
 //!     currently held — plus E, and only to notice Ctrl+Shift+E, the key that
-//!     reads the screen. Every other keycode is dropped inside the read loop —
-//!     nothing else is stored, counted or forwarded anywhere.
+//!     reads the screen, and Esc, which puts the bubble away. Every other
+//!     keycode is dropped inside the read loop — nothing else is stored,
+//!     counted or forwarded anywhere.
 //!
 //! The one exception is the left mouse button, read from devices that have no
 //! keyboard, so the clipboard route in [`super::borrow`] can tell when a drag
@@ -60,6 +61,8 @@ mod keycode {
     pub const RIGHTMETA: u16 = 126;
     /// Not a modifier: the key that, with Ctrl and Shift, reads the screen.
     pub const E: u16 = 18;
+    /// Not a modifier: puts the bubble away.
+    pub const ESC: u16 = 1;
     /// Not a modifier: read only by [`super::start_pointer`], from devices
     /// that have no keyboard at all.
     pub const BTN_LEFT: u16 = 272;
@@ -301,6 +304,12 @@ pub fn start() -> Result<(), String> {
                     }
                 },
                 move |code, down| {
+                    if code == keycode::ESC {
+                        if down {
+                            crate::platform::escape_pressed();
+                        }
+                        return;
+                    }
                     if code == keycode::E {
                         let pressed = down && !e_down;
                         e_down = down;

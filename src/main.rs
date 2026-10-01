@@ -105,6 +105,27 @@ fn main() -> eframe::Result<()> {
         );
         std::process::exit(1);
     }
+    #[cfg(target_os = "linux")]
+    if args.iter().any(|a| a == "--toggle") {
+        // A click on the Omarchy bar widget.
+        if ipc::request_toggle_auto() {
+            std::process::exit(0);
+        }
+        eprintln!("bubbleTranslate: nothing is running to toggle — start bubbleTranslate first.");
+        std::process::exit(1);
+    }
+    #[cfg(target_os = "linux")]
+    if args.iter().any(|a| a == "--status") {
+        std::process::exit(print_status());
+    }
+    #[cfg(target_os = "linux")]
+    if args.iter().any(|a| a == "--omarchy-install") {
+        std::process::exit(platform::omarchy::install_bar_widget());
+    }
+    #[cfg(target_os = "linux")]
+    if args.iter().any(|a| a == "--omarchy-remove") {
+        std::process::exit(platform::omarchy::remove_bar_widget());
+    }
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!(concat!("bubbleTranslate ", env!("CARGO_PKG_VERSION")));
         std::process::exit(0);
@@ -149,6 +170,17 @@ fn main() -> eframe::Result<()> {
     let (loaded_config, loaded_quota) = load_state();
     i18n::set(loaded_config.ui_lang);
     let config = Arc::new(Mutex::new(loaded_config));
+    #[cfg(target_os = "linux")]
+    {
+        // The Omarchy bar widget's click. Saved at once, so the widget's next
+        // `--status`, which reads the file, already shows the new state.
+        let config = config.clone();
+        ipc::on_toggle_auto(move || {
+            let mut cfg = config.lock().unwrap();
+            cfg.auto_translate = !cfg.auto_translate;
+            let _ = cfg.save();
+        });
+    }
     let licensing = Licensing {
         license: Arc::new(Mutex::new(License::load())),
         quota: Arc::new(Mutex::new(loaded_quota)),
@@ -301,6 +333,12 @@ fn main() -> eframe::Result<()> {
                 }
             }
 
+            // Esc while the bubble is up: wake the interface to put it away.
+            crate::platform::on_escape({
+                let ctx = cc.egui_ctx.clone();
+                move || ctx.request_repaint()
+            });
+
             // Ctrl+Shift+E: read a rectangle of the screen instead of a
             // selection. Registered the same way everywhere; on a platform
             // that has no such gesture yet the callback is simply never
@@ -338,6 +376,24 @@ fn main() -> eframe::Result<()> {
 /// "the network is"; this one separates either from "today's allowance is
 /// spent", which otherwise looks identical from the outside — no bubble
 /// appears.
+/// `--status`: one line of JSON for the Omarchy bar widget — whether a copy is
+/// running, whether bubbles appear on their own, and what is left of today's
+/// free allowance (`null` on Pro, where there is no limit).
+#[cfg(target_os = "linux")]
+fn print_status() -> i32 {
+    let licence = License::load();
+    let (config, mut quota) = load_state();
+    let remaining = quota
+        .remaining(&licence.entitlement)
+        .map_or_else(|| "null".to_string(), |n| n.to_string());
+    println!(
+        "{{\"running\":{},\"auto\":{},\"remaining\":{remaining}}}",
+        ipc::is_running(),
+        config.auto_translate,
+    );
+    0
+}
+
 fn license_status() -> i32 {
     let licence = License::load();
     let (_config, mut quota) = load_state();

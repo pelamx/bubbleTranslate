@@ -44,6 +44,8 @@ const NAVIGATION_KEYS: [i64; 8] = [
     121, // page down
 ];
 const KEYCODE_A: i64 = 0;
+/// `kVK_Escape`, from `HIToolbox/Events.h`.
+const KEYCODE_ESCAPE: i64 = 53;
 
 /// How often to re-ask whether Accessibility has been granted, while it has
 /// not. Idle in every sense — one TCC lookup on a thread that has nothing
@@ -228,6 +230,16 @@ fn run(on_trigger: impl Fn(Trigger) + Send + 'static) {
                     }
                 }
                 _ => {}
+            }
+
+            // Esc puts the bubble away. Ahead of the pause too: the pointer
+            // resting on the bubble is the likeliest moment to want it gone.
+            if matches!(event_type, CGEventType::KeyUp)
+                && event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE)
+                    == KEYCODE_ESCAPE
+            {
+                crate::platform::escape_pressed();
+                return CallbackResult::Keep;
             }
 
             if PAUSED.load(Ordering::Relaxed) {

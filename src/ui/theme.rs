@@ -62,6 +62,9 @@ pub(super) const fn rgb(r: u8, g: u8, b: u8) -> egui::Color32 {
 /// around it.
 pub(super) fn palette_for(theme: BubbleTheme) -> Palette {
     match theme {
+        BubbleTheme::Omarchy => {
+            omarchy_palette().unwrap_or_else(|| palette_for(BubbleTheme::Slate))
+        }
         BubbleTheme::Slate => Palette {
             text_primary: rgb(240, 240, 240),
             text_secondary: rgb(186, 186, 186),
@@ -211,6 +214,73 @@ pub(super) fn palette_for(theme: BubbleTheme) -> Palette {
             light: true,
         },
     }
+}
+
+/// The palette of whatever theme Omarchy is using, built from its
+/// `colors.toml`.
+///
+/// Built from the few colours every Omarchy theme names — its background, its
+/// text and its accent — with the steps between them mixed here rather than
+/// taken from the theme's other entries, which differ too much from theme to
+/// theme to mean the same role in each. That keeps every theme's text at the
+/// contrast the built-in palettes hold to, however the theme itself is drawn.
+#[cfg(target_os = "linux")]
+fn omarchy_palette() -> Option<Palette> {
+    let theme = crate::platform::omarchy::theme_colors()?;
+    let color = |key: &str| theme.get(key).map(|[r, g, b]| rgb(r, g, b));
+    let bg = color("background")?;
+    // The brighter of the theme's two text colours on a dark theme and the
+    // darker on a light one: whichever stands further off the card.
+    let text = [color("bright_foreground"), color("foreground")]
+        .into_iter()
+        .flatten()
+        .max_by_key(|c| luma_distance(*c, bg))?;
+    let toward = |c: egui::Color32, t: f32| mix(bg, c, t);
+    let shade = if theme.light {
+        egui::Color32::WHITE
+    } else {
+        egui::Color32::BLACK
+    };
+    Some(Palette {
+        text_primary: text,
+        text_secondary: toward(text, 0.78),
+        text_muted: toward(text, 0.6),
+        bubble_bg: bg,
+        bubble_border: toward(text, 0.22),
+        text_error: color("red").unwrap_or(if theme.light {
+            rgb(180, 40, 60)
+        } else {
+            rgb(255, 150, 150)
+        }),
+        control: toward(text, 0.1),
+        control_hover: toward(text, 0.16),
+        control_active: toward(text, 0.24),
+        field_bg: mix(bg, shade, 0.25),
+        accent: color("accent").unwrap_or(text),
+        control_edge: toward(text, 0.18),
+        control_edge_hover: toward(text, 0.32),
+        faint_bg: toward(text, 0.04),
+        disabled_bg: toward(text, 0.07),
+        light: theme.light,
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn omarchy_palette() -> Option<Palette> {
+    None
+}
+
+/// `a` moved `t` of the way to `b`.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn mix(a: egui::Color32, b: egui::Color32, t: f32) -> egui::Color32 {
+    let ch = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    rgb(ch(a.r(), b.r()), ch(a.g(), b.g()), ch(a.b(), b.b()))
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn luma_distance(a: egui::Color32, b: egui::Color32) -> u32 {
+    let luma = |c: egui::Color32| 299 * c.r() as i32 + 587 * c.g() as i32 + 114 * c.b() as i32;
+    (luma(a) - luma(b)).unsigned_abs()
 }
 
 thread_local! {
