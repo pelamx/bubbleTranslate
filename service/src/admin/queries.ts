@@ -272,12 +272,17 @@ export interface Downloads {
   releases: ReleaseRow[];
 }
 
-/** Every release asset's download count on GitHub, per OS, in total and per
- *  release. Cached for fifteen minutes: the API allows sixty unauthenticated
- *  calls an hour, and a Worker's outbound address is shared. Null when GitHub
- *  cannot be reached, so the panel says so rather than showing zeros. */
-export async function downloads(env: Env): Promise<Downloads | null> {
-  const url = "https://api.github.com/repos/pelamx/downloads/releases?per_page=100";
+type GitHubRelease = {
+  tag_name: string;
+  published_at: string | null;
+  assets: { name: string; download_count: number }[];
+};
+
+/** One repository's releases from the GitHub API. Cached for fifteen minutes:
+ *  the API allows sixty unauthenticated calls an hour, and a Worker's outbound
+ *  address is shared. Null when GitHub cannot be reached. */
+async function releasesOf(env: Env, repo: string): Promise<GitHubRelease[] | null> {
+  const url = `https://api.github.com/repos/${repo}/releases?per_page=100`;
   const cache = caches.default;
   const key = new Request(url);
   let res = await cache.match(key);
@@ -291,7 +296,7 @@ export async function downloads(env: Env): Promise<Downloads | null> {
         },
       });
       if (!fresh.ok) {
-        console.error(`github releases returned ${fresh.status}`);
+        console.error(`github releases of ${repo} returned ${fresh.status}`);
         return null;
       }
       res = new Response(await fresh.text(), {
@@ -302,30 +307,44 @@ export async function downloads(env: Env): Promise<Downloads | null> {
       return null;
     }
   }
-  const releases = (await res.json()) as {
-    tag_name: string;
-    published_at: string | null;
-    assets: { name: string; download_count: number }[];
-  }[];
+  return (await res.json()) as GitHubRelease[];
+}
+
+/** Every release asset's download count on GitHub, per OS, in total and per
+ *  release. Null when the current downloads repository cannot be reached, so
+ *  the panel says so rather than showing zeros.
+ *
+ *  Both repositories count: `pelamx/downloads` from 0.3.6 on, and the frozen
+ *  `bubbleTranslate/downloads` that held every release up to then. 0.3.6 was
+ *  published to both, so a tag found in both is one row with the two summed.
+ *  The old one failing to answer leaves its history out rather than the panel
+ *  empty. */
+export async function downloads(env: Env): Promise<Downloads | null> {
+  const [current, frozen] = await Promise.all([
+    releasesOf(env, "pelamx/downloads"),
+    releasesOf(env, "bubbleTranslate/downloads"),
+  ]);
+  if (!current) return null;
   const total: Record<string, number> = { windows: 0, linux: 0, macos: 0 };
-  const rows: ReleaseRow[] = [];
-  for (const r of releases) {
-    const row: ReleaseRow = {
-      tag: r.tag_name,
-      published: (r.published_at ?? "").slice(0, 10),
-      windows: 0,
-      linux: 0,
-      macos: 0,
-    };
+  const byTag = new Map<string, ReleaseRow>();
+  for (const r of [...current, ...(frozen ?? [])]) {
+    let row = byTag.get(r.tag_name);
+    if (!row) {
+      row = { tag: r.tag_name, published: (r.published_at ?? "").slice(0, 10), windows: 0, linux: 0, macos: 0 };
+      byTag.set(r.tag_name, row);
+    }
     for (const a of r.assets) {
       const name = a.name.toLowerCase();
-      if (name.endsWith(".zip") || name.endsWith(".exe")) row.windows += a.download_count;
-      else if (name.endsWith(".dmg")) row.macos += a.download_count;
-      else if (name.includes("linux")) row.linux += a.download_count;
+      let os: (typeof PLATFORMS)[number] | null = null;
+      if (name.endsWith(".zip") || name.endsWith(".exe")) os = "windows";
+      else if (name.endsWith(".dmg")) os = "macos";
+      else if (name.includes("linux")) os = "linux";
+      if (!os) continue;
+      row[os] += a.download_count;
+      total[os] += a.download_count;
     }
-    for (const os of PLATFORMS) total[os] += row[os];
-    rows.push(row);
   }
+  const rows = [...byTag.values()].filter((r) => r.windows + r.linux + r.macos > 0);
   rows.sort((a, b) => compareVersions(a.tag.replace(/^v/, ""), b.tag.replace(/^v/, "")));
   return { total, releases: rows };
 }

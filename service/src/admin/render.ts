@@ -958,12 +958,14 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
 
      ${countriesCard(byCountry)}
 
-     <section class="card" id="users">
-       <p class="label">Users, last 30 days — ${real} real${own ? ` · ${own} yours` : ""}</p>
-       <p class="muted" style="margin-top:0">One row per install. Press <b>This is me</b> on your
-         own machines: they stay in this list, tagged <b>you</b>, but leave every count on this page.</p>
-       ${usersTable(people)}
-     </section>
+     <details class="card" id="users" open>
+       <summary>Users, last 30 days — ${real} real${own ? ` · ${own} yours` : ""}</summary>
+       <div class="body">
+         <p class="muted" style="margin-top:0">One row per install. Press <b>This is me</b> on your
+           own machines: they stay in this list, tagged <b>you</b>, but leave every count on this page.</p>
+         ${usersTable(people)}
+       </div>
+     </details>
 
      ${webhookCard(hooks)}
      ${failureTable}
