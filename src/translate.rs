@@ -33,6 +33,40 @@ pub struct Translation {
     /// question that was pointless, and the engine reads this to keep such a
     /// round trip from spending the day's allowance. See [`Config::alt_lang`].
     pub echoed: bool,
+    /// What a single word can mean, grouped by part of speech, for the
+    /// bubble to list under the translation.
+    ///
+    /// One word translated into one word hides that it had five meanings, and
+    /// the one picked is often not the one the sentence around it used. Empty
+    /// for anything longer than a word, and from every provider but Google,
+    /// which is the only one that answers it.
+    pub dictionary: Vec<Sense>,
+}
+
+/// One part of speech and the words it translates to, most common first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sense {
+    /// Named in the target language: "fiil", "noun".
+    pub pos: String,
+    pub terms: Vec<String>,
+}
+
+/// How much of the dictionary the bubble shows: enough to see that a word
+/// has other meanings, not a page of them.
+const MAX_SENSES: usize = 3;
+const MAX_TERMS: usize = 5;
+
+/// Whether `text` is one word, and so worth asking the dictionary about.
+///
+/// Whitespace is the test, which also lets a word in a script written without
+/// spaces through. That costs nothing: Google simply answers without a
+/// dictionary for anything it does not hold an entry for.
+pub fn is_single_word(text: &str) -> bool {
+    let word = text.trim();
+    !word.is_empty()
+        && word.chars().count() <= 40
+        && !word.chars().any(char::is_whitespace)
+        && word.chars().any(char::is_alphabetic)
 }
 
 #[derive(Debug, Clone)]
@@ -178,7 +212,7 @@ impl Translator {
         let source = cfg.source_lang.trim();
         let target = cfg.target_lang.trim();
         match provider {
-            Provider::Google => self.google(text, source, target),
+            Provider::Google => self.google(text, source, target, cfg.dictionary),
             Provider::MyMemory => self.mymemory(text, source, target, &cfg.mymemory_email),
             Provider::DeepL => self.deepl(text, source, target, &cfg.deepl_api_key),
             Provider::Claude => self.claude(text, source, target, &cfg.anthropic_api_key),
@@ -197,6 +231,7 @@ impl Translator {
         text: &str,
         source: &str,
         target: &str,
+        dictionary: bool,
     ) -> Result<Translation, TranslateError> {
         let sl = if source.is_empty() { "auto" } else { source };
         let q = urlencoding::encode(text);
@@ -205,34 +240,43 @@ impl Translator {
         // query itself rather than merely fail to translate.
         let sl_param = urlencoding::encode(sl);
         let tl_param = urlencoding::encode(target);
+        // A single word also asks for its dictionary entry, with the parts of
+        // speech named in the language it is going into.
+        let dict = if dictionary && is_single_word(text) {
+            format!("&dt=bd&hl={tl_param}")
+        } else {
+            String::new()
+        };
         let hosts = [
             format!(
                 "https://translate.googleapis.com/translate_a/single\
-                 ?client=gtx&sl={sl_param}&tl={tl_param}&dt=t&q={q}"
+                 ?client=gtx&sl={sl_param}&tl={tl_param}&dt=t{dict}&q={q}"
             ),
             format!(
                 "https://clients5.google.com/translate_a/single\
-                 ?client=dict-chrome-ex&sl={sl_param}&tl={tl_param}&dt=t&q={q}"
+                 ?client=dict-chrome-ex&sl={sl_param}&tl={tl_param}&dt=t{dict}&q={q}"
             ),
         ];
+        let answer = |(translated, detected, dictionary): (String, String, Vec<Sense>)| {
+            Translation {
+                target_lang: target.to_string(),
+                echoed: false,
+                source_lang: if detected.is_empty() {
+                    sl.to_string()
+                } else {
+                    detected
+                },
+                provider: Provider::Google,
+                dictionary,
+                text: translated,
+            }
+        };
 
         let mut last = TranslateError::Network("no attempt made".into());
         for (idx, url) in hosts.iter().enumerate() {
             match self.get_text(url) {
                 Ok(body) => match parse_google(&body) {
-                    Ok((translated, detected)) => {
-                        return Ok(Translation {
-                            target_lang: target.to_string(),
-                            echoed: false,
-                            text: translated,
-                            source_lang: if detected.is_empty() {
-                                sl.to_string()
-                            } else {
-                                detected
-                            },
-                            provider: Provider::Google,
-                        });
-                    }
+                    Ok(parsed) => return Ok(answer(parsed)),
                     Err(err) => last = err,
                 },
                 Err(TranslateError::RateLimited) => {
@@ -243,19 +287,9 @@ impl Translator {
                     if idx == 0 {
                         std::thread::sleep(Duration::from_millis(500));
                         if let Ok(body) = self.get_text(url)
-                            && let Ok((translated, detected)) = parse_google(&body)
+                            && let Ok(parsed) = parse_google(&body)
                         {
-                            return Ok(Translation {
-                                target_lang: target.to_string(),
-                                echoed: false,
-                                text: translated,
-                                source_lang: if detected.is_empty() {
-                                    sl.to_string()
-                                } else {
-                                    detected
-                                },
-                                provider: Provider::Google,
-                            });
+                            return Ok(answer(parsed));
                         }
                     }
                 }
@@ -303,6 +337,7 @@ impl Translator {
                 target_lang: target.to_string(),
                 provider: Provider::MyMemory,
                 echoed: false,
+                dictionary: Vec::new(),
             });
         }
         let sl = if source.is_empty() || source == "auto" {
@@ -381,6 +416,7 @@ impl Translator {
         Ok(Translation {
             target_lang: target.to_string(),
             echoed: false,
+            dictionary: Vec::new(),
             text: decode_html_entities(&translated),
             source_lang: json
                 .pointer("/responseData/detectedLanguage")
@@ -480,6 +516,7 @@ impl Translator {
         Ok(Translation {
             target_lang: target.to_string(),
             echoed: false,
+            dictionary: Vec::new(),
             text: translated,
             source_lang: first
                 .get("detected_source_language")
@@ -596,6 +633,7 @@ impl Translator {
         Ok(Translation {
             target_lang: target.to_string(),
             echoed: false,
+            dictionary: Vec::new(),
             text: translated,
             source_lang: detected,
             provider: Provider::Claude,
@@ -629,7 +667,7 @@ impl Translator {
 ///   `{"sentences":[{"trans":"hello","orig":"merhaba"}],"src":"tr"}`
 /// Anything else (notably an HTML captcha interstitial) becomes a
 /// `BadResponse` rather than a panic.
-fn parse_google(body: &str) -> Result<(String, String), TranslateError> {
+fn parse_google(body: &str) -> Result<(String, String, Vec<Sense>), TranslateError> {
     let trimmed = body.trim_start();
     if trimmed.starts_with('<') {
         return Err(TranslateError::BadResponse(
@@ -639,14 +677,14 @@ fn parse_google(body: &str) -> Result<(String, String), TranslateError> {
     let json: Value = serde_json::from_str(body)
         .map_err(|e| TranslateError::BadResponse(format!("not JSON ({e})")))?;
 
-    let (translated, detected) =
+    let (translated, detected, mut senses) =
         if let Some(sentences) = json.get("sentences").and_then(Value::as_array) {
             let text = sentences
                 .iter()
                 .filter_map(|s| s.get("trans").and_then(Value::as_str))
                 .collect::<String>();
             let src = json.get("src").and_then(Value::as_str).unwrap_or("");
-            (text, src.to_string())
+            (text, src.to_string(), Vec::new())
         } else if let Some(outer) = json.as_array() {
             let text = outer
                 .first()
@@ -659,7 +697,7 @@ fn parse_google(body: &str) -> Result<(String, String), TranslateError> {
                 })
                 .unwrap_or_default();
             let src = outer.get(2).and_then(Value::as_str).unwrap_or("");
-            (text, src.to_string())
+            (text, src.to_string(), outer.get(1).map(parse_senses).unwrap_or_default())
         } else {
             return Err(TranslateError::BadResponse("unrecognised shape".into()));
         };
@@ -667,7 +705,47 @@ fn parse_google(body: &str) -> Result<(String, String), TranslateError> {
     if translated.trim().is_empty() {
         return Err(TranslateError::BadResponse("empty translation".into()));
     }
-    Ok((translated, detected))
+    // The translation itself is the bubble's headline; repeating it as the
+    // first meaning underneath says nothing.
+    let headline = translated.trim().to_lowercase();
+    for sense in &mut senses {
+        sense.terms.retain(|term| term.to_lowercase() != headline);
+        sense.terms.truncate(MAX_TERMS);
+    }
+    senses.retain(|sense| !sense.terms.is_empty());
+    Ok((translated, detected, senses))
+}
+
+/// The dictionary block of an answer: `[[pos, [term, …], …], …]`.
+///
+/// Anything not shaped like that is skipped rather than refused — the
+/// dictionary is extra, and a translation must never fail because of it.
+fn parse_senses(block: &Value) -> Vec<Sense> {
+    let Some(entries) = block.as_array() else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let pos = entry.get(0)?.as_str()?.trim();
+            let terms: Vec<String> = entry
+                .get(1)?
+                .as_array()?
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|term| !term.is_empty())
+                // One spare, for the headline that is taken out afterwards.
+                .take(MAX_TERMS + 1)
+                .map(str::to_string)
+                .collect();
+            (!pos.is_empty() && !terms.is_empty()).then(|| Sense {
+                pos: pos.to_string(),
+                terms,
+            })
+        })
+        .take(MAX_SENSES)
+        .collect()
 }
 
 /// DeepL wants uppercase codes and is picky about the ones with variants.
@@ -820,7 +898,7 @@ mod tests {
     #[test]
     fn parses_google_array_shape() {
         let body = r#"[[["hello","merhaba",null,null,10]],null,"tr",null,null,null,null,[]]"#;
-        let (text, src) = parse_google(body).unwrap();
+        let (text, src, _) = parse_google(body).unwrap();
         assert_eq!(text, "hello");
         assert_eq!(src, "tr");
     }
@@ -829,14 +907,14 @@ mod tests {
     fn joins_multi_segment_google_responses() {
         let body =
             r#"[[["Hello there. ","x",null,null,10],["How are you?","y",null,null,3]],null,"tr"]"#;
-        let (text, _) = parse_google(body).unwrap();
+        let (text, _, _) = parse_google(body).unwrap();
         assert_eq!(text, "Hello there. How are you?");
     }
 
     #[test]
     fn parses_google_sentences_shape() {
         let body = r#"{"sentences":[{"trans":"hello","orig":"merhaba"}],"src":"tr"}"#;
-        let (text, src) = parse_google(body).unwrap();
+        let (text, src, _) = parse_google(body).unwrap();
         assert_eq!(text, "hello");
         assert_eq!(src, "tr");
     }
@@ -971,9 +1049,56 @@ mod tests {
 
     #[test]
     fn google_without_a_detected_language_still_translates() {
-        let (text, src) = parse_google(r#"[[["hello","merhaba"]]]"#).unwrap();
+        let (text, src, _) = parse_google(r#"[[["hello","merhaba"]]]"#).unwrap();
         assert_eq!(text, "hello");
         assert_eq!(src, "");
+    }
+
+    #[test]
+    fn a_single_word_comes_back_with_its_meanings() {
+        // Trimmed from a real answer for "run" into Turkish.
+        let body = r#"[[["koşmak","run",null,null,10]],
+            [["fiil",["koşmak","çalıştırmak","yayınlamak","kaçmak","uzanmak","geçmek","işletmek"],[],"run",2],
+             ["sıfat",["kaçak"],[],"run",3],
+             ["isim",["koşu","akış"],[],"run",1],
+             ["zarf",["koşarak"],[],"run",4]],
+            "en"]"#;
+        let (text, src, senses) = parse_google(body).unwrap();
+        assert_eq!((text.as_str(), src.as_str()), ("koşmak", "en"));
+        assert_eq!(senses.len(), MAX_SENSES, "only the first few parts of speech");
+        assert_eq!(senses[0].pos, "fiil");
+        assert_eq!(
+            senses[0].terms,
+            ["çalıştırmak", "yayınlamak", "kaçmak", "uzanmak", "geçmek"],
+            "the headline is not repeated, and the list stops at a handful"
+        );
+        assert_eq!(senses[1].terms, ["kaçak"]);
+    }
+
+    #[test]
+    fn a_meaning_that_is_only_the_headline_is_left_out() {
+        let body = r#"[[["banka","bank"]],[["isim",["Banka"]],["fiil",["para yatırmak"]]],"en"]"#;
+        let (_, _, senses) = parse_google(body).unwrap();
+        assert_eq!(senses.len(), 1);
+        assert_eq!(senses[0].pos, "fiil");
+    }
+
+    #[test]
+    fn a_dictionary_of_the_wrong_shape_never_costs_the_translation() {
+        let (text, _, senses) = parse_google(r#"[[["hola","hello"]],{"odd":1},"en"]"#).unwrap();
+        assert_eq!(text, "hola");
+        assert!(senses.is_empty());
+    }
+
+    #[test]
+    fn only_a_single_word_asks_the_dictionary() {
+        assert!(is_single_word("run"));
+        assert!(is_single_word("  güzel\n"));
+        assert!(is_single_word("e-mail"));
+        assert!(!is_single_word("run fast"));
+        assert!(!is_single_word("1234"));
+        assert!(!is_single_word(""));
+        assert!(!is_single_word(&"a".repeat(41)));
     }
 
     #[test]
@@ -1017,6 +1142,7 @@ mod tests {
             target_lang: "tr".into(),
             provider: Provider::Google,
             echoed: false,
+            dictionary: Vec::new(),
         }
     }
 

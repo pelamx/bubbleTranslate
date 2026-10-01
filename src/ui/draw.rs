@@ -80,6 +80,36 @@ impl BubbleApp {
                                 .line_height(Some(size * LINE_HEIGHT_RATIO))
                                 .color(pal().text_primary),
                         );
+                        // A word's other meanings, one line per part of
+                        // speech, quieter than the translation they qualify.
+                        if !result.dictionary.is_empty() {
+                            ui.add_space(5.0);
+                            let small = (size * 0.8).max(11.5);
+                            for sense in &result.dictionary {
+                                let mut line = egui::text::LayoutJob::default();
+                                line.wrap.max_width = ui.available_width();
+                                line.append(
+                                    &sense.pos,
+                                    0.0,
+                                    egui::TextFormat {
+                                        font_id: egui::FontId::proportional(small),
+                                        color: pal().text_muted,
+                                        italics: true,
+                                        ..Default::default()
+                                    },
+                                );
+                                line.append(
+                                    &sense.terms.join(", "),
+                                    7.0,
+                                    egui::TextFormat {
+                                        font_id: egui::FontId::proportional(small),
+                                        color: pal().text_secondary,
+                                        ..Default::default()
+                                    },
+                                );
+                                ui.label(line);
+                            }
+                        }
                     });
             }
             State::Capped { limit } => {

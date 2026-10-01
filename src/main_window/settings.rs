@@ -365,6 +365,17 @@ pub(super) fn behaviour(ui: &mut egui::Ui, cfg: &mut Config) -> bool {
         )
         .changed();
 
+    dirty |= ui
+        .checkbox(
+            &mut cfg.dictionary,
+            t(
+                "Show other meanings of a single word",
+                "Tek kelimenin diğer anlamlarını göster",
+                "Mostrar otros significados de una palabra",
+            ),
+        )
+        .changed();
+
     ui.horizontal(|ui| {
         ui.label(t("Hold", "Seçerken", "Mantén"));
         egui::ComboBox::from_id_salt("trigger-key")

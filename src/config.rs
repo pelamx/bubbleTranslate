@@ -272,6 +272,9 @@ pub struct Config {
     pub license_key: String,
     /// Pop the bubble automatically when a selection is made.
     pub auto_translate: bool,
+    /// Under a single word's translation, list its other meanings by part of
+    /// speech. Only Google answers this; the other providers leave it empty.
+    pub dictionary: bool,
     /// Which key has to be held while selecting for the bubble to appear.
     ///
     /// Shift by default: it is already a selection key everywhere — holding it
@@ -372,6 +375,7 @@ impl Default for Config {
             mymemory_email: String::new(),
             license_key: String::new(),
             auto_translate: true,
+            dictionary: true,
             trigger_key: TriggerKey::Shift,
             feedback_via: FeedbackVia::MailApp,
             min_chars: 2,

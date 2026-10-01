@@ -724,6 +724,7 @@ mod tests {
             target_lang: "tr".into(),
             provider: Provider::Google,
             echoed,
+            dictionary: Vec::new(),
         }
     }
 

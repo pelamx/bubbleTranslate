@@ -13,6 +13,17 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**A single word shows its other meanings.** Select one word and, under the
+translation, the bubble lists what else it can mean, grouped by part of
+speech — "run" comes back as *koşmak*, with the verb's other senses, the noun
+and the adjective underneath. One word rarely has one translation, and the
+one picked is often not the one the sentence around it meant; now you can
+see the alternatives without opening a dictionary. It only appears for a
+single word, only when Google did the translating, and it can be turned off
+in the window's Behaviour section.
+
 ## 0.4.0 — 2026-10-01
 
 **Esc closes the bubble.** Press Esc and the bubble goes away, whichever

@@ -567,6 +567,7 @@ deepl_api_key = ""
 mymemory_email = ""         # raises the MyMemory quota
 license_key = ""            # Pro key; the signed token it buys lives elsewhere
 auto_translate = true       # bubble on selection
+dictionary = true           # a single word also lists its other meanings
 trigger_key = "shift"       # hold this while selecting; "always" for no key
 min_chars = 2
 max_chars = 4000            # keeps a stray Cmd+A out of the queue
