@@ -107,21 +107,21 @@ async function ping(env: Env, body: any, request: Request) {
   const cf = (request as { cf?: { country?: unknown } }).cf;
   const country =
     typeof cf?.country === "string" && /^[A-Z0-9]{2}$/.test(cf.country) ? cf.country : null;
-  await env.DB.prepare(
+  const os = String(body.os ?? "").slice(0, 16);
+  const row = await env.DB.prepare(
     `INSERT INTO installs (install, os, app, plan, first_seen, last_seen, country)
      VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)
      ON CONFLICT (install) DO UPDATE SET os = ?2, app = ?3, plan = ?4, last_seen = ?5,
-       country = COALESCE(?6, country)`,
+       country = COALESCE(?6, country)
+     RETURNING first_seen, source`,
   )
-    .bind(
-      install,
-      String(body.os ?? "").slice(0, 16),
-      String(body.app ?? "").slice(0, 32),
-      plan,
-      t,
-      country,
-    )
-    .run();
+    .bind(install, os, String(body.app ?? "").slice(0, 32), plan, t, country)
+    .first<{ first_seen: number; source: string | null }>();
+  // Only a brand-new install is matched, and only once: an old one already
+  // has its answer, or predates the matching and stays unknown.
+  if (row && row.first_seen === t && row.source === null) {
+    await attributeInstall(env, install, os, country, t);
+  }
   // Sent by the app the first time in a day the free allowance runs out. The
   // first time is kept, and each new day adds one, so a copy restarted twice
   // on a capped day still counts that day once.
@@ -143,6 +143,79 @@ async function ping(env: Env, body: any, request: Request) {
   // forgotten. Done here rather than in the cron, so the promise holds even
   // when no cron runs; the index on last_seen keeps it cheap.
   await env.DB.prepare("DELETE FROM installs WHERE last_seen < ?").bind(t - 396 * 86_400).run();
+  return new Response(null, { status: 204 });
+}
+
+/** How far back a download click can be and still be the one a first ping
+ *  came from: long enough for someone who downloads in the evening and opens
+ *  it after the weekend, short enough not to claim last month's visitor. */
+const ATTRIBUTION_WINDOW = 3 * 86_400;
+
+/** Gives a new install the source of the website download it most likely
+ *  came from: the latest unclaimed click for the same OS from the same
+ *  country, within the window. The click is claimed so the next install
+ *  cannot take it too. No click means it came some other way -- the GitHub
+ *  page, the README, a link shared directly -- and is recorded as such, so
+ *  "unmatched" is a number rather than a gap. */
+async function attributeInstall(
+  env: Env,
+  install: string,
+  os: string,
+  country: string | null,
+  t: number,
+): Promise<void> {
+  try {
+    const click = await env.DB.prepare(
+      `UPDATE download_clicks SET install = ?1
+        WHERE id = (SELECT id FROM download_clicks
+                     WHERE install IS NULL AND os = ?2 AND country IS ?3
+                       AND at BETWEEN ?4 AND ?5
+                     ORDER BY at DESC LIMIT 1)
+        RETURNING src`,
+    )
+      .bind(install, os, country, t - ATTRIBUTION_WINDOW, t)
+      .first<{ src: string }>();
+    await env.DB.prepare("UPDATE installs SET source = ? WHERE install = ?")
+      .bind(click?.src ?? "unmatched", install)
+      .run();
+  } catch (err) {
+    // A ping is never failed over a guess about where it came from.
+    console.error("could not attribute an install", err);
+  }
+}
+
+/** The tag a download click arrives with, as the panel will show it. The
+ *  website sends a link's `utm_source` or `ref`, or the host of the site that
+ *  sent the visitor; anything that is not a short plain word is `other`. */
+export function cleanSource(raw: unknown): string {
+  const s = String(raw ?? "").trim().toLowerCase().replace(/^www\./, "");
+  if (!s) return "direct";
+  return /^[a-z0-9][a-z0-9._-]{0,39}$/.test(s) ? s : "other";
+}
+
+/** One press of a download button on the website, sent with `sendBeacon` so
+ *  the download itself never waits on this service. Answers 204 whatever it
+ *  is sent, like the ping: the page cannot read the reply anyway. */
+async function downloadClick(env: Env, body: any, request: Request): Promise<Response> {
+  const os = String(body.os ?? "");
+  if (!["macos", "windows", "linux"].includes(os)) return new Response(null, { status: 204 });
+  try {
+    const t = now();
+    const cf = (request as { cf?: { country?: unknown } }).cf;
+    const country =
+      typeof cf?.country === "string" && /^[A-Z0-9]{2}$/.test(cf.country) ? cf.country : null;
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO download_clicks (at, os, src, country) VALUES (?, ?, ?, ?)").bind(
+        t,
+        os,
+        cleanSource(body.src),
+        country,
+      ),
+      env.DB.prepare("DELETE FROM download_clicks WHERE at < ?").bind(t - 90 * 86_400),
+    ]);
+  } catch (err) {
+    console.error("could not log a download click", err);
+  }
   return new Response(null, { status: 204 });
 }
 
@@ -943,6 +1016,8 @@ async function route(request: Request, env: Env): Promise<Response> {
     switch (pathname) {
       case "/v1/ping":
         return await ping(env, body, request);
+      case "/v1/download":
+        return await downloadClick(env, body, request);
       case "/v1/activate":
         return await activate(env, body);
       case "/v1/refresh":

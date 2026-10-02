@@ -28,6 +28,8 @@ import {
   compareVersions,
   countries,
   type CountryRow,
+  type SourceRow,
+  sources,
   type LimitHits,
   limitHits,
   type BuyFunnel,
@@ -79,6 +81,7 @@ export function usersTable(list: UserRow[]): string {
         <td>${escapeHtml(osLabel(u.os ?? "unknown"))}</td>
         <td>${escapeHtml(u.app ?? "—")}</td>
         <td>${escapeHtml(u.plan ?? "—")}</td>
+        <td>${u.source === null ? `<span class="muted">—</span>` : u.source === "unmatched" ? `<span class="muted">unmatched</span>` : escapeHtml(u.source)}</td>
         <td title="${escapeHtml(date(u.first_seen))}">${ago(u.first_seen)}</td>
         <td title="${escapeHtml(date(u.last_seen))}">${ago(u.last_seen)}</td>
         <td><code>${escapeHtml(u.install.slice(0, 8))}</code></td>
@@ -91,7 +94,7 @@ export function usersTable(list: UserRow[]): string {
     })
     .join("");
   return `<div class="scroll"><table>
-    <tr><th></th><th>OS</th><th>Version</th><th>Plan</th><th>First seen</th><th>Last seen</th><th>Id</th><th></th></tr>
+    <tr><th></th><th>OS</th><th>Version</th><th>Plan</th><th>Source</th><th>First seen</th><th>Last seen</th><th>Id</th><th></th></tr>
     ${body}
   </table></div>`;
 }
@@ -481,6 +484,41 @@ function countryLabel(code: string): string {
   return `${flag} ${escapeHtml(name)} <span class="muted">${escapeHtml(code)}</span>`;
 }
 
+function sourcesCard(rows: SourceRow[]): string {
+  const name = (src: string) =>
+    src === "unmatched"
+      ? `<span class="muted">Not from a website click</span>`
+      : src === "direct"
+        ? `direct <span class="muted">— typed in, or no referrer</span>`
+        : `<b>${escapeHtml(src)}</b>`;
+  const body = rows.length
+    ? rows
+        .map(
+          (r) => `<tr><td>${name(r.src)}</td>
+            <td class="num">${r.src === "unmatched" ? `<span class="muted">—</span>` : r.clicks}</td>
+            <td class="num"><b>${r.installs}</b></td>
+            <td>${ratio(r.active, r.installs)}</td>
+            <td class="num">${r.pro || `<span class="muted">0</span>`}</td></tr>`,
+        )
+        .join("")
+    : `<tr><td colspan="5" class="muted">No download clicks or new installs in the last 30 days.</td></tr>`;
+  return `<section class="card" id="sources">
+       <p class="label">Where users come from, last 30 days</p>
+       <div class="scroll"><table>
+         <tr><th>Source</th><th class="num">Download clicks</th><th class="num">Opened</th>
+             <th>Still using this week</th><th class="num">Pro now</th></tr>
+         ${body}
+       </table></div>
+       <p class="muted foot">The source is the <code>?utm_source=</code> or <code>?ref=</code> of the
+         link that brought someone to the website, or else the site that sent them. Tag every link
+         you post — <code>bubbletranslate.app/?ref=reddit</code> — so it gets a row of its own.
+         <b>Opened</b> is a best guess: a new install is matched to the latest download click for
+         the same system from the same country in the three days before it first opened, so two
+         people downloading alike on the same day can swap rows. Recorded from 2 October 2026;
+         your own machines are left out of Opened.</p>
+     </section>`;
+}
+
 function countriesCard(rows: CountryRow[]): string {
   const body = rows.length
     ? rows
@@ -718,7 +756,7 @@ export function delta(today: number, yesterday: number): string {
 }
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel] = await Promise.all([
+  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -741,6 +779,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     countries(env),
     limitHits(env),
     buyFunnel(env),
+    sources(env),
   ]);
   const dl = downloadsNow?.total ?? null;
 
@@ -955,6 +994,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
      ${limitCard(hits)}
 
      ${funnelCard(funnel)}
+
+     ${sourcesCard(bySource)}
 
      ${countriesCard(byCountry)}
 

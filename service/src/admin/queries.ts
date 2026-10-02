@@ -163,6 +163,56 @@ export async function countries(env: Env): Promise<CountryRow[]> {
   return results ?? [];
 }
 
+export interface SourceRow {
+  src: string;
+  /** Download buttons pressed on the website with this source. */
+  clicks: number;
+  /** New installs whose first ping was matched to one of those clicks. */
+  installs: number;
+  /** Of those installs, seen in the last eight days. */
+  active: number;
+  pro: number;
+}
+
+/** Where the last 30 days' users came from: website download clicks by
+ *  source, beside the new installs matched to them. Installs that matched no
+ *  click are the `unmatched` row; installs from before the matching existed
+ *  have no source and are left out rather than guessed at. */
+export async function sources(env: Env): Promise<SourceRow[]> {
+  const t = now();
+  const [clicks, installs] = await env.DB.batch([
+    env.DB.prepare(
+      `SELECT src, COUNT(*) AS n FROM download_clicks WHERE at > ?1 GROUP BY src`,
+    ).bind(t - 30 * DAY),
+    env.DB.prepare(
+      `SELECT source AS src, COUNT(*) AS n,
+              SUM(CASE WHEN last_seen > ?2 THEN 1 ELSE 0 END) AS active,
+              SUM(CASE WHEN plan = 'pro' THEN 1 ELSE 0 END) AS pro
+         FROM installs
+        WHERE first_seen > ?1 AND source IS NOT NULL AND ${NOT_MINE_INSTALL}
+        GROUP BY source`,
+    ).bind(t - 30 * DAY, t - 8 * DAY, null, null, null, null, null, null, await mineInstalls(env)),
+  ]);
+  const by = new Map<string, SourceRow>();
+  const row = (src: string) => {
+    let r = by.get(src);
+    if (!r) by.set(src, (r = { src, clicks: 0, installs: 0, active: 0, pro: 0 }));
+    return r;
+  };
+  for (const c of (clicks?.results ?? []) as { src: string; n: number }[]) row(c.src).clicks = c.n;
+  for (const i of (installs?.results ?? []) as { src: string; n: number; active: number; pro: number }[]) {
+    Object.assign(row(i.src), { installs: i.n, active: i.active ?? 0, pro: i.pro ?? 0 });
+  }
+  // Busiest first, with the installs nobody can account for always last.
+  return [...by.values()].sort(
+    (a, b) =>
+      Number(a.src === "unmatched") - Number(b.src === "unmatched") ||
+      b.installs - a.installs ||
+      b.clicks - a.clicks ||
+      a.src.localeCompare(b.src),
+  );
+}
+
 export interface CappedRow {
   install: string;
   os: string | null;
@@ -381,6 +431,7 @@ export interface UserRow {
   os: string | null;
   app: string | null;
   plan: string | null;
+  source: string | null;
   first_seen: number;
   last_seen: number;
   mine: number;
@@ -390,7 +441,7 @@ export interface UserRow {
  *  whether the operator said it is theirs. */
 export async function users(env: Env): Promise<UserRow[]> {
   const { results } = await env.DB.prepare(
-    `SELECT install, os, app, plan, first_seen, last_seen,
+    `SELECT install, os, app, plan, source, first_seen, last_seen,
             CASE WHEN install IN (SELECT value FROM json_each(?9))
                    OR install IN (SELECT install FROM ignored_installs)
                  THEN 1 ELSE 0 END AS mine

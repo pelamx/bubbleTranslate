@@ -155,6 +155,12 @@ CREATE INDEX IF NOT EXISTS paddle_subscriptions_by_customer
 --   ALTER TABLE installs ADD COLUMN first_capped INTEGER;
 --   ALTER TABLE installs ADD COLUMN last_capped INTEGER;
 --   ALTER TABLE installs ADD COLUMN capped_days INTEGER NOT NULL DEFAULT 0;
+--
+-- `source` is where the install most likely came from: the `src` of the
+-- website download click it was matched to on its first ping (see
+-- `download_clicks`), or 'unmatched' when no click fits. NULL for installs
+-- first seen before the matching existed. Added on 2026-10-02 with
+--   ALTER TABLE installs ADD COLUMN source TEXT;
 CREATE TABLE IF NOT EXISTS installs (
   install      TEXT PRIMARY KEY,
   os           TEXT,
@@ -165,7 +171,8 @@ CREATE TABLE IF NOT EXISTS installs (
   country      TEXT,
   first_capped INTEGER,
   last_capped  INTEGER,
-  capped_days  INTEGER NOT NULL DEFAULT 0
+  capped_days  INTEGER NOT NULL DEFAULT 0,
+  source       TEXT
 );
 
 CREATE INDEX IF NOT EXISTS installs_by_last_seen ON installs (last_seen);
@@ -270,3 +277,24 @@ CREATE TABLE IF NOT EXISTS buy_visits (
 );
 
 CREATE INDEX IF NOT EXISTS buy_visits_by_at ON buy_visits (at);
+
+-- Every press of a download button on the website, and where the visitor came
+-- from: the `utm_source` / `ref` of the link that brought them, or the site
+-- that sent them, or 'direct'. No address and no install id at the time of the
+-- click -- only the country Cloudflare already worked out.
+--
+-- A new install's first ping claims the latest unclaimed click with the same
+-- OS and country from the three days before it, and writes that click's `src`
+-- into `installs.source`. It is a best guess, not a join: two people in one
+-- country downloading for one OS on the same day can swap sources. Kept for
+-- 90 days, which is as long as a click can be worth matching and longer.
+CREATE TABLE IF NOT EXISTS download_clicks (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  at       INTEGER NOT NULL,
+  os       TEXT NOT NULL,
+  src      TEXT NOT NULL,
+  country  TEXT,
+  install  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS download_clicks_by_at ON download_clicks (at);

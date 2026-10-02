@@ -8,6 +8,7 @@
 DROP TABLE IF EXISTS admin_log;
 DROP TABLE IF EXISTS webhook_events;
 DROP TABLE IF EXISTS buy_visits;
+DROP TABLE IF EXISTS download_clicks;
 DROP TABLE IF EXISTS installs;
 DROP TABLE IF EXISTS orders;
 DROP TABLE IF EXISTS seats;
