@@ -13,6 +13,15 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**The daily usage ping survives a sleeping computer.** The anonymous "this
+copy is running" signal is still sent at most once a day, but it is now sent
+on the first day it has not gone out yet, rather than 24 hours after the last
+one. A computer put to sleep every night stopped that 24-hour clock, so a copy
+used every day could go uncounted for days at a time. Nothing more is sent
+than before, and `usage_ping = false` in the config file still turns it off.
+
 ## 0.4.1 — 2026-10-01
 
 **A single word shows its other meanings.** Select one word and, under the

@@ -276,7 +276,10 @@ fn main() -> eframe::Result<()> {
 
             // One anonymous ping a day while running; see `Config::usage_ping`.
             // Re-read every turn, so switching it off in the config stops the
-            // next one without a restart.
+            // next one without a restart. Checked hourly against the local
+            // day rather than slept for 24 hours: a sleep does not advance
+            // while the machine is suspended, so a laptop closed every night
+            // would otherwise go days without being counted.
             {
                 let config = config.clone();
                 let license = licensing.license.clone();
@@ -288,12 +291,15 @@ fn main() -> eframe::Result<()> {
                             .user_agent(concat!("bubbleTranslate/", env!("CARGO_PKG_VERSION")))
                             .build(),
                     );
+                    let mut pinged_on: Option<i64> = None;
                     loop {
-                        if config.lock().unwrap().usage_ping {
+                        let day = quota::local_day();
+                        if pinged_on != Some(day) && config.lock().unwrap().usage_ping {
+                            pinged_on = Some(day);
                             let pro = license.lock().unwrap().entitlement.is_pro();
                             license::ping(&agent, pro);
                         }
-                        std::thread::sleep(std::time::Duration::from_secs(24 * 3600));
+                        std::thread::sleep(std::time::Duration::from_secs(3600));
                     }
                 });
             }
