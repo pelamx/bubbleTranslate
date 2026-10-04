@@ -472,16 +472,37 @@ function backendsCard(rows: ProviderHealthRow[]): string {
  *  runtime has no name for it. `?` is installs not seen since it was recorded. */
 function countryLabel(code: string): string {
   if (code === "?") return `<span class="muted">not recorded yet</span>`;
+  const { flag, name } = country(code);
+  return `${flag} ${escapeHtml(name)} <span class="muted">${escapeHtml(code)}</span>`;
+}
+
+/** A country code's flag and English name; the name is the code where the
+ *  runtime has none (T1 for Tor, XX for unknown -- codes Cloudflare invents). */
+function country(code: string): { flag: string; name: string } {
   let name = code;
   try {
     name = new Intl.DisplayNames(["en"], { type: "region" }).of(code) ?? code;
   } catch {
-    // Codes Cloudflare invents (T1 for Tor, XX for unknown) have no name.
+    // No name; the code stands in for it.
   }
   const flag = /^[A-Z]{2}$/.test(code)
     ? String.fromCodePoint(...[...code].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65))
     : "";
-  return `${flag} ${escapeHtml(name)} <span class="muted">${escapeHtml(code)}</span>`;
+  return { flag, name };
+}
+
+/** Countries as compact chips -- flag and code, the full name on hover --
+ *  largest first. Empty when nobody is counted, so the card stays quiet. */
+function countryChips(rows: CountryRow[], pick: (r: CountryRow) => number): string {
+  const list = rows.filter((r) => pick(r) > 0).sort((a, b) => pick(b) - pick(a));
+  if (!list.length) return "";
+  return `<div>${list
+    .map((r) => {
+      const { flag, name } = country(r.country);
+      const code = r.country === "?" ? "unknown" : r.country;
+      return `<span class="os" title="${escapeHtml(name)}">${flag} ${escapeHtml(code)} ${pick(r)}</span>`;
+    })
+    .join("")}</div>`;
 }
 
 function sourcesCard(rows: SourceRow[]): string {
@@ -927,7 +948,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
            ${licChips((o) => o.today)}</div>
          <div class="stat"><div class="k">Active users</div><div class="v">${p.active_today}</div>
            <div class="sub">opened the app today</div>
-           ${osChips((o) => o.active_today)}</div>
+           ${osChips((o) => o.active_today)}
+           ${countryChips(byCountry, (r) => r.today)}</div>
        </div>
      </section>
 

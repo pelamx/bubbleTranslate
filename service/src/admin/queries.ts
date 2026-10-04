@@ -144,21 +144,24 @@ export interface CountryRow {
   country: string;
   n: number;
   week: number;
+  /** Of those, seen since midnight Turkey time -- the "Active users" card. */
+  today: number;
 }
 
 /** Real installs seen in the last 30 days, by the country their pings came
- *  from, with how many of them were seen in the last eight days. Installs
+ *  from, with how many of them were seen in the last eight days and today. Installs
  *  that have not pinged since the country was first recorded are `?`. */
 export async function countries(env: Env): Promise<CountryRow[]> {
   const t = now();
   const { results } = await env.DB.prepare(
     `SELECT COALESCE(country, '?') AS country, COUNT(*) AS n,
-            SUM(CASE WHEN last_seen > ?2 THEN 1 ELSE 0 END) AS week
+            SUM(CASE WHEN last_seen > ?2 THEN 1 ELSE 0 END) AS week,
+            SUM(CASE WHEN last_seen >= ?3 THEN 1 ELSE 0 END) AS today
        FROM installs WHERE last_seen > ?1 AND ${NOT_MINE_INSTALL}
       GROUP BY COALESCE(country, '?')
       ORDER BY n DESC, country`,
   )
-    .bind(t - 30 * DAY, t - 8 * DAY, null, null, null, null, null, null, await mineInstalls(env))
+    .bind(t - 30 * DAY, t - 8 * DAY, startOfToday(), null, null, null, null, null, await mineInstalls(env))
     .all<CountryRow>();
   return results ?? [];
 }
