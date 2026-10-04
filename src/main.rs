@@ -119,10 +119,6 @@ fn main() -> eframe::Result<()> {
         std::process::exit(print_status());
     }
     #[cfg(target_os = "linux")]
-    if args.iter().any(|a| a == "--omarchy-install") {
-        std::process::exit(platform::omarchy::install_bar_widget());
-    }
-    #[cfg(target_os = "linux")]
     if args.iter().any(|a| a == "--omarchy-remove") {
         std::process::exit(platform::omarchy::remove_bar_widget());
     }
@@ -320,8 +316,13 @@ fn main() -> eframe::Result<()> {
             // On macOS this is the status item, and it is what makes closing
             // the main window safe: with no Dock icon it is the only way back
             // to the window, and the only Quit affordance. On Linux there is
-            // nothing yet, which is why closing the window quits instead.
+            // no tray, which is why closing the window quits instead.
             shell::install(cc.egui_ctx.clone());
+
+            // The Omarchy bar widget was withdrawn; take it off any bar an
+            // older version put it on.
+            #[cfg(target_os = "linux")]
+            platform::omarchy::remove_stale_bar_widget();
 
             // The keybinding route into the same pipeline a selection takes.
             // It asks for no anchor of its own: the bubble goes to the pointer

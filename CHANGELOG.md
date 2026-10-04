@@ -13,7 +13,17 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.4.2 — 2026-10-05
+
+**No more tray icon (Linux).** The icon in the system tray is gone. On some
+bars it showed no menu at all, which left no way to quit the app. Now the
+window is the app: closing it quits bubbleTranslate, and opening it again from
+your launcher starts it back up.
+
+**The Omarchy bar widget is gone (Linux).** Like the tray icon, it stayed on
+the bar with no way to close it, and showed "not running" whenever the app
+was closed. If an earlier version added it to your bar, starting this version
+takes it off again.
 
 **The daily usage ping survives a sleeping computer.** The anonymous "this
 copy is running" signal is still sent at most once a day, but it is now sent

@@ -1,6 +1,6 @@
 [package]
 name = "bubbleTranslate"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 license-file = "LICENSE"
 
@@ -72,16 +72,8 @@ x11rb = { version = "0.13", features = ["xfixes"] }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
-# The tray icon, so closing the interface leaves the translator running with
-# something to bring it back. Blocking API — the app has no async runtime of
-# its own, and ksni gives the service its own thread either way.
-ksni = { version = "0.3.6", default-features = false, features = [
-    "async-io",
-    "blocking",
-] }
 # The screenshot portal, which is how GNOME and KDE hand an application a
-# picture of the screen; see `platform::linux::portal`. The same zbus the tray
-# already brings in, on the same executor.
+# picture of the screen; see `platform::linux::portal`.
 zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
 png = "0.18"
 # The reader that works with nothing installed; see `platform::linux::reader`.

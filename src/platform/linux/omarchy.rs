@@ -1,16 +1,12 @@
 //! Omarchy: the desktop this app is most at home on, and the only one it
 //! reaches into.
 //!
-//! Two things, both of which exist only when Omarchy is there to see them:
-//!
 //! - **The theme.** Omarchy keeps the palette of the theme in use as a
 //!   `colors.toml` in its state directory. The bubble can be told to follow it,
 //!   so switching the desktop's theme switches the bubble's along with it
 //!   rather than leaving it on whichever of the built-in palettes was closest.
-//! - **The bar.** A small widget for Omarchy's own bar, embedded in this binary
-//!   and written out by `--omarchy-install`, so there is still exactly one file
-//!   to download. It shows whether bubbles appear on their own and how many free
-//!   translations are left today, and a click turns the first on or off.
+//! - **The bar.** Older versions could put a widget on Omarchy's bar. It has
+//!   been withdrawn; what is left here takes it off again.
 
 use std::path::PathBuf;
 
@@ -101,67 +97,33 @@ fn hex(value: &str) -> Option<[u8; 3]> {
     Some([byte(0)?, byte(2)?, byte(4)?])
 }
 
-/// The bar widget's id. Omarchy plugin ids are reverse-domain-ish; this one is
-/// the product's domain.
+/// The id of the bar widget older versions installed.
 const PLUGIN_ID: &str = "app.bubbletranslate";
-const MANIFEST: &str = include_str!("../../../omarchy/manifest.json");
-const WIDGET: &str = include_str!("../../../omarchy/BarWidget.qml");
 
-/// `--omarchy-install`: writes the bar widget into the user's plugin directory,
-/// pointed at this binary, and asks Omarchy to put it on the bar.
-pub fn install_bar_widget() -> i32 {
-    if !present() {
-        eprintln!("bubbleTranslate: this is not an Omarchy desktop; there is no bar to add to.");
-        return 1;
-    }
-    let Ok(exe) = std::env::current_exe() else {
-        eprintln!("bubbleTranslate: could not tell where this binary is.");
-        return 1;
-    };
+/// Takes the bar widget off again wherever an older version installed it. Run
+/// at startup, silently, and by `--omarchy-remove`.
+pub fn remove_stale_bar_widget() {
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
-        eprintln!("bubbleTranslate: HOME is not set.");
-        return 1;
+        return;
     };
-    let dir = home.join(".config/omarchy/plugins").join(PLUGIN_ID);
-    // The widget runs this binary by path, so the path is written into it. A
-    // QML string literal: backslashes and quotes escaped, nothing else needed.
-    let quoted = exe
-        .to_string_lossy()
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"");
-    let widget = WIDGET.replace("@BUBBLETRANSLATE@", &quoted);
-    let written = std::fs::create_dir_all(&dir)
-        .and_then(|()| std::fs::write(dir.join("manifest.json"), MANIFEST))
-        .and_then(|()| std::fs::write(dir.join("BarWidget.qml"), widget));
-    if let Err(err) = written {
-        eprintln!("bubbleTranslate: could not write {}: {err}", dir.display());
-        return 1;
-    }
-    println!("bar widget written to {}", dir.display());
-
-    // Omarchy's own command does the enabling and the placing, so the bar's
-    // layout file is never edited behind its back. The shell has to have seen
-    // the new folder first, or it refuses a plugin it does not know.
-    let _ = std::process::Command::new("omarchy-shell")
-        .args(["shell", "rescanPlugins"])
-        .stdout(std::process::Stdio::null())
-        .status();
-    match std::process::Command::new("omarchy")
-        .args(["plugin", "enable", PLUGIN_ID, "--section", "right"])
-        .status()
-    {
-        Ok(status) if status.success() => {
-            println!("added to the bar");
-            0
-        }
-        _ => {
-            println!("add it to the bar with: omarchy plugin enable {PLUGIN_ID}");
-            0
-        }
+    if home.join(".config/omarchy/plugins").join(PLUGIN_ID).is_dir() {
+        std::thread::spawn(|| {
+            let _ = std::process::Command::new("omarchy")
+                .args(["plugin", "disable", PLUGIN_ID])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            let _ = remove_bar_widget_files();
+        });
     }
 }
 
-/// `--omarchy-remove`: the reverse, for someone who no longer wants it.
+fn remove_bar_widget_files() -> std::io::Result<()> {
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    std::fs::remove_dir_all(home.join(".config/omarchy/plugins").join(PLUGIN_ID))
+}
+
+/// `--omarchy-remove`: takes the bar widget off by hand.
 pub fn remove_bar_widget() -> i32 {
     let _ = std::process::Command::new("omarchy")
         .args(["plugin", "disable", PLUGIN_ID])
