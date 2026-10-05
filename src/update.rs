@@ -18,8 +18,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-const MANIFEST_URL: &str =
-    "https://raw.githubusercontent.com/pelamx/downloads/main/latest.json";
+const MANIFEST_URL: &str = "https://raw.githubusercontent.com/pelamx/downloads/main/latest.json";
 
 /// A build newer than the one running.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,7 +141,10 @@ mod tests {
     fn a_newer_build_for_this_platform_is_reported() {
         let found = newer_in(MANIFEST, "linux", "0.1.0").unwrap();
         assert_eq!(found.version, "0.2.0");
-        assert_eq!(found.url, "https://github.com/pelamx/downloads/releases/download/v0.2.0/linux");
+        assert_eq!(
+            found.url,
+            "https://github.com/pelamx/downloads/releases/download/v0.2.0/linux"
+        );
     }
 
     #[test]

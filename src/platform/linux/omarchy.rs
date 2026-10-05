@@ -106,7 +106,11 @@ pub fn remove_stale_bar_widget() {
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
         return;
     };
-    if home.join(".config/omarchy/plugins").join(PLUGIN_ID).is_dir() {
+    if home
+        .join(".config/omarchy/plugins")
+        .join(PLUGIN_ID)
+        .is_dir()
+    {
         std::thread::spawn(|| {
             let _ = std::process::Command::new("omarchy")
                 .args(["plugin", "disable", PLUGIN_ID])
@@ -119,7 +123,9 @@ pub fn remove_stale_bar_widget() {
 }
 
 fn remove_bar_widget_files() -> std::io::Result<()> {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
     std::fs::remove_dir_all(home.join(".config/omarchy/plugins").join(PLUGIN_ID))
 }
 

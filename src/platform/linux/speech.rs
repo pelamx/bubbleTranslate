@@ -46,15 +46,15 @@ fn piper() -> Option<&'static Path> {
     static FOUND: OnceLock<Option<PathBuf>> = OnceLock::new();
     FOUND
         .get_or_init(|| {
-            ["piper-tts", "piper"].into_iter().filter_map(on_path).find(|p| {
-                Command::new(p)
-                    .arg("--help")
-                    .output()
-                    .is_ok_and(|o| {
+            ["piper-tts", "piper"]
+                .into_iter()
+                .filter_map(on_path)
+                .find(|p| {
+                    Command::new(p).arg("--help").output().is_ok_and(|o| {
                         let help = [o.stdout, o.stderr].concat();
                         String::from_utf8_lossy(&help).contains("--model")
                     })
-            })
+                })
         })
         .as_deref()
 }
@@ -62,7 +62,11 @@ fn piper() -> Option<&'static Path> {
 /// What plays the WAV Piper writes: PipeWire's own player, else ALSA's.
 fn player() -> Option<&'static str> {
     static FOUND: OnceLock<Option<&str>> = OnceLock::new();
-    *FOUND.get_or_init(|| ["pw-play", "paplay", "aplay"].into_iter().find(|p| on_path(p).is_some()))
+    *FOUND.get_or_init(|| {
+        ["pw-play", "paplay", "aplay"]
+            .into_iter()
+            .find(|p| on_path(p).is_some())
+    })
 }
 
 /// Every Piper voice model on this machine. Piper has no voice directory of

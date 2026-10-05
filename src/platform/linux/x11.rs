@@ -195,7 +195,10 @@ impl EscapeWatch {
             .reply()
             .ok()?;
         let per = map.keysyms_per_keycode.max(1) as usize;
-        let index = map.keysyms.chunks(per).position(|syms| syms.contains(&ESCAPE))?;
+        let index = map
+            .keysyms
+            .chunks(per)
+            .position(|syms| syms.contains(&ESCAPE))?;
         Some(Self {
             keycode: min + index as u8,
             conn,

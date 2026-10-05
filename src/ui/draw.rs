@@ -321,7 +321,10 @@ impl BubbleApp {
                             t("Listen", "Dinle", "Escuchar")
                         };
                         if ui
-                            .add(egui::Button::new(egui::RichText::new(label).size(12.0)).frame(false))
+                            .add(
+                                egui::Button::new(egui::RichText::new(label).size(12.0))
+                                    .frame(false),
+                            )
                             .clicked()
                         {
                             if speaking {

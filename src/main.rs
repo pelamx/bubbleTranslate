@@ -157,7 +157,10 @@ fn main() -> eframe::Result<()> {
     //
     // macOS routes the same gesture back into the running process itself, as a
     // reopen event, which is why this is not shared code.
-    #[cfg(target_os = "windows")]
+    //
+    // Linux asks the same question for one more reason: with no tray icon,
+    // launching the app again is how a closed window comes back.
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     if ipc::request_open() {
         crate::trace!("another copy is running; asked it to show its window");
         std::process::exit(0);
@@ -315,8 +318,9 @@ fn main() -> eframe::Result<()> {
 
             // On macOS this is the status item, and it is what makes closing
             // the main window safe: with no Dock icon it is the only way back
-            // to the window, and the only Quit affordance. On Linux there is
-            // no tray, which is why closing the window quits instead.
+            // to the window, and the only Quit affordance. The Linux tray icon
+            // plays the same part; launching the app again also brings the
+            // window back there.
             shell::install(cc.egui_ctx.clone());
 
             // The Omarchy bar widget was withdrawn; take it off any bar an

@@ -7,14 +7,16 @@
 //! process says "translate the selection" down a socket and exits; the first
 //! one does the work.
 //!
-//! On Windows it carries a second message for a second reason. Nothing there
-//! stops a user launching the app again while it is running, and two copies
-//! would mean two tray icons and two translators racing for the same
-//! selection, so the new process asks the old one to show its window and then
-//! gets out of the way.
+//! On Windows and Linux it carries a second message for a second reason.
+//! Nothing there stops a user launching the app again while it is running, and
+//! two copies would mean two translators racing for the same selection, so the
+//! new process asks the old one to show its window and then gets out of the
+//! way. On Linux that is also the only way back to a window that was closed:
+//! there is no tray icon, so opening the app from the launcher again is it.
 //!
 //! That is the right answer only while the two copies are the same build. An
-//! update on Windows is a downloaded `.exe` the user double-clicks, and a new
+//! update on Windows is a downloaded `.exe` the user double-clicks (and on
+//! Linux a downloaded binary the user runs), and a new
 //! build standing down for an old one is how "I installed it and nothing
 //! changed" happens: the window comes forward, it is the old version's window,
 //! and the banner still says an update is available. So the request carries
@@ -35,7 +37,7 @@ const TRANSLATE: &str = "translate-selection";
 /// has to run a command instead.
 #[cfg(target_os = "linux")]
 const READ_SCREEN: &str = "read-screen";
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 const OPEN: &str = "open-window";
 /// Turn automatic bubbles on or off: what a click on the Omarchy bar widget
 /// asks for. The running copy owns the setting, so it is the one that flips it.
@@ -56,15 +58,21 @@ pub fn on_toggle_auto(handler: impl Fn() + Send + Sync + 'static) {
 
 /// What the listener answers an [`OPEN`] with: whether it is staying, and so
 /// whether the caller is the copy that gets out of the way.
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 const STAY: &str = "staying";
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 const STAND_DOWN: &str = "standing-down";
+
+/// How long the older copy has to finish quitting before the newer one
+/// starts anyway. Long enough for a window to close and a tray icon to go,
+/// short enough not to look like a launch that did nothing.
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+const HANDOVER: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Splits a request into the word that names it and whatever followed, which
 /// today is a version and otherwise nothing. Kept out of the platform modules
 /// so it can be tested on any of them.
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn split_request(message: &str) -> (&str, &str) {
     match message.trim().split_once(char::is_whitespace) {
         Some((word, rest)) => (word, rest.trim()),
@@ -78,7 +86,7 @@ fn split_request(message: &str) -> (&str, &str) {
 const MAX_MESSAGE: u64 = 64;
 
 #[cfg(target_os = "linux")]
-pub use unix::{is_running, request_read_screen, request_toggle_auto};
+pub use unix::{is_running, request_open, request_read_screen, request_toggle_auto};
 #[cfg(unix)]
 pub use unix::{listen, request_translate};
 
@@ -91,6 +99,8 @@ mod unix {
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::PathBuf;
 
+    #[cfg(target_os = "linux")]
+    use super::{HANDOVER, OPEN, STAND_DOWN, STAY, split_request};
     use super::{MAX_MESSAGE, TRANSLATE};
 
     /// Where the running instance listens.
@@ -139,6 +149,29 @@ mod unix {
                         .is_err()
                     {
                         continue;
+                    }
+                    // Answered before anything else is done, because the
+                    // caller is waiting to be told whether this copy stays.
+                    #[cfg(target_os = "linux")]
+                    {
+                        let (word, caller) = split_request(&message);
+                        if word == OPEN {
+                            let outranked =
+                                crate::update::is_newer(caller, env!("CARGO_PKG_VERSION"));
+                            let _ = stream
+                                .write_all(if outranked { STAND_DOWN } else { STAY }.as_bytes());
+                            drop(stream);
+                            if outranked {
+                                crate::trace!(
+                                    "ipc: {caller} is newer than this copy; standing down"
+                                );
+                                crate::shell::request_quit();
+                            } else {
+                                crate::trace!("ipc: asked to show the window");
+                                crate::shell::request_open();
+                            }
+                            continue;
+                        }
                     }
                     if message.trim() == TRANSLATE {
                         crate::trace!("ipc: asked to translate the selection");
@@ -193,6 +226,46 @@ mod unix {
         stream.write_all(super::TOGGLE_AUTO.as_bytes()).is_ok()
     }
 
+    /// Asks the running instance to show its window, and says whether this
+    /// copy should now stand down. The same exchange as on Windows: a second
+    /// launch brings the first copy forward, unless this copy is the newer
+    /// build, in which case the old one quits and this one takes over.
+    #[cfg(target_os = "linux")]
+    pub fn request_open() -> bool {
+        let Some(answer) = ask(&format!("{OPEN} {}", env!("CARGO_PKG_VERSION"))) else {
+            return false;
+        };
+        if answer.trim() != STAND_DOWN {
+            return true;
+        }
+        crate::trace!("ipc: the running copy is older and is quitting; taking over");
+        // The old copy has to let go of the socket first; after the wait this
+        // starts either way, so a copy that never goes cannot leave nothing
+        // running.
+        let deadline = std::time::Instant::now() + HANDOVER;
+        while std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            if UnixStream::connect(socket_path()).is_err() {
+                break;
+            }
+        }
+        false
+    }
+
+    /// Sends one request and reads the answer, or `None` when nobody is
+    /// listening. The write half is closed so the listener, which reads to
+    /// the end, knows the request is complete.
+    #[cfg(target_os = "linux")]
+    fn ask(message: &str) -> Option<String> {
+        let mut stream = UnixStream::connect(socket_path()).ok()?;
+        let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(3)));
+        stream.write_all(message.as_bytes()).ok()?;
+        stream.shutdown(std::net::Shutdown::Write).ok()?;
+        let mut answer = String::new();
+        let _ = stream.take(MAX_MESSAGE).read_to_string(&mut answer);
+        Some(answer)
+    }
+
     /// Whether a copy is running to answer. An empty connection is ignored by
     /// the listener, so asking costs it nothing.
     #[cfg(target_os = "linux")]
@@ -217,7 +290,7 @@ mod windows {
     use ::windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
     use ::windows::core::PCWSTR;
 
-    use super::{MAX_MESSAGE, OPEN, STAND_DOWN, STAY, TRANSLATE, split_request};
+    use super::{HANDOVER, MAX_MESSAGE, OPEN, STAND_DOWN, STAY, TRANSLATE, split_request};
 
     /// Where the running instance listens.
     ///
@@ -442,11 +515,6 @@ mod windows {
         }
         false
     }
-
-    /// How long the older copy has to finish quitting before the newer one
-    /// starts anyway. Long enough for a window to close and a tray icon to go,
-    /// short enough not to look like a launch that did nothing.
-    const HANDOVER: Duration = Duration::from_secs(5);
 
     /// Sends one request and returns the answer, or `None` when nobody was
     /// there to take it. An answer of `""` is a listener that had nothing to

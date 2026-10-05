@@ -609,7 +609,8 @@ impl BubbleApp {
             // With nothing outside the app's own windows to bring it back,
             // closing the main window is the only Quit there is. Staying alive
             // would leave a translator running that the user cannot reach.
-            if !shell::has_indicator() {
+            // Linux is the exception: launching the app again reaches it.
+            if !shell::has_indicator() && !cfg!(target_os = "linux") {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             return;
@@ -637,7 +638,8 @@ impl BubbleApp {
         let licensing = self.licensing.clone();
         ctx.show_viewport_deferred(id, builder, move |ui, _class| {
             // Closing the window must not take the translator down with it;
-            // the app keeps running and the menu bar item brings it back.
+            // the app keeps running and the menu bar item (on Linux, launching
+            // it again) brings it back.
             if ui.ctx().input(|i| i.viewport().close_requested()) {
                 state.lock().unwrap().open = false;
             }

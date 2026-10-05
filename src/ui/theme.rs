@@ -494,7 +494,10 @@ pub(super) const FALLBACK_FONTS: &[&str] = &[
 /// Asian language pack added — the font files are always there even when the
 /// input methods are not.
 #[cfg(target_os = "windows")]
-pub(super) const BOLD_FONTS: &[&str] = &[r"C:\Windows\Fonts\segoeuib.ttf", r"C:\Windows\Fonts\arialbd.ttf"];
+pub(super) const BOLD_FONTS: &[&str] = &[
+    r"C:\Windows\Fonts\segoeuib.ttf",
+    r"C:\Windows\Fonts\arialbd.ttf",
+];
 
 #[cfg(target_os = "windows")]
 pub(super) const FALLBACK_FONTS: &[&str] = &[
@@ -532,9 +535,10 @@ pub(super) fn install_fonts(ctx: &egui::Context) {
     // still draws — just not bold, which is the right way round.
     if let Some((path, bytes)) = find_bold_font() {
         crate::trace!("bold font: {path}");
-        fonts
-            .font_data
-            .insert(BOLD_FAMILY.to_string(), Arc::new(egui::FontData::from_owned(bytes)));
+        fonts.font_data.insert(
+            BOLD_FAMILY.to_string(),
+            Arc::new(egui::FontData::from_owned(bytes)),
+        );
         let mut family = vec![BOLD_FAMILY.to_string()];
         family.extend(
             fonts
@@ -571,9 +575,11 @@ pub(crate) fn emphasis_family() -> egui::FontFamily {
 }
 
 fn find_bold_font() -> Option<(String, Vec<u8>)> {
-    BOLD_FONTS
-        .iter()
-        .find_map(|path| std::fs::read(path).ok().map(|bytes| ((*path).to_string(), bytes)))
+    BOLD_FONTS.iter().find_map(|path| {
+        std::fs::read(path)
+            .ok()
+            .map(|bytes| ((*path).to_string(), bytes))
+    })
 }
 
 /// Finds fonts with coverage past Latin, and reads them.

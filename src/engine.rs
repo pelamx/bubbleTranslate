@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::capture;
-use crate::health::Health;
 use crate::config::{Config, Provider};
+use crate::health::Health;
 use crate::license::{self, Licensing};
 use crate::platform::{CaptureSource, Trigger};
 use crate::quota::Verdict;
@@ -277,7 +277,11 @@ fn run(
                     .copied()
                     .map(|provider| {
                         let outcome = translator
-                            .translate_with(provider, crate::translate::probe_text(&cfg.target_lang), &cfg)
+                            .translate_with(
+                                provider,
+                                crate::translate::probe_text(&cfg.target_lang),
+                                &cfg,
+                            )
                             .map(|t| t.text)
                             .map_err(|e| e.to_string());
                         (provider, outcome)

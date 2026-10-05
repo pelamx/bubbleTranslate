@@ -13,6 +13,16 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**The tray icon is back, and closing the window no longer quits (Linux).**
+In 0.4.2 closing the window stopped bubbleTranslate completely, so there was
+no bubble until you opened it again. Now closing the window leaves the
+translator running in the background with its icon on the bar: click the icon
+to bring the window back, and right-click it and choose Quit to stop it.
+Opening bubbleTranslate from your launcher while it is already running also
+brings the window back, instead of starting a second copy.
+
 ## 0.4.2 — 2026-10-05
 
 **No more tray icon (Linux).** The icon in the system tray is gone. On some

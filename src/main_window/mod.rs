@@ -315,7 +315,7 @@ fn section(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
 ///
 /// Worth spelling out, because closing it does not do what closing a window
 /// usually does. Wherever the app has an indicator — the menu bar on macOS, a
-/// tray icon on Linux — closing puts the interface away and the translator
+/// tray icon on Windows and Linux — closing puts the interface away and the translator
 /// carries on watching selections, and quitting is deliberately somewhere
 /// else: the indicator's own menu. A window that can be dismissed by reflex
 /// should not also be the thing that stops the app.
@@ -330,7 +330,7 @@ fn footer(ui: &mut egui::Ui) {
         .color(TEXT_MUTED),
     );
 
-    if crate::shell::has_indicator() {
+    if crate::shell::has_indicator() && !cfg!(target_os = "linux") {
         ui.add_space(4.0);
         ui.label(
             egui::RichText::new(t(
@@ -340,6 +340,28 @@ fn footer(ui: &mut egui::Ui) {
                      Durdurmak için tepsi simgesinin menüsündeki Quit'i kullan.",
                 "Cerrar esta ventana deja el traductor funcionando en segundo plano. \
                      Para detenerlo, usa Quit en el menú del icono de la bandeja.",
+            ))
+            .size(10.5)
+            .color(TEXT_MUTED),
+        );
+    }
+
+    // On Linux the window can also come back by launching the app again, which
+    // matters on a session whose bar has no tray.
+    #[cfg(target_os = "linux")]
+    {
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(t(
+                "Closing this window leaves the translator running in the background. \
+                     Click the tray icon to bring it back; to stop it, right-click the \
+                     tray icon and choose Quit.",
+                "Bu pencereyi kapatmak çevirmeni arka planda çalışır bırakır. \
+                     Geri getirmek için tepsi simgesine tıkla; durdurmak için tepsi \
+                     simgesine sağ tıklayıp Quit'i seç.",
+                "Cerrar esta ventana deja el traductor funcionando en segundo plano. \
+                     Haz clic en el icono de la bandeja para recuperarla; para detenerlo, \
+                     haz clic derecho en el icono y elige Quit.",
             ))
             .size(10.5)
             .color(TEXT_MUTED),

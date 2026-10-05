@@ -257,8 +257,8 @@ impl Translator {
                  ?client=dict-chrome-ex&sl={sl_param}&tl={tl_param}&dt=t{dict}&q={q}"
             ),
         ];
-        let answer = |(translated, detected, dictionary): (String, String, Vec<Sense>)| {
-            Translation {
+        let answer =
+            |(translated, detected, dictionary): (String, String, Vec<Sense>)| Translation {
                 target_lang: target.to_string(),
                 echoed: false,
                 source_lang: if detected.is_empty() {
@@ -269,8 +269,7 @@ impl Translator {
                 provider: Provider::Google,
                 dictionary,
                 text: translated,
-            }
-        };
+            };
 
         let mut last = TranslateError::Network("no attempt made".into());
         for (idx, url) in hosts.iter().enumerate() {
@@ -553,10 +552,7 @@ impl Translator {
         let said = if source.is_empty() || source == "auto" {
             "Detect which language it is in.".to_string()
         } else {
-            format!(
-                "It is in {}.",
-                crate::config::language_name(source)
-            )
+            format!("It is in {}.", crate::config::language_name(source))
         };
         let prompt = format!(
             "Translate the text inside <text> into {target_name}. {said}\n\
@@ -608,13 +604,11 @@ impl Translator {
                 ));
             }
             other => {
-                let msg = serde_json::from_str::<Value>(&raw)
-                    .ok()
-                    .and_then(|v| {
-                        v.pointer("/error/message")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned)
-                    });
+                let msg = serde_json::from_str::<Value>(&raw).ok().and_then(|v| {
+                    v.pointer("/error/message")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                });
                 return Err(match msg {
                     Some(m) => TranslateError::BadResponse(format!("HTTP {other}: {m}")),
                     None => TranslateError::Http(other),
@@ -697,7 +691,11 @@ fn parse_google(body: &str) -> Result<(String, String, Vec<Sense>), TranslateErr
                 })
                 .unwrap_or_default();
             let src = outer.get(2).and_then(Value::as_str).unwrap_or("");
-            (text, src.to_string(), outer.get(1).map(parse_senses).unwrap_or_default())
+            (
+                text,
+                src.to_string(),
+                outer.get(1).map(parse_senses).unwrap_or_default(),
+            )
         } else {
             return Err(TranslateError::BadResponse("unrecognised shape".into()));
         };
@@ -1065,7 +1063,11 @@ mod tests {
             "en"]"#;
         let (text, src, senses) = parse_google(body).unwrap();
         assert_eq!((text.as_str(), src.as_str()), ("koşmak", "en"));
-        assert_eq!(senses.len(), MAX_SENSES, "only the first few parts of speech");
+        assert_eq!(
+            senses.len(),
+            MAX_SENSES,
+            "only the first few parts of speech"
+        );
         assert_eq!(senses[0].pos, "fiil");
         assert_eq!(
             senses[0].terms,
@@ -1171,7 +1173,10 @@ mod tests {
                 ..Config::default()
             };
             let out = Translator::new().resolve_echo(answered("tr"), "merhaba", &cfg);
-            assert!(out.echoed, "alt_lang {alt:?} should leave nothing translated");
+            assert!(
+                out.echoed,
+                "alt_lang {alt:?} should leave nothing translated"
+            );
         }
     }
 

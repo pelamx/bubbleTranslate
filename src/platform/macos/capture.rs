@@ -366,7 +366,10 @@ fn write_pasteboard_string(pasteboard: &NSPasteboard, value: &str, private: bool
         pasteboard.setString_forType(&ns, NSPasteboardTypeString);
         if private {
             let empty = NSString::from_str("");
-            for marker in ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"] {
+            for marker in [
+                "org.nspasteboard.ConcealedType",
+                "org.nspasteboard.TransientType",
+            ] {
                 pasteboard.setString_forType(&empty, &NSString::from_str(marker));
             }
         }

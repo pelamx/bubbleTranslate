@@ -28,14 +28,13 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::UI::HiDpi::GetDpiForSystem;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetDoubleClickTime, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey,
-    VIRTUAL_KEY, VK_A, VK_C, VK_CONTROL, VK_DOWN, VK_E, VK_ESCAPE,
-    VK_END, VK_HOME, VK_LEFT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RIGHT, VK_RWIN, VK_SHIFT,
-    VK_UP,
+    VIRTUAL_KEY, VK_A, VK_C, VK_CONTROL, VK_DOWN, VK_E, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT,
+    VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetCursorPos, GetMessageW, HHOOK, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT,
-    SetWindowsHookExW, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN,
-    WM_HOTKEY, WM_LBUTTONUP, WM_SYSKEYUP,
+    SetWindowsHookExW, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_SYSKEYUP,
 };
 
 use crate::config::TriggerKey;

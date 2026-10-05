@@ -189,147 +189,147 @@ fn run(on_trigger: impl Fn(Trigger) + Send + 'static) {
     // unambiguous.
     let press: Mutex<Option<((f64, f64), isize, CGEventFlags)>> = Mutex::new(None);
 
-    let callback =
-        move |_proxy: _, event_type: CGEventType, event: &core_graphics::event::CGEvent| {
-            // macOS switches off a tap whose callback took too long, and then
-            // simply stops delivering events — no error, no further callbacks
-            // beyond this one notification. Catching it and switching the tap back
-            // on is the difference between a hiccup and selection detection being
-            // dead for the rest of the session.
-            if matches!(
-                event_type,
-                CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput
-            ) {
-                crate::trace!("tap disabled by system ({event_type:?}) — re-enabling");
-                TAP_PORT.with(|port| {
-                    let port = port.get();
-                    if !port.is_null() {
-                        unsafe { CGEventTapEnable(port, true) };
-                    }
-                });
-                return CallbackResult::Keep;
-            }
+    let callback = move |_proxy: _,
+                         event_type: CGEventType,
+                         event: &core_graphics::event::CGEvent| {
+        // macOS switches off a tap whose callback took too long, and then
+        // simply stops delivering events — no error, no further callbacks
+        // beyond this one notification. Catching it and switching the tap back
+        // on is the difference between a hiccup and selection detection being
+        // dead for the rest of the session.
+        if matches!(
+            event_type,
+            CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput
+        ) {
+            crate::trace!("tap disabled by system ({event_type:?}) — re-enabling");
+            TAP_PORT.with(|port| {
+                let port = port.get();
+                if !port.is_null() {
+                    unsafe { CGEventTapEnable(port, true) };
+                }
+            });
+            return CallbackResult::Keep;
+        }
 
-            // Never react to the Cmd+C we post ourselves, or the gesture would
-            // feed itself.
-            if capture::is_synthesizing() || capture::is_marked_synthetic(event) {
-                return CallbackResult::Keep;
+        // Never react to the Cmd+C we post ourselves, or the gesture would
+        // feed itself.
+        if capture::is_synthesizing() || capture::is_marked_synthetic(event) {
+            return CallbackResult::Keep;
+        }
+        // Recorded before the pause gate: while the crosshair is up the
+        // tap is paused, and that drag is the one the bubble needs.
+        match event_type {
+            CGEventType::LeftMouseDown => {
+                let p = event.location();
+                *DRAG_FROM.lock().unwrap() = Some((p.x, p.y));
             }
-            // Recorded before the pause gate: while the crosshair is up the
-            // tap is paused, and that drag is the one the bubble needs.
-            match event_type {
-                CGEventType::LeftMouseDown => {
+            CGEventType::LeftMouseUp => {
+                if let Some((x0, y0)) = *DRAG_FROM.lock().unwrap() {
                     let p = event.location();
-                    *DRAG_FROM.lock().unwrap() = Some((p.x, p.y));
+                    *LAST_DRAG.lock().unwrap() =
+                        Some((x0.min(p.x), y0.min(p.y), (p.x - x0).abs(), (p.y - y0).abs()));
                 }
-                CGEventType::LeftMouseUp => {
-                    if let Some((x0, y0)) = *DRAG_FROM.lock().unwrap() {
-                        let p = event.location();
-                        *LAST_DRAG.lock().unwrap() =
-                            Some((x0.min(p.x), y0.min(p.y), (p.x - x0).abs(), (p.y - y0).abs()));
+            }
+            _ => {}
+        }
+
+        // Esc puts the bubble away. Ahead of the pause too: the pointer
+        // resting on the bubble is the likeliest moment to want it gone.
+        if matches!(event_type, CGEventType::KeyUp)
+            && event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) == KEYCODE_ESCAPE
+        {
+            crate::platform::escape_pressed();
+            return CallbackResult::Keep;
+        }
+
+        if PAUSED.load(Ordering::Relaxed) {
+            crate::trace!("event ignored: pointer is over the bubble");
+            return CallbackResult::Keep;
+        }
+
+        match event_type {
+            CGEventType::LeftMouseDown => {
+                let p = event.location();
+                crate::trace!("mouse-down at ({:.0}, {:.0})", p.x, p.y);
+                // Sampled here because a copy-on-select interface writes the
+                // pasteboard at mouse-up; by the time the capture runs there is
+                // no longer a "before" to compare against.
+                *press.lock().unwrap() = Some((
+                    (p.x, p.y),
+                    capture::pasteboard_change_count(),
+                    event.get_flags(),
+                ));
+            }
+            CGEventType::LeftMouseUp => {
+                let p = event.location();
+                let pressed = press.lock().unwrap().take();
+                let dragged = pressed
+                    .map(|((x, y), _, _)| {
+                        ((p.x - x).powi(2) + (p.y - y).powi(2)).sqrt() > DRAG_THRESHOLD
+                    })
+                    .unwrap_or(false);
+                // Click state 2 is a double-click (word), 3 a triple-click
+                // (paragraph); both select without any drag.
+                let multi_click =
+                    event.get_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE) >= 2;
+
+                crate::trace!(
+                    "mouse-up  drag={} multi_click={} -> {}",
+                    if dragged { "yes" } else { "no " },
+                    multi_click,
+                    if dragged || multi_click {
+                        "TRIGGER"
+                    } else {
+                        "ignored"
+                    },
+                );
+                // Either end of the gesture counts: the key may be taken
+                // before the button goes down or let go before it comes up,
+                // and both are the same request.
+                let key = trigger_key();
+                let keyed = satisfies(key, event.get_flags())
+                    || pressed.is_some_and(|(_, _, flags)| satisfies(key, flags));
+                if !keyed {
+                    crate::trace!("mouse-up  {} was not held -> ignored", key.label());
+                } else if dragged || multi_click {
+                    on_trigger(Trigger {
+                        at: Some((p.x, p.y)),
+                        clipboard_before: pressed.map(|(_, count, _)| count),
+                    });
+                }
+            }
+            CGEventType::KeyUp => {
+                let flags = event.get_flags();
+                let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+                // Asked for outright, so it is checked before the trigger
+                // key and before the selection gestures: it has nothing to
+                // do with whatever happens to be selected.
+                if is_region_key(keycode, flags) {
+                    crate::trace!("key-up    keycode={keycode} -> read the screen");
+                    if let Some(ask) = ON_REGION.get() {
+                        ask.lock().unwrap()();
                     }
+                    return CallbackResult::Keep;
                 }
-                _ => {}
-            }
+                let shift_select = flags.contains(CGEventFlags::CGEventFlagShift)
+                    && NAVIGATION_KEYS.contains(&keycode);
+                let select_all =
+                    flags.contains(CGEventFlags::CGEventFlagCommand) && keycode == KEYCODE_A;
 
-            // Esc puts the bubble away. Ahead of the pause too: the pointer
-            // resting on the bubble is the likeliest moment to want it gone.
-            if matches!(event_type, CGEventType::KeyUp)
-                && event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE)
-                    == KEYCODE_ESCAPE
-            {
-                crate::platform::escape_pressed();
-                return CallbackResult::Keep;
-            }
-
-            if PAUSED.load(Ordering::Relaxed) {
-                crate::trace!("event ignored: pointer is over the bubble");
-                return CallbackResult::Keep;
-            }
-
-            match event_type {
-                CGEventType::LeftMouseDown => {
+                if (shift_select || select_all) && satisfies(trigger_key(), flags) {
+                    crate::trace!("key-up    keycode={keycode} -> TRIGGER");
                     let p = event.location();
-                    crate::trace!("mouse-down at ({:.0}, {:.0})", p.x, p.y);
-                    // Sampled here because a copy-on-select interface writes the
-                    // pasteboard at mouse-up; by the time the capture runs there is
-                    // no longer a "before" to compare against.
-                    *press.lock().unwrap() = Some((
-                        (p.x, p.y),
-                        capture::pasteboard_change_count(),
-                        event.get_flags(),
-                    ));
+                    on_trigger(Trigger {
+                        at: Some((p.x, p.y)),
+                        clipboard_before: None,
+                    });
                 }
-                CGEventType::LeftMouseUp => {
-                    let p = event.location();
-                    let pressed = press.lock().unwrap().take();
-                    let dragged = pressed
-                        .map(|((x, y), _, _)| {
-                            ((p.x - x).powi(2) + (p.y - y).powi(2)).sqrt() > DRAG_THRESHOLD
-                        })
-                        .unwrap_or(false);
-                    // Click state 2 is a double-click (word), 3 a triple-click
-                    // (paragraph); both select without any drag.
-                    let multi_click =
-                        event.get_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE) >= 2;
-
-                    crate::trace!(
-                        "mouse-up  drag={} multi_click={} -> {}",
-                        if dragged { "yes" } else { "no " },
-                        multi_click,
-                        if dragged || multi_click {
-                            "TRIGGER"
-                        } else {
-                            "ignored"
-                        },
-                    );
-                    // Either end of the gesture counts: the key may be taken
-                    // before the button goes down or let go before it comes up,
-                    // and both are the same request.
-                    let key = trigger_key();
-                    let keyed = satisfies(key, event.get_flags())
-                        || pressed.is_some_and(|(_, _, flags)| satisfies(key, flags));
-                    if !keyed {
-                        crate::trace!("mouse-up  {} was not held -> ignored", key.label());
-                    } else if dragged || multi_click {
-                        on_trigger(Trigger {
-                            at: Some((p.x, p.y)),
-                            clipboard_before: pressed.map(|(_, count, _)| count),
-                        });
-                    }
-                }
-                CGEventType::KeyUp => {
-                    let flags = event.get_flags();
-                    let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
-                    // Asked for outright, so it is checked before the trigger
-                    // key and before the selection gestures: it has nothing to
-                    // do with whatever happens to be selected.
-                    if is_region_key(keycode, flags) {
-                        crate::trace!("key-up    keycode={keycode} -> read the screen");
-                        if let Some(ask) = ON_REGION.get() {
-                            ask.lock().unwrap()();
-                        }
-                        return CallbackResult::Keep;
-                    }
-                    let shift_select = flags.contains(CGEventFlags::CGEventFlagShift)
-                        && NAVIGATION_KEYS.contains(&keycode);
-                    let select_all =
-                        flags.contains(CGEventFlags::CGEventFlagCommand) && keycode == KEYCODE_A;
-
-                    if (shift_select || select_all) && satisfies(trigger_key(), flags) {
-                        crate::trace!("key-up    keycode={keycode} -> TRIGGER");
-                        let p = event.location();
-                        on_trigger(Trigger {
-                            at: Some((p.x, p.y)),
-                            clipboard_before: None,
-                        });
-                    }
-                }
-                _ => {}
             }
+            _ => {}
+        }
 
-            CallbackResult::Keep
-        };
+        CallbackResult::Keep
+    };
 
     // The tap cannot be created until this binary is ticked in Accessibility,
     // and that tick can arrive at any time — from the system's own dialog, or
