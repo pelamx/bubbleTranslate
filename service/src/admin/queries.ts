@@ -516,36 +516,6 @@ export async function users(env: Env): Promise<UserRow[]> {
   return results ?? [];
 }
 
-export interface OnlineRow {
-  install: string;
-  os: string | null;
-  app: string | null;
-  plan: string | null;
-  country: string | null;
-  first_seen: number;
-  alive_at: number;
-  mine: number;
-}
-
-/** The copies open right now -- heard from in the last {@link ONLINE_WINDOW} --
- *  most recent first, the operator's own included and marked, so a machine
- *  just started can be seen to arrive. */
-export async function onlineNow(env: Env): Promise<OnlineRow[]> {
-  const { results } = await env.DB.prepare(
-    `SELECT install, os, app, plan, country, first_seen, alive_at,
-            CASE WHEN install IN (SELECT value FROM json_each(?9))
-                   OR install IN (SELECT install FROM ignored_installs)
-                 THEN 1 ELSE 0 END AS mine
-       FROM installs
-      WHERE alive_at > ?1
-      ORDER BY alive_at DESC
-      LIMIT 200`,
-  )
-    .bind(now() - ONLINE_WINDOW, null, null, null, null, null, null, null, await mineInstalls(env))
-    .all<OnlineRow>();
-  return results ?? [];
-}
-
 /** "5m ago", "3h ago", "2d ago". */
 export interface Usage {
   daily: number;
