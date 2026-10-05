@@ -188,7 +188,7 @@ export async function updates(env: Env): Promise<Updates> {
       .all<UpdateRow>(),
     env.DB.prepare(
       `SELECT COALESCE(os, 'unknown') AS os, COALESCE(app, '?') AS app, COUNT(*) AS n,
-              SUM(CASE WHEN last_seen >= ?2 THEN 1 ELSE 0 END) AS today
+              SUM(CASE WHEN MAX(last_seen, COALESCE(alive_at, 0)) >= ?2 THEN 1 ELSE 0 END) AS today
          FROM installs WHERE last_seen > ?1 AND ${NOT_MINE_INSTALL}
         GROUP BY os, app`,
     )
@@ -214,7 +214,7 @@ export async function countries(env: Env): Promise<CountryRow[]> {
   const { results } = await env.DB.prepare(
     `SELECT COALESCE(country, '?') AS country, COUNT(*) AS n,
             SUM(CASE WHEN last_seen > ?2 THEN 1 ELSE 0 END) AS week,
-            SUM(CASE WHEN last_seen >= ?3 THEN 1 ELSE 0 END) AS today
+            SUM(CASE WHEN MAX(last_seen, COALESCE(alive_at, 0)) >= ?3 THEN 1 ELSE 0 END) AS today
        FROM installs WHERE last_seen > ?1 AND ${NOT_MINE_INSTALL}
       GROUP BY COALESCE(country, '?')
       ORDER BY n DESC, country`,
@@ -580,7 +580,7 @@ export async function mineBreakdown(env: Env): Promise<OsRow[]> {
   const { results } = await env.DB.prepare(
     `SELECT COALESCE(os, 'unknown') AS os,
             SUM(CASE WHEN first_seen >= ?2 THEN 1 ELSE 0 END) AS today,
-            SUM(CASE WHEN last_seen  >= ?2 THEN 1 ELSE 0 END) AS active_today,
+            SUM(CASE WHEN MAX(last_seen, COALESCE(alive_at, 0)) >= ?2 THEN 1 ELSE 0 END) AS active_today,
             SUM(CASE WHEN last_seen  >  ?1 THEN 1 ELSE 0 END) AS active,
             SUM(CASE WHEN alive_at   >  ?3 THEN 1 ELSE 0 END) AS online,
             COUNT(*) AS total
@@ -597,7 +597,7 @@ export async function osBreakdown(env: Env): Promise<OsRow[]> {
   const { results } = await env.DB.prepare(
     `SELECT COALESCE(os, 'unknown') AS os,
             SUM(CASE WHEN first_seen >= ?2 THEN 1 ELSE 0 END) AS today,
-            SUM(CASE WHEN last_seen  >= ?2 THEN 1 ELSE 0 END) AS active_today,
+            SUM(CASE WHEN MAX(last_seen, COALESCE(alive_at, 0)) >= ?2 THEN 1 ELSE 0 END) AS active_today,
             SUM(CASE WHEN last_seen  >  ?1 THEN 1 ELSE 0 END) AS active,
             SUM(CASE WHEN alive_at   >  ?3 THEN 1 ELSE 0 END) AS online,
             COUNT(*) AS total

@@ -234,3 +234,23 @@ it("counts a copy as online while it keeps saying it is open", async () => {
   expect(upTo).toContain("Linux 1");
   expect(upTo).toContain("macOS 0");
 });
+
+/** A copy left open across midnight counts for the new day as soon as it says
+ *  it is still open, without waiting for its next daily ping. */
+it("counts an app still open after midnight as active today", async () => {
+  const activeToday = async () => {
+    const html = await (await get("/admin")).text();
+    const tile = html.slice(html.indexOf('<div class="k">Active users'));
+    return Number(/<div class="v">(\d+)<\/div>/.exec(tile)![1]);
+  };
+  const before = await activeToday();
+  const t = Math.floor(Date.now() / 1000);
+  // Last daily ping three days ago, but said "still open" a moment ago.
+  await env.DB.prepare(
+    `INSERT OR REPLACE INTO installs (install, os, app, plan, first_seen, last_seen, alive_at)
+     VALUES (?1, 'linux', '0.4.4', 'free', ?2, ?2, ?3)`,
+  )
+    .bind("7".repeat(32), t - 3 * 86400, t)
+    .run();
+  expect(await activeToday()).toBe(before + 1);
+});

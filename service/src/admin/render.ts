@@ -309,7 +309,7 @@ export async function pulse(env: Env): Promise<Pulse> {
       `SELECT
          SUM(CASE WHEN first_seen >= ?1 THEN 1 ELSE 0 END) AS today,
          SUM(CASE WHEN first_seen >= ?2 AND first_seen < ?1 THEN 1 ELSE 0 END) AS yesterday,
-         SUM(CASE WHEN last_seen  >= ?1 THEN 1 ELSE 0 END) AS active
+         SUM(CASE WHEN MAX(last_seen, COALESCE(alive_at, 0)) >= ?1 THEN 1 ELSE 0 END) AS active
        FROM installs WHERE ${NOT_MINE_INSTALL}`,
     )
       .bind(t, t - DAY, null, null, null, null, null, null, await mineInstalls(env))
