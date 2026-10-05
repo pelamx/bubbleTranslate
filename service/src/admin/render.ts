@@ -42,6 +42,8 @@ import {
   licenceOs,
   mineInstalls,
   mineBreakdown,
+  type OnlineRow,
+  onlineNow,
   type ProviderHealthRow,
   providerHealth,
   osBreakdown,
@@ -870,8 +872,40 @@ export function delta(today: number, yesterday: number): string {
   return `<div class="d"><span class="${cls}">${arrow} ${d > 0 ? "+" : ""}${d}</span> · yesterday ${yesterday}</div>`;
 }
 
+/** Each copy open right now, one row apiece, the operator's own marked so a
+ *  machine just started can be seen to arrive without being mistaken for a
+ *  customer. Copies before 0.4.4 only say so with their daily ping, so they
+ *  show for ten minutes after starting and then drop off while still open. */
+function onlineSection(rows: OnlineRow[]): string {
+  const theirs = rows.filter((r) => !r.mine).length;
+  const body = rows.length
+    ? `<div class="scroll"><table>
+         <tr><th>Install</th><th>Version</th><th>Plan</th><th>Country</th><th>Using since</th><th>Last heard</th><th></th></tr>
+         ${rows
+           .map(
+             (r) => `<tr${r.mine ? ' class="mine"' : ""}>
+           <td><code>${escapeHtml(r.install.slice(0, 8))}</code></td>
+           <td>${escapeHtml(osLabel(r.os ?? "unknown"))} ${escapeHtml(r.app ?? "")}</td>
+           <td>${r.plan === "pro" ? `<span class="badge on">pro</span>` : `<span class="muted">free</span>`}</td>
+           <td>${r.country ? countryLabel(r.country) : `<span class="muted">—</span>`}</td>
+           <td title="${escapeHtml(date(r.first_seen))}">${ago(r.first_seen)}</td>
+           <td>${ago(r.alive_at)}</td>
+           <td>${r.mine ? `<span class="badge">you</span>` : ""}</td></tr>`,
+           )
+           .join("")}
+       </table></div>`
+    : `<p class="sub">Nobody has the app open right now.</p>`;
+  return `<section class="card" id="online">
+       <p class="label">Online now <span style="text-transform:none;font-weight:400">(${theirs} ${theirs === 1 ? "person" : "people"}, plus ${rows.length - theirs} of yours)</span></p>
+       ${body}
+       <p class="muted foot">Copies heard from in the last 10 minutes. 0.4.4 and newer say every five
+         minutes that they are still open; older versions only check in once a day, so they show for
+         ten minutes after starting and then drop off even while still open.</p>
+     </section>`;
+}
+
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry] = await Promise.all([
+  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, online] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -897,6 +931,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     sources(env),
     updates(env),
     versionCountries(env),
+    onlineNow(env),
   ]);
   const dl = downloadsNow?.total ?? null;
 
@@ -1048,13 +1083,16 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
            ${licChips((o) => o.today)}</div>
          <div class="stat"><div class="k">Online now</div><div class="v">${byOs.reduce((a, o) => a + (o.online ?? 0), 0)}</div>
            <div class="sub">app open in the last 10 minutes</div>
-           ${osChips((o) => o.online ?? 0)}</div>
+           ${osChips((o) => o.online ?? 0)}
+           <a class="sub" href="#online">see who</a></div>
          <div class="stat"><div class="k">Active users</div><div class="v">${p.active_today}</div>
            <div class="sub">opened the app today</div>
            ${osChips((o) => o.active_today)}
            ${countryChips(byCountry, (r) => r.today)}</div>
        </div>
      </section>
+
+     ${onlineSection(online)}
 
      <section class="card">
        <p class="label">Overall</p>

@@ -233,4 +233,10 @@ it("counts a copy as online while it keeps saying it is open", async () => {
   expect(upTo).toContain(">1<");
   expect(upTo).toContain("Linux 1");
   expect(upTo).toContain("macOS 0");
+
+  // And the list names the open one, not the one that went quiet.
+  const list = html.slice(html.indexOf('id="online"'));
+  const section = list.slice(0, list.indexOf("</section>"));
+  expect(section).toContain("eeeeeeee");
+  expect(section).not.toContain("99999999");
 });
