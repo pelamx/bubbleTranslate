@@ -140,6 +140,21 @@ export async function versions(
   return results ?? [];
 }
 
+/** Real installs per version over the last 30 days, by the country their
+ *  pings came from -- where the users of each version are. */
+export async function versionCountries(
+  env: Env,
+): Promise<{ app: string; country: string; n: number }[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT COALESCE(app, '?') AS app, COALESCE(country, '?') AS country, COUNT(*) AS n
+       FROM installs WHERE last_seen > ?1 AND ${NOT_MINE_INSTALL}
+      GROUP BY app, COALESCE(country, '?')`,
+  )
+    .bind(now() - 30 * DAY, null, null, null, null, null, null, null, await mineInstalls(env))
+    .all<{ app: string; country: string; n: number }>();
+  return results ?? [];
+}
+
 export interface UpdateRow {
   install: string;
   os: string | null;

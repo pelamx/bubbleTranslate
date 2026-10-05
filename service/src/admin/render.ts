@@ -54,6 +54,7 @@ import {
   usage,
   users,
   versions,
+  versionCountries,
 } from "./queries";
 
 export function ago(unix: number): string {
@@ -870,7 +871,7 @@ export function delta(today: number, yesterday: number): string {
 }
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups] = await Promise.all([
+  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -895,6 +896,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     buyFunnel(env),
     sources(env),
     updates(env),
+    versionCountries(env),
   ]);
   const dl = downloadsNow?.total ?? null;
 
@@ -950,7 +952,11 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
             ? `<td class="num" title="The latest ${escapeHtml(osLabel(os))} version"><b class="ok">${count}</b> <span class="badge on">latest</span>${yours(os)}</td>`
             : `<td class="num">${count}${yours(os)}</td>`;
         }).join("")}
-        <td class="num"><b>${all}</b></td></tr>`;
+        <td class="num"><b>${all}</b></td>
+        <td>${countryChips(
+          versCountry.filter((c) => c.app === app).map((c) => ({ country: c.country, n: c.n, week: 0, today: 0 })),
+          (c) => c.n,
+        )}</td></tr>`;
     })
     .join("");
   // How far each platform has updated: the share of this month's installs on
@@ -964,10 +970,10 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
       .reduce((a, v) => a + v.n, 0);
   const adoptionRows = `<tr class="total"><td>On latest</td>${PLATFORMS.map(
     (os) => `<td class="num">${pub?.[os] ? ratio(onLatest(os), onPlatform(os)) : `<span class="muted">—</span>`}</td>`,
-  ).join("")}<td></td></tr>
+  ).join("")}<td></td><td></td></tr>
     <tr><td>0.2.7 or older</td>${PLATFORMS.map(
       (os) => `<td class="num">${onOld(os) ? `<span class="warn">${onOld(os)}</span>` : `<span class="muted">0</span>`}</td>`,
-    ).join("")}<td class="num">${PLATFORMS.reduce((a, os) => a + onOld(os), 0)}</td></tr>`;
+    ).join("")}<td class="num">${PLATFORMS.reduce((a, os) => a + onOld(os), 0)}</td><td></td></tr>`;
 
   const real = people.filter((x) => !x.mine).length;
   const own = people.length - real;
@@ -1098,8 +1104,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
              `<th class="num">${osLabel(os)}${
                pub?.[os] ? `<br><span class="muted" style="font-weight:400">latest ${escapeHtml(pub[os])}</span>` : ""
              }</th>`,
-         ).join("")}<th class="num">Total</th></tr>
-         ${versionRows || `<tr><td colspan="5" class="muted">No installs this month.</td></tr>`}
+         ).join("")}<th class="num">Total</th><th>From</th></tr>
+         ${versionRows || `<tr><td colspan="6" class="muted">No installs this month.</td></tr>`}
          ${versionRows ? adoptionRows : ""}
        </table></div>
 
