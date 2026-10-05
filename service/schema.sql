@@ -177,6 +177,24 @@ CREATE TABLE IF NOT EXISTS installs (
 
 CREATE INDEX IF NOT EXISTS installs_by_last_seen ON installs (last_seen);
 
+-- Every time an install's daily ping arrives with a different version from
+-- the one it last reported: that copy was updated (or, rarely, went back).
+-- Same salted install id as `installs`, nothing else about the person. Before
+-- this table only the current version was kept, so an update could not be told
+-- from a new install on the new version. Kept for 13 months,
+-- like the install itself. Added on 2026-10-05 to a live database with this
+-- statement and the index below.
+CREATE TABLE IF NOT EXISTS updates (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  install  TEXT NOT NULL,
+  os       TEXT,
+  from_app TEXT NOT NULL,
+  to_app   TEXT NOT NULL,
+  at       INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS updates_by_at ON updates (at);
+
 -- How each translation backend fared, per day, added up across every install.
 --
 -- Totals only: no install id, so this says "Google failed 400 times yesterday"

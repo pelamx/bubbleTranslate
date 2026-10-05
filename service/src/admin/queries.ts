@@ -140,6 +140,49 @@ export async function versions(
   return results ?? [];
 }
 
+export interface UpdateRow {
+  install: string;
+  os: string | null;
+  from_app: string;
+  to_app: string;
+  at: number;
+  country: string | null;
+}
+
+export interface Updates {
+  /** Real copies seen changing version in the last 30 days, newest first. */
+  recent: UpdateRow[];
+  /** Real installs used in the last 7 days, per OS and version; `today` is
+   *  the part of `n` seen since local midnight. */
+  week: { os: string; app: string; n: number; today: number }[];
+}
+
+/** Who updated, and who is still on an older version. An update is only seen
+ *  on the first ping after it, so a copy that was updated and never opened
+ *  again does not appear. */
+export async function updates(env: Env): Promise<Updates> {
+  const mine = await mineInstalls(env);
+  const [recent, week] = await Promise.all([
+    env.DB.prepare(
+      `SELECT install, u.os AS os, from_app, to_app, at, i.country AS country
+         FROM updates u LEFT JOIN installs i USING (install)
+        WHERE at > ?1 AND ${NOT_MINE_INSTALL}
+        ORDER BY at DESC`,
+    )
+      .bind(now() - 30 * DAY, null, null, null, null, null, null, null, mine)
+      .all<UpdateRow>(),
+    env.DB.prepare(
+      `SELECT COALESCE(os, 'unknown') AS os, COALESCE(app, '?') AS app, COUNT(*) AS n,
+              SUM(CASE WHEN last_seen >= ?2 THEN 1 ELSE 0 END) AS today
+         FROM installs WHERE last_seen > ?1 AND ${NOT_MINE_INSTALL}
+        GROUP BY os, app`,
+    )
+      .bind(now() - 7 * DAY, startOfToday(), null, null, null, null, null, null, mine)
+      .all<{ os: string; app: string; n: number; today: number }>(),
+  ]);
+  return { recent: recent.results ?? [], week: week.results ?? [] };
+}
+
 export interface CountryRow {
   country: string;
   n: number;

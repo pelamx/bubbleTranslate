@@ -108,6 +108,17 @@ async function ping(env: Env, body: any, request: Request) {
   const country =
     typeof cf?.country === "string" && /^[A-Z0-9]{2}$/.test(cf.country) ? cf.country : null;
   const os = String(body.os ?? "").slice(0, 16);
+  const app = String(body.app ?? "").slice(0, 32);
+  // Before the row is overwritten: a known install reporting a different
+  // version from last time has been updated, which is the only moment that
+  // can be seen.
+  await env.DB.prepare(
+    `INSERT INTO updates (install, os, from_app, to_app, at)
+     SELECT install, ?2, app, ?3, ?4 FROM installs
+      WHERE install = ?1 AND app IS NOT NULL AND app <> '' AND ?3 <> '' AND app <> ?3`,
+  )
+    .bind(install, os, app, t)
+    .run();
   const row = await env.DB.prepare(
     `INSERT INTO installs (install, os, app, plan, first_seen, last_seen, country)
      VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)
@@ -115,7 +126,7 @@ async function ping(env: Env, body: any, request: Request) {
        country = COALESCE(?6, country)
      RETURNING first_seen, source`,
   )
-    .bind(install, os, String(body.app ?? "").slice(0, 32), plan, t, country)
+    .bind(install, os, app, plan, t, country)
     .first<{ first_seen: number; source: string | null }>();
   // Only a brand-new install is matched, and only once: an old one already
   // has its answer, or predates the matching and stays unknown.
@@ -143,6 +154,7 @@ async function ping(env: Env, body: any, request: Request) {
   // forgotten. Done here rather than in the cron, so the promise holds even
   // when no cron runs; the index on last_seen keeps it cheap.
   await env.DB.prepare("DELETE FROM installs WHERE last_seen < ?").bind(t - 396 * 86_400).run();
+  await env.DB.prepare("DELETE FROM updates WHERE at < ?").bind(t - 396 * 86_400).run();
   return new Response(null, { status: 204 });
 }
 

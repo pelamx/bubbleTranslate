@@ -32,6 +32,8 @@ import {
   sources,
   type LimitHits,
   limitHits,
+  type Updates,
+  updates,
   type BuyFunnel,
   buyFunnel,
   downloads,
@@ -561,6 +563,97 @@ function countriesCard(rows: CountryRow[]): string {
      </section>`;
 }
 
+/** Which version the people using the app right now are on: everyone seen
+ *  this week, per version and platform, with today's part of it beside. */
+function activeVersionsCard(up: Updates, pub: Record<string, string> | null): string {
+  const apps = [...new Set(up.week.map((w) => w.app))].sort(compareVersions).reverse();
+  if (apps.length === 0) {
+    return `<section class="card">
+       <p class="label">Active users by version</p>
+       <p class="sub">Nobody has used the app this week.</p>
+     </section>`;
+  }
+  const cell = (n: number, today: number) =>
+    n ? `<b>${n}</b> <span class="muted">· ${today} today</span>` : `<span class="muted">0</span>`;
+  const pick = (f: (w: Updates["week"][number]) => boolean) => {
+    const ws = up.week.filter(f);
+    return cell(ws.reduce((a, w) => a + w.n, 0), ws.reduce((a, w) => a + w.today, 0));
+  };
+  const rows = apps
+    .map(
+      (app) => `<tr><td>${escapeHtml(app)}</td>
+        ${PLATFORMS.map((os) => {
+          const c = pick((w) => w.app === app && w.os === os);
+          return pub?.[os] === app
+            ? `<td class="num">${c} <span class="badge on">latest</span></td>`
+            : `<td class="num">${c}</td>`;
+        }).join("")}
+        <td class="num">${pick((w) => w.app === app)}</td></tr>`,
+    )
+    .join("");
+  return `<section class="card">
+       <p class="label">Active users by version</p>
+       <div class="scroll"><table>
+         <tr><th>Version</th>${PLATFORMS.map((os) => `<th class="num">${escapeHtml(osLabel(os))}</th>`).join("")}
+             <th class="num">Total</th></tr>
+         ${rows}
+         <tr class="total"><td>All</td>${PLATFORMS.map((os) => `<td class="num">${pick((w) => w.os === os)}</td>`).join("")}
+             <td class="num">${pick(() => true)}</td></tr>
+       </table></div>
+       <p class="muted foot">Everyone who used the app in the last 7 days, by the version they had
+         then; "today" is the part of them seen since midnight, Turkey time.</p>
+     </section>`;
+}
+
+/** Whether old copies move to the new version: per platform, who updated in
+ *  the last 30 days and who used an older version this week, then each update
+ *  as it was seen. */
+function updatesCard(up: Updates, pub: Record<string, string> | null): string {
+  const latest = (os: string) => pub?.[os];
+  const rows = PLATFORMS.map((os) => {
+    const mine = up.recent.filter((r) => r.os === os);
+    const toLatest = mine.filter((r) => r.to_app === latest(os)).length;
+    const week = up.week.filter((w) => w.os === os);
+    const used = week.reduce((a, w) => a + w.n, 0);
+    const behind = week
+      .filter((w) => latest(os) && /^\d+\.\d+\.\d+$/.test(w.app) && compareVersions(w.app, latest(os)!) < 0)
+      .reduce((a, w) => a + w.n, 0);
+    return `<tr><td>${escapeHtml(osLabel(os))}</td>
+      <td>${latest(os) ? escapeHtml(latest(os)!) : `<span class="muted">—</span>`}</td>
+      <td class="num"><b>${mine.length}</b></td>
+      <td class="num">${latest(os) ? toLatest : `<span class="muted">—</span>`}</td>
+      <td>${latest(os) ? (behind ? `<span class="warn">${ratio(behind, used)}</span>` : ratio(0, used)) : `<span class="muted">—</span>`}</td></tr>`;
+  }).join("");
+  const list = up.recent
+    .slice(0, 25)
+    .map(
+      (r) => `<tr><td><code>${escapeHtml(r.install.slice(0, 8))}</code></td>
+        <td>${escapeHtml(osLabel(r.os ?? "unknown"))}</td>
+        <td>${escapeHtml(r.from_app)} → <b${r.to_app === latest(r.os ?? "") ? ' class="ok"' : ""}>${escapeHtml(r.to_app)}</b></td>
+        <td>${ago(r.at)}</td>
+        <td>${r.country ? countryLabel(r.country) : `<span class="muted">—</span>`}</td></tr>`,
+    )
+    .join("");
+  return `<section class="card">
+       <p class="label">Updates, last 30 days</p>
+       <div class="scroll"><table>
+         <tr><th>Platform</th><th>Latest</th><th class="num">Updated</th><th class="num">To latest</th>
+             <th>Still on an older version, used this week</th></tr>
+         ${rows}
+       </table></div>
+       ${
+         list
+           ? `<div class="scroll" style="margin-top:14px"><table>
+         <tr><th>Install</th><th>Platform</th><th>Version</th><th>Seen</th><th>Country</th></tr>
+         ${list}
+       </table></div>`
+           : `<p class="sub">Nobody has been seen updating yet.</p>`
+       }
+       <p class="muted foot">An update shows up the first time the updated copy is opened and
+         reports in. Recorded from 5 October 2026; anything before that is not here.</p>
+     </section>`;
+}
+
 function limitCard(hits: LimitHits): string {
   const { base, capped } = hits;
   if (capped.length === 0) {
@@ -777,7 +870,7 @@ export function delta(today: number, yesterday: number): string {
 }
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource] = await Promise.all([
+  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -801,6 +894,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     limitHits(env),
     buyFunnel(env),
     sources(env),
+    updates(env),
   ]);
   const dl = downloadsNow?.total ?? null;
 
@@ -1012,6 +1106,10 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
        <p class="label" style="margin-top:22px">Downloads per release</p>
        ${releasesTable(downloadsNow)}
      </section>
+
+     ${activeVersionsCard(ups, pub)}
+
+     ${updatesCard(ups, pub)}
 
      ${limitCard(hits)}
 

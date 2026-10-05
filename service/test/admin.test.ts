@@ -149,3 +149,52 @@ it("shows who ran out of the free allowance, and where installs are", async () =
   expect(html).toContain("Installs by country");
   expect(html).toContain("Germany");
 });
+
+/** An update is only visible as a known install reporting a new version, so
+ *  the ping has to notice the change before it overwrites the old one. */
+it("shows a copy that moved to a new version, and not one that stayed", async () => {
+  const ping = (install: string, app: string) =>
+    worker.fetch(
+      new Request("https://api.bubbletranslate.app/v1/ping", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ install, os: "linux", app, plan: "free" }),
+      }),
+      env,
+    );
+  const moved = "c".repeat(32);
+  const stayed = "d".repeat(32);
+  await ping(moved, "0.4.1");
+  await ping(stayed, "0.4.1");
+  await ping(moved, "0.4.2");
+  await ping(stayed, "0.4.1");
+
+  const { results } = await env.DB.prepare("SELECT install, from_app, to_app FROM updates").all();
+  expect(results).toEqual([{ install: moved, from_app: "0.4.1", to_app: "0.4.2" }]);
+
+  const html = await (await get("/admin")).text();
+  const card = html.slice(html.indexOf("Updates, last 30 days"));
+  expect(card).toContain("cccccccc");
+  expect(card).toContain("0.4.1 → <b>0.4.2</b>");
+  expect(card.slice(0, card.indexOf("</section>"))).not.toContain("dddddddd");
+});
+
+it("shows which version this week's users are on", async () => {
+  const t = Math.floor(Date.now() / 1000);
+  const add = (install: string, app: string, seen: number) =>
+    env.DB.prepare(
+      `INSERT OR REPLACE INTO installs (install, os, app, plan, first_seen, last_seen)
+       VALUES (?1, 'windows', ?2, 'free', ?3, ?3)`,
+    )
+      .bind(install, app, seen)
+      .run();
+  await add("1".repeat(32), "0.4.9", t);
+  await add("2".repeat(32), "0.4.9", t - 3 * 86400);
+  await add("3".repeat(32), "0.3.1", t - 20 * 86400);
+  const html = await (await get("/admin")).text();
+  const card = html.slice(html.indexOf("Active users by version"));
+  const body = card.slice(0, card.indexOf("</section>"));
+  expect(body).toContain("<b>2</b> <span class=\"muted\">· 1 today</span>");
+  // Not seen this week, so not an active user.
+  expect(body).not.toContain("0.3.1");
+});
