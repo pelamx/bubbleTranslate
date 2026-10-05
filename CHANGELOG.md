@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.4.3 — 2026-10-05
 
 **The tray icon is back, and closing the window no longer quits (Linux).**
 In 0.4.2 closing the window stopped bubbleTranslate completely, so there was
