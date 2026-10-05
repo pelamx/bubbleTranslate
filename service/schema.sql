@@ -161,6 +161,12 @@ CREATE INDEX IF NOT EXISTS paddle_subscriptions_by_customer
 -- `download_clicks`), or 'unmatched' when no click fits. NULL for installs
 -- first seen before the matching existed. Added on 2026-10-02 with
 --   ALTER TABLE installs ADD COLUMN source TEXT;
+--
+-- `alive_at` is the last time a running copy said it was still open: every
+-- few minutes while it runs (see `license::alive`), and with each daily ping.
+-- It is what the panel's "Online now" counts. Added on 2026-10-06 with
+--   ALTER TABLE installs ADD COLUMN alive_at INTEGER;
+--   CREATE INDEX IF NOT EXISTS installs_by_alive_at ON installs (alive_at);
 CREATE TABLE IF NOT EXISTS installs (
   install      TEXT PRIMARY KEY,
   os           TEXT,
@@ -172,10 +178,12 @@ CREATE TABLE IF NOT EXISTS installs (
   first_capped INTEGER,
   last_capped  INTEGER,
   capped_days  INTEGER NOT NULL DEFAULT 0,
-  source       TEXT
+  source       TEXT,
+  alive_at     INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS installs_by_last_seen ON installs (last_seen);
+CREATE INDEX IF NOT EXISTS installs_by_alive_at ON installs (alive_at);
 
 -- Every time an install's daily ping arrives with a different version from
 -- the one it last reported: that copy was updated (or, rarely, went back).

@@ -579,6 +579,22 @@ pub fn ping(agent: &ureq::Agent, pro: bool) {
         );
 }
 
+/// Tells the service this copy is still open: the install id and nothing else.
+/// Sent every few minutes while the app runs, under the same `usage_ping`
+/// switch as the daily ping, so the service can count how many copies are open
+/// right now rather than only how many were opened today. Best effort and
+/// silent; the answer is ignored.
+pub fn alive(agent: &ureq::Agent) {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("BUBBLETRANSLATE_LICENSE_API").is_none() {
+        return;
+    }
+    let _ = agent
+        .post(format!("{}/v1/alive", api_base()))
+        .header("Content-Type", "application/json")
+        .send(serde_json::json!({ "install": install_id() }).to_string().as_str());
+}
+
 /// Tells the service this install ran out of today's free allowance. Sent at
 /// most once a day, by the engine, the moment it first refuses; the same
 /// install id, OS, version and plan as the daily ping and nothing more. It

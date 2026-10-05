@@ -7,6 +7,11 @@ export const PAGE_SIZE = 40;
 
 export const DAY = 86_400;
 
+/** A running copy says it is still open every five minutes, so one that has
+ *  not been heard from in ten has been closed, or its machine is asleep. One
+ *  missed beat is allowed for. */
+export const ONLINE_WINDOW = 10 * 60;
+
 export const date = (unix: number) => new Date(unix * 1000).toISOString().slice(0, 10);
 
 /** The operator reads the panel in Turkey, which has been UTC+3 all year

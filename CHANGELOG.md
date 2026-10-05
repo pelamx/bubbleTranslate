@@ -13,6 +13,16 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## 0.4.4 — 2026-10-06
+
+**A short "still open" signal while the app runs.** Besides the anonymous
+daily ping, a running copy now says it is still open every five minutes,
+carrying only the same anonymous install id — no text, no languages, not even
+the version. The daily count shows how many people opened the app on a given
+day, but not how many are using it at this moment, which is what tells us
+whether a change is being felt right away. `usage_ping = false` in the config
+file turns this off along with the daily ping.
+
 ## 0.4.3 — 2026-10-05
 
 **The tray icon is back, and closing the window no longer quits (Linux).**

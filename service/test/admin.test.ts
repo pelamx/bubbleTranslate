@@ -198,3 +198,39 @@ it("shows which version this week's users are on", async () => {
   // Not seen this week, so not an active user.
   expect(body).not.toContain("0.3.1");
 });
+
+/** "Online now" counts copies that said they are still open in the last ten
+ *  minutes, not everyone who opened the app today. */
+it("counts a copy as online while it keeps saying it is open", async () => {
+  const post = (path: string, body: object) =>
+    worker.fetch(
+      new Request(`https://api.bubbletranslate.app${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+      env,
+    );
+  const open = "e".repeat(32);
+  const closed = "9".repeat(32);
+  const t = Math.floor(Date.now() / 1000);
+  await post("/v1/ping", { install: open, os: "linux", app: "0.4.4", plan: "free" });
+  await post("/v1/ping", { install: closed, os: "macos", app: "0.4.4", plan: "free" });
+  // Both opened today; one went quiet an hour ago, the other is still beating.
+  await env.DB.prepare("UPDATE installs SET alive_at = ?1").bind(t - 3600).run();
+  await post("/v1/alive", { install: open });
+  // An id the daily ping never created gets no row.
+  await post("/v1/alive", { install: "8".repeat(32) });
+
+  const { results } = await env.DB.prepare("SELECT install FROM installs WHERE alive_at > ?1")
+    .bind(t - 600)
+    .all();
+  expect(results).toEqual([{ install: open }]);
+
+  const html = await (await get("/admin")).text();
+  const tile = html.slice(html.indexOf("Online now"));
+  const upTo = tile.slice(0, tile.indexOf("</div></div>"));
+  expect(upTo).toContain(">1<");
+  expect(upTo).toContain("Linux 1");
+  expect(upTo).toContain("macOS 0");
+});

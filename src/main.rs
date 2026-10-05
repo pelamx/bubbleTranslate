@@ -273,9 +273,10 @@ fn main() -> eframe::Result<()> {
                 engine.request(Request::RefreshLicense);
             }
 
-            // One anonymous ping a day while running; see `Config::usage_ping`.
+            // One anonymous ping a day while running, and a bare "still open"
+            // every five minutes between them; see `Config::usage_ping`.
             // Re-read every turn, so switching it off in the config stops the
-            // next one without a restart. Checked hourly against the local
+            // next one without a restart. Checked each turn against the local
             // day rather than slept for 24 hours: a sleep does not advance
             // while the machine is suspended, so a laptop closed every night
             // would otherwise go days without being counted.
@@ -292,13 +293,17 @@ fn main() -> eframe::Result<()> {
                     );
                     let mut pinged_on: Option<i64> = None;
                     loop {
-                        let day = quota::local_day();
-                        if pinged_on != Some(day) && config.lock().unwrap().usage_ping {
-                            pinged_on = Some(day);
-                            let pro = license.lock().unwrap().entitlement.is_pro();
-                            license::ping(&agent, pro);
+                        if config.lock().unwrap().usage_ping {
+                            let day = quota::local_day();
+                            if pinged_on != Some(day) {
+                                pinged_on = Some(day);
+                                let pro = license.lock().unwrap().entitlement.is_pro();
+                                license::ping(&agent, pro);
+                            } else {
+                                license::alive(&agent);
+                            }
                         }
-                        std::thread::sleep(std::time::Duration::from_secs(3600));
+                        std::thread::sleep(std::time::Duration::from_secs(300));
                     }
                 });
             }

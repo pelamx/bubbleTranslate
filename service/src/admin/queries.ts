@@ -3,7 +3,7 @@
 import { type Env, USD_AMOUNT } from "../env";
 import { type Licence } from "../licences";
 import { now, sha256Hex } from "../tokens";
-import { DAY, PAGE_SIZE, startOfToday } from "./shared";
+import { DAY, ONLINE_WINDOW, PAGE_SIZE, startOfToday } from "./shared";
 
 export interface Stats {
   live: number;
@@ -561,6 +561,8 @@ export interface OsRow {
   today: number;
   active_today: number;
   active: number;
+  /** Open right now: heard from in the last {@link ONLINE_WINDOW}. */
+  online: number;
   total: number;
 }
 
@@ -580,12 +582,13 @@ export async function mineBreakdown(env: Env): Promise<OsRow[]> {
             SUM(CASE WHEN first_seen >= ?2 THEN 1 ELSE 0 END) AS today,
             SUM(CASE WHEN last_seen  >= ?2 THEN 1 ELSE 0 END) AS active_today,
             SUM(CASE WHEN last_seen  >  ?1 THEN 1 ELSE 0 END) AS active,
+            SUM(CASE WHEN alive_at   >  ?3 THEN 1 ELSE 0 END) AS online,
             COUNT(*) AS total
        FROM installs
       WHERE ${MINE_INSTALL}
       GROUP BY os`,
   )
-    .bind(now() - 8 * DAY, startOfToday(), null, null, null, null, null, null, await mineInstalls(env))
+    .bind(now() - 8 * DAY, startOfToday(), now() - ONLINE_WINDOW, null, null, null, null, null, await mineInstalls(env))
     .all<OsRow>();
   return results ?? [];
 }
@@ -596,12 +599,13 @@ export async function osBreakdown(env: Env): Promise<OsRow[]> {
             SUM(CASE WHEN first_seen >= ?2 THEN 1 ELSE 0 END) AS today,
             SUM(CASE WHEN last_seen  >= ?2 THEN 1 ELSE 0 END) AS active_today,
             SUM(CASE WHEN last_seen  >  ?1 THEN 1 ELSE 0 END) AS active,
+            SUM(CASE WHEN alive_at   >  ?3 THEN 1 ELSE 0 END) AS online,
             COUNT(*) AS total
        FROM installs
       WHERE ${NOT_MINE_INSTALL}
       GROUP BY os`,
   )
-    .bind(now() - 8 * DAY, startOfToday(), null, null, null, null, null, null, await mineInstalls(env))
+    .bind(now() - 8 * DAY, startOfToday(), now() - ONLINE_WINDOW, null, null, null, null, null, await mineInstalls(env))
     .all<OsRow>();
   return results ?? [];
 }

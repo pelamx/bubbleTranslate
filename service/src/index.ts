@@ -120,10 +120,10 @@ async function ping(env: Env, body: any, request: Request) {
     .bind(install, os, app, t)
     .run();
   const row = await env.DB.prepare(
-    `INSERT INTO installs (install, os, app, plan, first_seen, last_seen, country)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)
+    `INSERT INTO installs (install, os, app, plan, first_seen, last_seen, country, alive_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?5)
      ON CONFLICT (install) DO UPDATE SET os = ?2, app = ?3, plan = ?4, last_seen = ?5,
-       country = COALESCE(?6, country)
+       alive_at = ?5, country = COALESCE(?6, country)
      RETURNING first_seen, source`,
   )
     .bind(install, os, app, plan, t, country)
@@ -155,6 +155,20 @@ async function ping(env: Env, body: any, request: Request) {
   // when no cron runs; the index on last_seen keeps it cheap.
   await env.DB.prepare("DELETE FROM installs WHERE last_seen < ?").bind(t - 396 * 86_400).run();
   await env.DB.prepare("DELETE FROM updates WHERE at < ?").bind(t - 396 * 86_400).run();
+  return new Response(null, { status: 204 });
+}
+
+/** "Still open", sent every few minutes by a running copy. Only moves
+ *  `alive_at` on an install the daily ping already created: it carries the
+ *  install id and nothing else, so there is nothing more to record, and an
+ *  unknown id is not worth a row. */
+async function alive(env: Env, body: any) {
+  const install = String(body.install ?? "");
+  if (/^[0-9a-f]{32}$/.test(install)) {
+    await env.DB.prepare("UPDATE installs SET alive_at = ?1 WHERE install = ?2")
+      .bind(now(), install)
+      .run();
+  }
   return new Response(null, { status: 204 });
 }
 
@@ -1028,6 +1042,8 @@ async function route(request: Request, env: Env): Promise<Response> {
     switch (pathname) {
       case "/v1/ping":
         return await ping(env, body, request);
+      case "/v1/alive":
+        return await alive(env, body);
       case "/v1/download":
         return await downloadClick(env, body, request);
       case "/v1/activate":

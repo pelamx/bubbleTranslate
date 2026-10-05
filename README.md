@@ -334,9 +334,11 @@ Once a day while it runs, the app tells the licence service it is in use: a
 hashed install id, the OS, the version, free or Pro, and how each translation
 backend fared that day. That is the whole message — never the text, never the
 languages, never the licence key. It is how we count the installs that are
-alive — actually in use — on free and on Pro, which downloads cannot show. It
-is used only as totals, never to identify anyone. Set `usage_ping = false` in
-the config to turn it off.
+alive — actually in use — on free and on Pro, which downloads cannot show.
+Between those, while the app is open, it sends the same install id and nothing
+else every five minutes, which is how we know how many copies are open right
+now. Both are used only as totals, never to identify anyone. Set
+`usage_ping = false` in the config to turn both off.
 
 The backend counts are there because the provider the chain leads with is an
 undocumented endpoint that can begin refusing at any time; without them a day
@@ -577,7 +579,7 @@ watch_clipboard = false     # also translate on copy, for apps with no selection
 auto_hide_secs = 12         # 0 = stay until closed; pauses while hovered
 font_size = 15.0
 ui_scale = 1.0              # whole-interface scale, on top of the display's
-usage_ping = true           # one anonymous "in use today" ping a day
+usage_ping = true           # anonymous "in use" pings: daily, plus "still open"
 ```
 
 Target language, auto-translate, the trigger key and the DeepL key are also

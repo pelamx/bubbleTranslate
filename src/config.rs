@@ -344,7 +344,9 @@ pub struct Config {
     pub theme: BubbleTheme,
     /// Send one anonymous "in use today" ping a day: an install id, the OS,
     /// the version and free/pro. It is how the number of people using the
-    /// app is known at all. Never the text, never the languages.
+    /// app is known at all. Between those, while the app is open, a bare
+    /// "still open" with only the install id every five minutes. Never the
+    /// text, never the languages.
     pub usage_ping: bool,
     /// The language of the app's own interface. English unless changed.
     pub ui_lang: crate::i18n::UiLang,

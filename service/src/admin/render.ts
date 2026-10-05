@@ -1046,6 +1046,9 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
          <div class="stat"><div class="k">New paying customers</div><div class="v">${p.subs_today}</div>
            ${delta(p.subs_today, p.subs_yesterday)}
            ${licChips((o) => o.today)}</div>
+         <div class="stat"><div class="k">Online now</div><div class="v">${byOs.reduce((a, o) => a + (o.online ?? 0), 0)}</div>
+           <div class="sub">app open in the last 10 minutes</div>
+           ${osChips((o) => o.online ?? 0)}</div>
          <div class="stat"><div class="k">Active users</div><div class="v">${p.active_today}</div>
            <div class="sub">opened the app today</div>
            ${osChips((o) => o.active_today)}
