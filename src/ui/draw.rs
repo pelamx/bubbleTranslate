@@ -232,16 +232,42 @@ impl BubbleApp {
                         .size(11.5)
                         .color(pal().text_secondary),
                     );
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new(t("Download", "İndir", "Descargar")).size(12.0),
-                            )
-                            .frame(false),
+                    let link = |ui: &mut egui::Ui, label: &str| {
+                        ui.add(
+                            egui::Button::new(egui::RichText::new(label).size(12.0)).frame(false),
                         )
                         .clicked()
-                    {
-                        shell::open_url(&newer.url);
+                    };
+                    use crate::update::{CAN_INSTALL, Progress, progress};
+                    match progress() {
+                        Progress::Working => {
+                            ui.label(
+                                egui::RichText::new(t(
+                                    "Updating…",
+                                    "Güncelleniyor…",
+                                    "Actualizando…",
+                                ))
+                                .size(12.0)
+                                .color(pal().text_muted),
+                            );
+                            ui.ctx()
+                                .request_repaint_after(std::time::Duration::from_millis(250));
+                        }
+                        Progress::Idle if CAN_INSTALL => {
+                            if link(ui, t("Update", "Güncelle", "Actualizar")) {
+                                let ctx = ui.ctx().clone();
+                                crate::update::install({
+                                    let ctx = ctx.clone();
+                                    move || ctx.request_repaint()
+                                });
+                                ctx.request_repaint();
+                            }
+                        }
+                        _ => {
+                            if link(ui, t("Download", "İndir", "Descargar")) {
+                                shell::open_url(&newer.url);
+                            }
+                        }
                     }
                 });
             }

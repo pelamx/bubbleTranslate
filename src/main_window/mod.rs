@@ -369,8 +369,9 @@ fn footer(ui: &mut egui::Ui) {
     }
 }
 
-/// A newer build is published: say which, and open its download. Nothing is
-/// installed from here; the user replaces the app the way they installed it.
+/// A newer build is published: say which, and put it in place with one click
+/// where the app can do that itself (see [`crate::update`]). Where it cannot,
+/// or it tried and failed, the button opens the download instead.
 fn update_banner(ui: &mut egui::Ui) {
     let Some(newer) = crate::update::available() else {
         return;
@@ -410,8 +411,50 @@ fn update_banner(ui: &mut egui::Ui) {
                 .color(TEXT_SECONDARY),
             );
             ui.add_space(4.0);
-            if ui.button(t("Download", "İndir", "Descargar")).clicked() {
-                crate::shell::open_url(&newer.url);
+            use crate::update::{CAN_INSTALL, Progress, progress};
+            match progress() {
+                Progress::Working => {
+                    ui.label(
+                        egui::RichText::new(t(
+                            "Updating… bubbleTranslate restarts by itself in a moment.",
+                            "Güncelleniyor… bubbleTranslate birazdan kendiliğinden yeniden başlar.",
+                            "Actualizando… bubbleTranslate se reinicia solo en un momento.",
+                        ))
+                        .size(12.0)
+                        .color(TEXT_SECONDARY),
+                    );
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_millis(250));
+                }
+                Progress::Idle if CAN_INSTALL => {
+                    if ui
+                        .button(t("Update now", "Şimdi güncelle", "Actualizar ahora"))
+                        .clicked()
+                    {
+                        let ctx = ui.ctx().clone();
+                        crate::update::install({
+                            let ctx = ctx.clone();
+                            move || ctx.request_repaint()
+                        });
+                        ctx.request_repaint();
+                    }
+                }
+                state => {
+                    if state == Progress::Failed {
+                        ui.label(
+                            egui::RichText::new(t(
+                                "It could not be updated from here. Download it instead:",
+                                "Buradan güncellenemedi. Bunun yerine indir:",
+                                "No se pudo actualizar desde aquí. Descárgala:",
+                            ))
+                            .size(12.0)
+                            .color(TEXT_SECONDARY),
+                        );
+                    }
+                    if ui.button(t("Download", "İndir", "Descargar")).clicked() {
+                        crate::shell::open_url(&newer.url);
+                    }
+                }
             }
         });
     ui.add_space(14.0);

@@ -13,6 +13,19 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**Update with one click (Windows, Linux).** When a new version is out, the
+window now has an "Update now" button, and the bubble an "Update" link, where
+before there was only a download. One click fetches the new version, checks
+that it arrived intact, swaps it in and restarts bubbleTranslate, with nothing
+to unzip or replace by hand. Your licence, settings and today's free
+translations stay as they are. If it cannot be done from there — no
+connection, or the app sits in a folder it may not write to — the download
+button comes back instead. This works from the next update after this one:
+getting this version is still the usual download. On macOS the download stays
+as it is for now.
+
 ## 0.4.4 — 2026-10-06
 
 **A short "still open" signal while the app runs.** Besides the anonymous

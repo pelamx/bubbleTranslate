@@ -592,7 +592,11 @@ pub fn alive(agent: &ureq::Agent) {
     let _ = agent
         .post(format!("{}/v1/alive", api_base()))
         .header("Content-Type", "application/json")
-        .send(serde_json::json!({ "install": install_id() }).to_string().as_str());
+        .send(
+            serde_json::json!({ "install": install_id() })
+                .to_string()
+                .as_str(),
+        );
 }
 
 /// Tells the service this install ran out of today's free allowance. Sent at
