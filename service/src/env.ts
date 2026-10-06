@@ -17,6 +17,9 @@ export interface Env {
   /** Optional read-only GitHub token for the admin download counts; without it
    *  the API rate-limits by the Worker's shared outbound address. */
   GITHUB_TOKEN?: string;
+  /** DeepL key for the fallback the app uses when Google and MyMemory have
+   *  both failed (see `deepl.ts`). Without it the route answers 503. */
+  DEEPL_API_KEY?: string;
 
   // -- Paddle ----------------------------------------------------------------
   /** Sandbox until it is set to "production". Chooses both the API host and

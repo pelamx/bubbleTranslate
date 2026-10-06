@@ -8,8 +8,12 @@ application and a small bubble appears at the cursor with the translation.
   implementations of "what is selected, when did it finish, where is the
   pointer"; everything above that line is the same code everywhere.
 - `service/` — the licence service, a Cloudflare Worker on D1. It sells Pro,
-  issues licence keys and signs entitlement tokens. It is **never** on the path
-  of a translation.
+  issues licence keys and signs entitlement tokens. It is on the path of a
+  translation in one place only: the DeepL fallback (`service/src/deepl.ts`),
+  which a copy without its own DeepL key asks once Google and MyMemory have
+  both failed. The key is a secret (`DEEPL_API_KEY`), rationed per install
+  and per day. Nothing else may put the service between a user and a
+  translation.
 - The website lives in a separate repository, `pelamx/bubbletranslate.app`.
 
 ## Every change is written down for the people using it

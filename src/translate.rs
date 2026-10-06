@@ -107,6 +107,17 @@ const CLAUDE_MAX_TOKENS: u32 = 4096;
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
+/// The service's DeepL fallback refuses longer selections (`DEEPL_MAX_CHARS`
+/// in `service/src/deepl.ts`), so they are not sent.
+const RELAY_MAX_CHARS: usize = 1500;
+
+/// Whether a copy without its own DeepL key may use the service's. A
+/// development build stays off the deployed service unless pointed at one,
+/// as the usage ping does, so tests never spend the shared allowance.
+fn relay_enabled() -> bool {
+    !cfg!(debug_assertions) || std::env::var_os("BUBBLETRANSLATE_LICENSE_API").is_some()
+}
+
 /// MyMemory rejects queries longer than this.
 const MYMEMORY_MAX_BYTES: usize = 500;
 
@@ -436,20 +447,22 @@ impl Translator {
         key: &str,
     ) -> Result<Translation, TranslateError> {
         let key = key.trim();
-        if key.is_empty() {
+        // Without a key of its own the copy borrows the service's, which
+        // only ever happens here: the chain has already been through Google
+        // and MyMemory for this selection by the time DeepL is asked.
+        let relayed = key.is_empty();
+        if relayed && !relay_enabled() {
             return Err(TranslateError::Unavailable("no API key configured".into()));
+        }
+        if relayed && text.chars().count() > RELAY_MAX_CHARS {
+            return Err(TranslateError::Unavailable(
+                "too long for the built-in DeepL fallback".into(),
+            ));
         }
         let Some(target_code) = deepl_target(target) else {
             return Err(TranslateError::Unavailable(format!(
                 "DeepL has no target language '{target}'"
             )));
-        };
-
-        // Free keys carry a ":fx" suffix and live on a different host.
-        let host = if key.ends_with(":fx") {
-            "https://api-free.deepl.com"
-        } else {
-            "https://api.deepl.com"
         };
 
         let mut payload = serde_json::json!({
@@ -462,14 +475,25 @@ impl Translator {
         {
             payload["source_lang"] = Value::String(src);
         }
-        let body = payload.to_string();
 
-        let response = self
-            .agent
-            .post(format!("{host}/v2/translate"))
-            .header("Authorization", format!("DeepL-Auth-Key {key}"))
+        let request = if relayed {
+            payload["install"] = Value::String(crate::license::install_id());
+            self.agent
+                .post(format!("{}/v1/deepl", crate::license::api_base()))
+        } else {
+            // Free keys carry a ":fx" suffix and live on a different host.
+            let host = if key.ends_with(":fx") {
+                "https://api-free.deepl.com"
+            } else {
+                "https://api.deepl.com"
+            };
+            self.agent
+                .post(format!("{host}/v2/translate"))
+                .header("Authorization", format!("DeepL-Auth-Key {key}"))
+        };
+        let response = request
             .header("Content-Type", "application/json")
-            .send(body.as_str())
+            .send(payload.to_string().as_str())
             .map_err(|e| TranslateError::Network(e.to_string()))?;
 
         let status = response.status().as_u16();
@@ -482,15 +506,20 @@ impl Translator {
             200 => {}
             // 456 is DeepL's dedicated "character quota exhausted".
             429 | 456 => return Err(TranslateError::RateLimited),
-            403 => {
+            403 if !relayed => {
                 return Err(TranslateError::Unavailable(
                     "DeepL rejected the API key".into(),
                 ));
             }
             other => {
+                // DeepL explains itself in `message`, the service in `error`.
                 let msg = serde_json::from_str::<Value>(&text_body)
                     .ok()
-                    .and_then(|v| v.get("message").and_then(Value::as_str).map(str::to_owned));
+                    .and_then(|v| {
+                        ["message", "error"]
+                            .iter()
+                            .find_map(|k| v.get(*k).and_then(Value::as_str).map(str::to_owned))
+                    });
                 return Err(match msg {
                     Some(m) => TranslateError::BadResponse(format!("HTTP {other}: {m}")),
                     None => TranslateError::Http(other),
@@ -931,15 +960,15 @@ mod tests {
     }
 
     #[test]
-    fn deepl_is_skipped_without_a_key() {
+    fn deepl_stays_in_the_chain_without_a_key() {
+        // Without a key it goes through the service's, so it is still the
+        // last resort after Google and MyMemory.
         let mut cfg = Config::default();
         cfg.deepl_api_key.clear();
         assert_eq!(
             cfg.active_providers(),
-            vec![Provider::Google, Provider::MyMemory]
+            vec![Provider::Google, Provider::MyMemory, Provider::DeepL]
         );
-        cfg.deepl_api_key = "abc:fx".into();
-        assert_eq!(cfg.active_providers().len(), 3);
     }
 
     // -- the chain -------------------------------------------------------------
@@ -986,16 +1015,32 @@ mod tests {
     }
 
     #[test]
-    fn deepl_without_a_key_is_not_tried_at_all() {
+    fn deepl_without_a_key_stays_off_the_service_in_a_dev_build() {
+        // The tests must never spend the shared allowance, so a development
+        // build not pointed at a service refuses before any request.
         let cfg = Config {
-            providers: vec![Provider::DeepL, Provider::MyMemory],
+            providers: vec![Provider::DeepL],
             deepl_api_key: "   ".into(),
             ..Config::default()
         };
-        let long = "x".repeat(MYMEMORY_MAX_BYTES + 1);
-        let failures = Translator::new().translate(&long, &cfg).unwrap_err();
+        let failures = Translator::new().translate("Hello", &cfg).unwrap_err();
         assert_eq!(failures.len(), 1);
-        assert_eq!(failures[0].0, Provider::MyMemory);
+        assert_eq!(failures[0].0, Provider::DeepL);
+        assert!(failures[0].1.to_string().contains("no API key"));
+    }
+
+    #[test]
+    fn a_selection_too_long_for_the_deepl_fallback_is_not_sent() {
+        let cfg = Config {
+            providers: vec![Provider::DeepL],
+            deepl_api_key: String::new(),
+            ..Config::default()
+        };
+        if relay_enabled() {
+            let long = "x".repeat(RELAY_MAX_CHARS + 1);
+            let failures = Translator::new().translate(&long, &cfg).unwrap_err();
+            assert!(failures[0].1.to_string().contains("too long"));
+        }
     }
 
     #[test]
@@ -1237,8 +1282,9 @@ mod tests {
         assert!(parse_claude(r#"{"source":"tr","text":"  "}"#).is_err());
     }
 
-    /// Both keyed providers stay out of the chain until they are configured,
-    /// so a listed one never looks like a silent failure.
+    /// Claude stays out of the chain until it is configured, so a listed one
+    /// never looks like a silent failure. DeepL stays in: without a key it
+    /// goes through the service's.
     #[test]
     fn a_keyed_provider_without_its_key_is_not_in_the_chain() {
         let cfg = Config {
@@ -1249,7 +1295,7 @@ mod tests {
         };
         assert_eq!(
             cfg.active_providers(),
-            vec![Provider::Google, Provider::MyMemory]
+            vec![Provider::Google, Provider::MyMemory, Provider::DeepL]
         );
 
         let keyed = Config {
@@ -1257,7 +1303,6 @@ mod tests {
             ..cfg
         };
         assert!(keyed.active_providers().contains(&Provider::Claude));
-        assert!(!keyed.active_providers().contains(&Provider::DeepL));
     }
     /// The probe must never be in the target language, or a working provider
     /// reports itself broken. Checked across the whole offered list rather than

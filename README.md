@@ -320,9 +320,11 @@ people who already have it is the one thing this cannot undo.
 
 There are no accounts and no passwords. A purchase produces a licence key,
 which is exchanged once for a signed token that is then checked locally
-against a key compiled into the binary. The licence service is never on the
-path of a translation and never sees one: Pro only lifts a counter, so the
-text you select goes to the providers exactly as it does on the free tier.
+against a key compiled into the binary. Pro only lifts a counter, so the text you select goes to the providers
+exactly as it does on the free tier. The licence service is on the path of a
+translation in one case only: when Google and MyMemory have both failed and
+you have no DeepL key of your own, it passes the text to DeepL with its key
+and keeps nothing but a count, rationed to 50 a day per install.
 The token is good offline for up to 30 days between checks, and never outlives
 the subscription period it was issued against by more than a few days.
 

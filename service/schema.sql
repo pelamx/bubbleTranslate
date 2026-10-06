@@ -324,3 +324,15 @@ CREATE TABLE IF NOT EXISTS download_clicks (
 );
 
 CREATE INDEX IF NOT EXISTS download_clicks_by_at ON download_clicks (at);
+
+-- What each install spent of the DeepL fallback on a UTC day (see
+-- `deepl.ts`): requests and characters, never the text. Both limits are read
+-- from here -- per install, and the day's total across all installs. Rows
+-- older than a week are dropped as new ones arrive. Added on 2026-10-06.
+CREATE TABLE IF NOT EXISTS deepl_usage (
+  day       TEXT NOT NULL,
+  install   TEXT NOT NULL,
+  requests  INTEGER NOT NULL DEFAULT 0,
+  chars     INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, install)
+);

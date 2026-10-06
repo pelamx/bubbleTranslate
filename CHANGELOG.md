@@ -26,6 +26,16 @@ button comes back instead. This works from the next update after this one:
 getting this version is still the usual download. On macOS the download stays
 as it is for now.
 
+**DeepL now steps in when Google and MyMemory both fail, with no key needed.**
+Until now, when both free translators were down or had blocked you for too
+many requests, the bubble showed an error unless you had entered a DeepL key
+of your own. Now it asks DeepL on bubbleTranslate's behalf instead, so a
+translation still arrives. It is a backup, so it is limited: 50 translations
+a day per computer, selections up to 1,500 characters, and a shared daily
+total for everyone. The text goes through bubbleTranslate's server to DeepL
+for that one translation and is not kept. If you have your own DeepL key, it
+is used exactly as before.
+
 ## 0.4.4 — 2026-10-06
 
 **A short "still open" signal while the app runs.** Besides the anonymous

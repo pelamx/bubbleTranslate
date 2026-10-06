@@ -168,11 +168,7 @@ pub(super) fn providers(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Conf
 
             // A keyed provider without its key never reaches the network, so
             // say so here rather than letting it look like a silent failure.
-            let unkeyed = match provider {
-                Provider::DeepL => cfg.deepl_api_key.trim().is_empty(),
-                Provider::Claude => cfg.anthropic_api_key.trim().is_empty(),
-                _ => false,
-            };
+            let unkeyed = *provider == Provider::Claude && cfg.anthropic_api_key.trim().is_empty();
             if unkeyed {
                 ui.label(
                     egui::RichText::new(t(

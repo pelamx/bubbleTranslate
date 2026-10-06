@@ -266,9 +266,9 @@ pub(super) fn account(
             t("Device", "Cihaz", "Dispositivo"),
             &license::device_id()[..8],
             t(
-                "translations are never sent through our servers",
-                "çeviriler asla sunucularımızdan geçmez",
-                "las traducciones nunca pasan por nuestros servidores",
+                "translations go through our server only as a last-resort backup, and are not kept",
+                "çeviriler sunucumuzdan yalnızca son çare yedek olarak geçer ve saklanmaz",
+                "las traducciones solo pasan por nuestro servidor como último recurso, y no se guardan",
             ),
         ))
         .size(10.5)

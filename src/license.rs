@@ -625,7 +625,7 @@ pub fn ping_capped(agent: &ureq::Agent) {
         );
 }
 
-fn api_base() -> String {
+pub(crate) fn api_base() -> String {
     #[cfg(debug_assertions)]
     {
         std::env::var("BUBBLETRANSLATE_LICENSE_API").unwrap_or_else(|_| LICENSE_API.to_string())
@@ -659,7 +659,7 @@ pub fn device_id() -> String {
 }
 
 /// Like [`device_id`], but under its own salt: see [`INSTALL_SALT`].
-fn install_id() -> String {
+pub(crate) fn install_id() -> String {
     let mut hasher = Sha256::new();
     hasher.update(INSTALL_SALT.as_bytes());
     hasher.update(device_id().as_bytes());

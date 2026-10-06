@@ -258,10 +258,11 @@ pub struct Config {
     /// Failover order. Google first by default: no key, no quota to register.
     pub providers: Vec<Provider>,
     /// DeepL API key. Free keys end in ":fx"; the endpoint is chosen from that
-    /// suffix. Without a key DeepL is skipped even if listed in `providers`.
+    /// suffix. Without a key DeepL goes through the licence service's, which
+    /// is rationed per install per day.
     pub deepl_api_key: String,
     /// Anthropic API key. Without one Claude is skipped even if listed in
-    /// `providers`, exactly as DeepL is.
+    /// `providers`.
     pub anthropic_api_key: String,
     /// Optional contact address for MyMemory. Anonymous use is capped at ~5k
     /// chars/day; supplying an address raises it to ~50k.
@@ -482,14 +483,14 @@ impl Config {
         Ok(())
     }
 
-    /// Providers that can actually run right now, in failover order. DeepL
-    /// drops out when unconfigured so it never costs a round trip.
+    /// Providers that can actually run right now, in failover order. Claude
+    /// drops out when unconfigured so it never costs a round trip; DeepL
+    /// stays, because without a key it goes through the service's.
     pub fn active_providers(&self) -> Vec<Provider> {
         self.providers
             .iter()
             .copied()
             .filter(|p| match p {
-                Provider::DeepL => !self.deepl_api_key.trim().is_empty(),
                 Provider::Claude => !self.anthropic_api_key.trim().is_empty(),
                 _ => true,
             })
