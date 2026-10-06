@@ -144,6 +144,12 @@ fn main() -> eframe::Result<()> {
         std::process::exit(reset_quota());
     }
 
+    // A download started from Downloads installs itself and carries on as the
+    // installed copy, before it asks whether another copy is running: the
+    // installed copy is the one that should answer that.
+    #[cfg(target_os = "linux")]
+    platform::install::install_and_relaunch(&args);
+
     // Nothing on Windows stops a user launching the app again while it is
     // already running, and two copies would mean two tray icons, two sets of
     // input hooks and two translators racing for the same selection. So the

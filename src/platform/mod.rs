@@ -25,7 +25,7 @@ pub use macos::{on_screen_region_request, read_screen_region};
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-pub use linux::{capture, monitor, omarchy, shell, speech as speech_command};
+pub use linux::{capture, install, monitor, omarchy, shell, speech as speech_command};
 
 #[cfg(target_os = "windows")]
 mod windows;

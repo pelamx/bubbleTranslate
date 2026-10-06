@@ -25,6 +25,7 @@
 
 pub mod capture;
 pub mod cursor;
+pub mod install;
 pub mod monitor;
 pub mod omarchy;
 pub mod shell;

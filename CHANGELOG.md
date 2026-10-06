@@ -13,6 +13,17 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## 0.4.6 — 2026-10-06
+
+**The download installs itself (Linux).** Until now the Linux download was
+only a file: it ran from wherever the browser saved it, never showed up in the
+application menu, and had to be found again in Downloads every time. Now the
+first time you run it, bubbleTranslate puts itself in your home folder,
+adds itself to the application menu with its icon, and starts from there,
+including at login. Running a newer download later updates that copy and
+replaces the one that is running, so updating by hand is just downloading and
+running the new file. Nothing needs a password.
+
 ## 0.4.5 — 2026-10-06
 
 **Update with one click (Windows, Linux).** When a new version is out, the

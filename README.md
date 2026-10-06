@@ -15,7 +15,7 @@ selected, which is a surprisingly large difference: see
 |---|---|---|
 | **macOS** | [`bubbleTranslate.dmg`](https://github.com/pelamx/downloads/releases/latest/download/bubbleTranslate.dmg) (14 MB, Intel + Apple Silicon) | An app bundle to drag into Applications |
 | **Windows** | [`bubbleTranslate-windows-x64.zip`](https://github.com/pelamx/downloads/releases/latest/download/bubbleTranslate-windows-x64.zip) (7 MB, Windows 10 and 11) — or the [bare `.exe`](https://github.com/pelamx/downloads/releases/latest/download/bubbleTranslate.exe) (17 MB) | One executable to double-click |
-| **Linux** | [`bubbleTranslate-linux-x86_64`](https://github.com/pelamx/downloads/releases/latest/download/bubbleTranslate-linux-x86_64) (16 MB, any distribution with glibc 2.28 or newer) | One executable to `chmod +x` and run |
+| **Linux** | [`bubbleTranslate-linux-x86_64`](https://github.com/pelamx/downloads/releases/latest/download/bubbleTranslate-linux-x86_64) (16 MB, any distribution with glibc 2.28 or newer) | One executable to `chmod +x` and run once; it installs itself |
 
 The download is the metered build: ten free translations a day, and Pro to
 lift the limit — see [The free allowance and Pro](#the-free-allowance-and-pro).
@@ -136,6 +136,14 @@ chmod +x bubbleTranslate-linux-x86_64
 `--check` runs one translation through each provider and prints the result
 without opening a window, which separates "the app is broken" from "the network
 is" on a first run.
+
+**The first run installs it.** Started from anywhere else, it copies itself to
+`~/.local/bin/bubbleTranslate`, adds a launcher and an icon to the application
+menu, and carries on from the installed copy, which is also what "start at
+login" points at. Running a newer download later replaces the installed copy
+and takes over from the one that is running; an older download leaves a newer
+install alone. A copy under `/usr`, `/opt` or `/nix` belongs to a package
+manager and is left where it is.
 
 **It runs on any distribution from the last several years** — anything with
 glibc 2.28 or newer: Debian 10, Ubuntu 20.04, Fedora, RHEL and Rocky 8, Arch,
