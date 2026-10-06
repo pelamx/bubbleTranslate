@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.4.5 — 2026-10-06
 
 **Update with one click (Windows, Linux).** When a new version is out, the
 window now has an "Update now" button, and the bubble an "Update" link, where
