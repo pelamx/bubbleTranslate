@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Microsoft Store package. `package.ps1` fills the three @...@ fields from
+  windows\store-identity.json and the version from Cargo.toml, so nothing in
+  here is edited by hand on a release.
+
+  The app inside is the same translator as the download, built with the
+  "store" cargo feature: no update check, because a packaged app may not
+  replace its own files and the Store is what ships a new version there.
+
+  uap10:TrustLevel / RuntimeBehavior say this is an ordinary Win32 program in
+  a package rather than a sandboxed app. It has to be: the translator installs
+  low-level keyboard and mouse hooks to notice a selection and reads the
+  selected text out of other applications through UI Automation, and neither
+  is possible from the restricted runtime. runFullTrust is the capability that
+  goes with it, and it is the one that puts a submission in front of a human
+  reviewer; CLAUDE.md says what to tell them.
+
+  (No double hyphen may appear anywhere in an XML comment, which is why the
+  cargo flag is named in prose above rather than written out.)
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap10 rescap">
+
+  <Identity
+    Name="@IDENTITY_NAME@"
+    Publisher="@PUBLISHER@"
+    Version="@VERSION@"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>bubbleTranslate</DisplayName>
+    <PublisherDisplayName>@PUBLISHER_DISPLAY_NAME@</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <!--
+      17763 is the oldest Windows 10 that has everything the app asks of the
+      system: the WinRT OCR engine, per-monitor DPI awareness, and the
+      UI Automation text pattern it reads selections with.
+    -->
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0"
+                        MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+    <Resource Language="tr-tr" />
+    <Resource Language="es-es" />
+  </Resources>
+
+  <Applications>
+    <!--
+      EntryPoint plus the runFullTrust capability below is the ordinary way a
+      Win32 program is packaged, and the way to prefer for a first submission.
+
+      There is a second way: uap10:RuntimeBehavior="win32App" with
+      uap10:TrustLevel="mediumIL" runs the app unvirtualized, so it writes to
+      the real %APPDATA% and a user moving across from the download keeps
+      their settings. It needs the unvirtualizedResources restricted
+      capability as well, which is a second thing for a reviewer to approve.
+      As it stands the settings live in the package's own store instead, so a
+      Store install starts fresh. Worth revisiting once the first submission
+      is through, not before.
+    -->
+    <Application Id="bubbleTranslate"
+                 Executable="bubbleTranslate.exe"
+                 EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="bubbleTranslate"
+        Description="Select text in any application and a bubble appears at your cursor with the translation."
+        BackgroundColor="#1e1f22"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Square310x310Logo="Assets\Square310x310Logo.png"
+                         Wide310x150Logo="Assets\Wide310x150Logo.png"
+                         Square71x71Logo="Assets\Square71x71Logo.png" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

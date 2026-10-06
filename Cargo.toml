@@ -4,6 +4,22 @@ version = "0.4.6"
 edition = "2024"
 license-file = "LICENSE"
 
+# The Microsoft Store build, and the only thing that separates it from the
+# download. Off by default, so `cargo build` is the download exactly as it was
+# and the Store cannot reach into it: what the feature guards is not compiled
+# at all unless it is asked for. `package.ps1` is the only thing that asks.
+#
+# What it turns off is the updater, because a packaged app may not replace its
+# own files and the Store delivers new versions itself. See `update::spawn`.
+#
+# Subtractive, which cargo features are not supposed to be — a feature should
+# add. That rule is there so two crates asking for different features of a
+# third cannot break each other, and nothing depends on this binary, so the
+# reason does not apply. The name says which build it is rather than what it
+# removes, so it still reads correctly at the call sites.
+[features]
+store = []
+
 # Platform-neutral: the translation engine, config, and the egui interface.
 [dependencies]
 anyhow = "1.0.104"

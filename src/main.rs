@@ -123,7 +123,13 @@ fn main() -> eframe::Result<()> {
         std::process::exit(platform::omarchy::remove_bar_widget());
     }
     if args.iter().any(|a| a == "--version" || a == "-V") {
+        // The Store build says so, and that is not decoration: `release.ps1`
+        // reads this line and refuses to publish a binary that says "store",
+        // because the two builds are the same file name and telling them
+        // apart by eye is exactly the mistake worth making impossible.
         println!(concat!("bubbleTranslate ", env!("CARGO_PKG_VERSION")));
+        #[cfg(feature = "store")]
+        println!("channel   store");
         std::process::exit(0);
     }
     if args.iter().any(|a| a == "--health") {
@@ -315,6 +321,14 @@ fn main() -> eframe::Result<()> {
             }
 
             // Says when a newer build is on GitHub; the window shows it.
+            //
+            // Not in the Microsoft Store build, which is told about new
+            // versions by the Store itself. This one call is the whole of it:
+            // everything downstream reads `update::available()`, which stays
+            // empty when nothing fills it, so the window's banner, the
+            // bubble's Update link and the installer are all unreachable
+            // without a second condition anywhere.
+            #[cfg(not(feature = "store"))]
             {
                 let ctx = cc.egui_ctx.clone();
                 update::spawn(move || ctx.request_repaint());

@@ -36,6 +36,25 @@ bubbleTranslate.app/
 # writes beside them is the one that ships, and that one is tracked.
 windows/preview-*.png
 
+# The Microsoft Store package, and the tile images it is built from. Both are
+# drawn from the tracked mark by package.ps1 on every run, and the package
+# goes to Partner Center rather than to a release, so neither is worth the
+# seven megabytes a copy in the history.
+bubbleTranslate.msix
+windows/store-assets/
+
+# The listing screenshots, drawn by windows\make-store-shots.ps1 from the real
+# app. Uploaded to Partner Center once rather than shipped, and regenerated
+# whenever the interface changes, so the script is tracked and its output is
+# not -- the same way the tile images work.
+windows/store-shots/
+
+# Which product in Partner Center this machine packages for. Not a secret --
+# the identity is public once the app is listed -- but it is assigned per
+# account, so it is filled in on the machine that submits rather than
+# committed. windows/store-identity.example.json is the shape of it.
+windows/store-identity.json
+
 # The previous download, moved aside because it was running when release.ps1
 # rebuilt it. The next release deletes it; it is history's copy either way.
 bubbleTranslate.exe.locked-old

@@ -1,0 +1,6 @@
+{
+  "_comment": "Copy to store-identity.json and fill in from Partner Center: the product's Product management > Product identity page. identityName is 'Package/Identity/Name', publisher is the full 'Package/Identity/Publisher' CN= string (not the display name), publisherDisplayName is 'Package/Properties/PublisherDisplayName'. All three must match exactly or the upload is rejected.",
+  "identityName": "00000Publisher.bubbleTranslate",
+  "publisher": "CN=00000000-0000-0000-0000-000000000000",
+  "publisherDisplayName": "Your publisher display name"
+}

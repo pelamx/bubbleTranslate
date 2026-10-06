@@ -131,6 +131,62 @@ publishing one is what moves them.
 Every release machine therefore needs `gh` logged in to the `bubbleTranslate`
 account, which owns the downloads repository.
 
+## The Microsoft Store is a second channel, and it must not touch the first
+
+Windows is published twice: the download — the zip on `pelamx/downloads`, which
+everything above describes — and a Microsoft Store package. They come from one
+source tree and they are kept apart on purpose. **The Store must never change
+how the download behaves.**
+
+The only difference between the two builds is the `store` cargo feature, off by
+default:
+
+- `cargo build --release` is the download, unchanged. Everything the Store
+  needs is behind `#[cfg(feature = "store")]`, so it is not compiled into it.
+- `cargo build --release --features store` turns the update check off. That is
+  the whole feature. A packaged app may not replace its own files, and the
+  Store delivers new versions itself; an app that updates itself around the
+  Store is also against its policy.
+
+One line does it: `main` does not call `update::spawn` in that build, so
+`update::available()` stays empty and the window's banner, the bubble's Update
+link and the installer are all unreachable without a second condition anywhere.
+Keep it that way — a second switch somewhere else is how the two builds start
+to differ in ways nobody is tracking.
+
+**The two channels drift, and that is correct.** Certification takes hours or
+days, so the Store routinely sits a version behind the download. Nothing needs
+reconciling: a Store copy never reads `latest.json`, because it never checks.
+
+`package.ps1` builds the package and **publishes nothing**. It must never write
+`latest.json`, create a release, upload an asset, run `fill-release.sh`, or
+date the `Unreleased` heading — those belong to the download, and a Store
+version written into `latest.json` would tell every installed copy to update
+and hand it a URL for an asset that does not exist. The `.msix` goes to Partner
+Center by hand.
+
+Each script refuses the other's binary. The build stamps its channel into
+`--version`, `release.ps1` stops if it reads `channel store`, and `package.ps1`
+stops if it does not. Both files are called `bubbleTranslate.exe`; telling them
+apart by eye is the mistake worth making impossible.
+
+`windows/store-identity.json` says which product in Partner Center this machine
+packages for. It is not secret, but it is per account, so it is filled in on the
+submitting machine rather than committed — `store-identity.example.json` is the
+shape of it.
+
+A certification reviewer will ask about the low-level keyboard and mouse hooks
+and about reading other applications' text through UI Automation. Both are the
+product rather than an aside: nothing is sent anywhere except the selected text
+to the translator, which the privacy policy already describes. Say so plainly
+rather than leaving it to be discovered.
+
+Settings do not carry across. A packaged app's `%APPDATA%` writes are
+redirected into the package's own store, so a Store install starts fresh rather
+than finding an existing `%APPDATA%\bubbleTranslate`. The manifest records the
+alternative — running unvirtualized — and why it is not worth a second
+restricted capability on a first submission.
+
 ## Paddle
 
 Paddle is how everyone pays — it is the only processor. Paddle is the

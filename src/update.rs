@@ -22,6 +22,15 @@
 //! Only the program file changes: the licence, the settings and today's
 //! allowance live elsewhere and stay as they are. macOS keeps the download
 //! link, because the app there is a signed bundle inside a disk image.
+//!
+//! None of it runs in the Microsoft Store build, where the Store is what
+//! publishes a new version and a packaged app may not rewrite its own files.
+//! `main` does not call [`spawn`] there, so nothing ever fills [`AVAILABLE`]
+//! and the rest of the module is unreachable rather than switched off one
+//! function at a time. The module is still compiled, so it is still type-
+//! checked and its tests still run; this says so rather than leaving a
+//! column of dead-code warnings for the reader to work through.
+#![cfg_attr(feature = "store", allow(dead_code))]
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -100,7 +109,14 @@ pub fn progress() -> Progress {
 }
 
 /// Whether this platform can put the update in place itself.
-pub const CAN_INSTALL: bool = cfg!(any(target_os = "linux", target_os = "windows"));
+///
+/// Never in the Microsoft Store build: the files of a packaged app belong to
+/// the package and may not be swapped underneath it, and the Store is what
+/// delivers a new version there. `spawn` is not called in that build either,
+/// so nothing reaches this — it is false as well because a constant that says
+/// a Store copy can install its own update would be wrong wherever it is read.
+pub const CAN_INSTALL: bool =
+    cfg!(any(target_os = "linux", target_os = "windows")) && !cfg!(feature = "store");
 
 /// Downloads and starts the newer build, off the calling thread. `changed`
 /// runs when the outcome is known, so the window can be redrawn. On success

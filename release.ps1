@@ -63,6 +63,30 @@ if ($LASTEXITCODE -ne 0) { throw "the build failed" }
 
 $built = Join-Path $PSScriptRoot "target\$TARGET\release\bubbleTranslate.exe"
 
+# --- not the Store build ----------------------------------------------------
+#
+# `package.ps1` builds from the same source into the same path, with
+# `--features store`: no update check, because the Store is what tells a
+# packaged copy about a new version. That binary must never become the
+# download. It would install and run, and it would never mention an update
+# again -- a copy that quietly stops updating itself, which nothing on the
+# machine would report and the next release would not fix.
+#
+# The two files have the same name, so the build says which it is and this
+# reads it back. A GUI-subsystem program has no stdout here, hence the file.
+$stamp = Join-Path $env:TEMP "bubbleTranslate-version-$PID.txt"
+Start-Process -FilePath $built -ArgumentList '--version' -Wait -WindowStyle Hidden `
+    -RedirectStandardOutput $stamp | Out-Null
+$said = (Get-Content $stamp -Raw -ErrorAction SilentlyContinue)
+Remove-Item $stamp -Force -ErrorAction SilentlyContinue
+if ($said -match 'channel\s+store') {
+    Write-Host "error: this is the Microsoft Store build." -ForegroundColor Red
+    Write-Host "       It has no update check, so publishing it as the download would"
+    Write-Host "       leave every copy that installed it stuck on this version."
+    Write-Host "       Rebuild without the feature:  cargo build --release --target $TARGET"
+    exit 1
+}
+
 # Windows will not let a running program be overwritten, and the program most
 # likely to be running while this builds is this one. It will, however, let a
 # running program be *renamed*: the handle follows the file rather than the
