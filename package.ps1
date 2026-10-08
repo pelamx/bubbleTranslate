@@ -129,8 +129,8 @@ New-Item -ItemType Directory -Force -Path (Join-Path $stage 'Assets') | Out-Null
 
 Copy-Item $built (Join-Path $stage 'bubbleTranslate.exe') -Force
 Copy-Item (Join-Path $PSScriptRoot 'windows\store-assets\*.png') (Join-Path $stage 'Assets') -Force
-# The listing logo is uploaded to Partner Center, not carried in the package.
-Remove-Item (Join-Path $stage 'Assets\StoreListing-300x300.png') -Force -ErrorAction SilentlyContinue
+# The listing images are uploaded to Partner Center, not carried in the package.
+Remove-Item (Join-Path $stage 'Assets\StoreListing-*.png') -Force -ErrorAction SilentlyContinue
 
 $manifest = Get-Content (Join-Path $PSScriptRoot 'windows\AppxManifest.xml') -Raw
 $manifest = $manifest.Replace('@IDENTITY_NAME@', $identity.identityName).
@@ -148,6 +148,38 @@ function Find-SdkTool([string]$name) {
     }
     return $found.FullName
 }
+
+# --- the resource index ------------------------------------------------------
+#
+# Windows finds the scale- and targetsize-qualified logos through this index
+# rather than by file name. Without it only the five unqualified logos in the
+# manifest are reachable and the other sixty are dead weight in the package --
+# and the places that ask for a qualified one by name, the taskbar and the
+# Start menu among them, get nothing and draw no icon at all.
+#
+# It is built after the manifest is written, because makepri reads the package
+# identity out of it.
+$makepri = Find-SdkTool 'makepri.exe'
+$priConfig = Join-Path $PSScriptRoot 'target\priconfig.xml'
+Remove-Item $priConfig -Force -ErrorAction SilentlyContinue
+& $makepri createconfig /cf $priConfig /dq en-US /o | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "makepri createconfig failed" }
+
+# createconfig writes an autoResourcePackage rule per qualifier, which splits
+# the index into a separate .pri per scale. That is meant for a bundle, where
+# each one ships as its own resource package. This is a single package, and
+# the split leaves the scaled logos indexed in files Windows never opens --
+# the same missing icon as having no index at all, arrived at differently.
+[xml]$priXml = Get-Content $priConfig
+$packaging = $priXml.resources.packaging
+if ($packaging) {
+    $priXml.resources.RemoveChild($packaging) | Out-Null
+    $priXml.Save($priConfig)
+}
+& $makepri new /pr $stage /cf $priConfig /of (Join-Path $stage 'resources.pri') /o | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "makepri new failed" }
+if (-not (Test-Path (Join-Path $stage 'resources.pri'))) { throw "resources.pri was not written" }
+Write-Host "indexed the logos into resources.pri"
 
 $makeappx = Find-SdkTool 'makeappx.exe'
 $MSIX = Join-Path $PSScriptRoot 'bubbleTranslate.msix'
@@ -182,7 +214,7 @@ Write-Host ""
 Write-Host "Nothing was published. To submit:"
 Write-Host "  Partner Center > bubbleTranslate > Packages > upload the .msix"
 Write-Host "  release notes: the '## $version' section of CHANGELOG.md"
-Write-Host "  listing logo:  windows\store-assets\StoreListing-300x300.png"
+Write-Host "  listing images: windows\store-assets\StoreListing-*.png"
 Write-Host ""
 Write-Host "latest.json and the downloads repository were not touched, which is"
 Write-Host "what keeps the Store channel from disturbing the download."

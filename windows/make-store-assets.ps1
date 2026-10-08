@@ -58,6 +58,50 @@ function Write-Logo([string]$name, [int]$size) {
     return $path
 }
 
+# Partner Center's poster art: the one listing image that is not square, and
+# refused outright at any ratio but 2:3. The mark is a dark card, so it is
+# laid on a darker ground rather than on its own colour -- on #1e1f22 the card
+# would vanish and only its outline would read.
+function Write-Poster([string]$name, [int]$width, [int]$height) {
+    $bmp = New-Object System.Drawing.Bitmap($width, $height, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+    $g.Clear([System.Drawing.ColorTranslator]::FromHtml('#141518'))
+
+    # The mark a little under half the width and above centre, so it and the
+    # name below read as one block rather than two things that happen to share
+    # a canvas.
+    $mark = $width * 0.46
+    $state = $g.Save()
+    $g.TranslateTransform([float](($width - $mark) / 2.0), [float]($height * 0.36 - $mark / 2.0))
+    $g.ScaleTransform($mark / 128.0, $mark / 128.0)
+    Draw-Mark $g
+    $g.Restore($state)
+
+    $fmt = New-Object System.Drawing.StringFormat
+    $fmt.Alignment = [System.Drawing.StringAlignment]::Center
+    $fmt.LineAlignment = [System.Drawing.StringAlignment]::Center
+
+    # Lowercase b, the way the name is written everywhere a person can read it.
+    $nameFont = New-Object System.Drawing.Font('Segoe UI Semibold', [float]($width * 0.082), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
+    $nameBrush = New-Object System.Drawing.SolidBrush($INK)
+    $g.DrawString('bubbleTranslate', $nameFont, $nameBrush,
+        (New-Object System.Drawing.RectangleF(0, [float]($height * 0.52), [float]$width, [float]($height * 0.10))), $fmt)
+
+    $subFont = New-Object System.Drawing.Font('Segoe UI', [float]($width * 0.040), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
+    $subBrush = New-Object System.Drawing.SolidBrush([System.Drawing.ColorTranslator]::FromHtml('#9aa0a8'))
+    $g.DrawString("Select text anywhere.`nThe translation appears at your cursor.", $subFont, $subBrush,
+        (New-Object System.Drawing.RectangleF([float]($width * 0.08), [float]($height * 0.62), [float]($width * 0.84), [float]($height * 0.14))), $fmt)
+
+    $nameFont.Dispose(); $nameBrush.Dispose(); $subFont.Dispose(); $subBrush.Dispose(); $fmt.Dispose()
+    $g.Dispose()
+    $path = Join-Path $out $name
+    $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+    $bmp.Dispose()
+    return $path
+}
+
 # The three logos a package must carry, each at the scales Windows picks
 # between on different displays. A missing scale is not an error -- Windows
 # scales the nearest one -- but a scaled 44-pixel globe on a 200% display is
@@ -107,5 +151,11 @@ foreach ($size in 16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256) {
 # listing page itself, uploaded there rather than built in.
 $null = Write-Logo 'StoreListing-300x300.png' 300
 $count++
+
+# Poster art, which Partner Center accepts at exactly these two sizes and at
+# no others -- the second is the first at 2x.
+$null = Write-Poster 'StoreListing-Poster-720x1080.png' 720 1080
+$null = Write-Poster 'StoreListing-Poster-1440x2160.png' 1440 2160
+$count += 2
 
 "wrote $count images to $out"

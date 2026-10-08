@@ -13,6 +13,15 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## 0.4.7 — 2026-10-08
+
+**The icon is back in the Start menu and on the taskbar (Windows, Microsoft
+Store).** The version installed from the Store arrived without one: a blank
+square in the Start menu, on the taskbar and in Alt+Tab, which made it hard to
+find and made a working app look broken. The pictures were in it all along —
+nothing told Windows where to look for them. The copy downloaded from the
+website was never affected and is unchanged.
+
 ## 0.4.6 — 2026-10-06
 
 **The download installs itself (Linux).** Until now the Linux download was
