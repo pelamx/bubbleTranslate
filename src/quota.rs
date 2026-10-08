@@ -9,7 +9,10 @@
 //! PDF would burn the day's allowance in under a minute if every trigger were
 //! charged. So the rule is deliberately narrow: only a translation that was
 //! asked for and actually came back spends anything. Failures, language
-//! switches and re-reading the same sentence are all free.
+//! switches and re-reading the same sentence are all free — until the day is
+//! spent. None of those exemptions outlives the allowance: once the tenth
+//! translation is in, the next selection is refused whether it is new text or
+//! the same sentence again.
 //!
 //! What is written to disk is only the count: a day number, a total, and the
 //! flags below. The list of what has already been translated today is held in
@@ -211,16 +214,22 @@ impl Quota {
         let Some(limit) = self.limit(entitlement) else {
             return Verdict::Allow;
         };
+        // The cap is asked first, and that ordering is the whole of the rule.
+        // A repeat is free because it was already paid for — not because it is
+        // exempt. Asking the repeat window first left the last sixteen phrases
+        // of the day translatable for ever once the allowance was spent, which
+        // is an unmetered app for anyone who keeps selecting the same text.
+        // Spent is spent, and re-reading does not reopen it.
+        if self.counter.used >= limit {
+            return Verdict::Capped {
+                used: self.counter.used,
+                limit,
+            };
+        }
         if self.recent.contains(&digest(text)) {
             return Verdict::Repeat;
         }
-        if self.counter.used < limit {
-            return Verdict::Allow;
-        }
-        Verdict::Capped {
-            used: self.counter.used,
-            limit,
-        }
+        Verdict::Allow
     }
 
     /// Records a translation that actually came back. Called only on success,
@@ -572,18 +581,48 @@ mod tests {
     fn re_selecting_the_same_text_is_free() {
         let mut q = today_quota(0);
         q.record("merhaba dünya");
-        // Spend the rest of the day on other things.
-        for n in 0..(FREE_DAILY_TRANSLATIONS - 1) {
+        // Spend some of the day on other things, but not all of it: the
+        // exemption is for a day with something still in it.
+        for n in 0..(FREE_DAILY_TRANSLATIONS - 3) {
             q.record(&format!("other {n}"));
         }
-        assert_eq!(q.used_today(), FREE_DAILY_TRANSLATIONS);
+        assert_eq!(q.used_today(), FREE_DAILY_TRANSLATIONS - 2);
         assert_eq!(q.verdict("merhaba dünya", &free()), Verdict::Repeat);
         // Whitespace differences are the same selection to a human.
         assert_eq!(q.verdict("  merhaba dünya  ", &free()), Verdict::Repeat);
-        assert!(matches!(
-            q.verdict("a different sentence", &free()),
-            Verdict::Capped { .. },
-        ));
+        assert_eq!(q.verdict("a different sentence", &free()), Verdict::Allow);
+    }
+
+    /// The leak this ordering exists to close: a spent allowance used to go on
+    /// translating anything in the repeat window, because the window was
+    /// asked about before the cap. Sixteen phrases stayed free for ever, so an
+    /// install that kept selecting the same text was never metered at all.
+    #[test]
+    fn a_spent_allowance_does_not_reopen_for_a_repeat() {
+        let mut q = today_quota(0);
+        for n in 0..FREE_DAILY_TRANSLATIONS {
+            q.record(&format!("phrase {n}"));
+        }
+        assert_eq!(q.used_today(), FREE_DAILY_TRANSLATIONS);
+
+        // Every one of these was translated today and is still remembered.
+        for n in 0..FREE_DAILY_TRANSLATIONS {
+            assert!(
+                matches!(
+                    q.verdict(&format!("phrase {n}"), &free()),
+                    Verdict::Capped { .. },
+                ),
+                "phrase {n} was translated again on a spent allowance",
+            );
+        }
+        // And asking repeatedly never wears the refusal down.
+        for _ in 0..50 {
+            assert!(matches!(
+                q.verdict("phrase 0", &free()),
+                Verdict::Capped { .. }
+            ));
+        }
+        assert_eq!(q.used_today(), FREE_DAILY_TRANSLATIONS);
     }
 
     /// Every refusal carries the numbers the bubble shows, every time. There

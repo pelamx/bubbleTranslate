@@ -314,7 +314,9 @@ fn run(
 
         // The last element is whether the allowance applies. Re-reading the
         // same selection in another language is the same translation, so
-        // switching target language must never cost anything.
+        // switching target language must never cost anything. The repeat
+        // window in [`crate::quota`] is what delivers that, rather than an
+        // exemption from the meter here.
         let (text, at, via, metered) = match request {
             // Already handled above; the compiler cannot see that.
             Request::Manual(_)
@@ -326,10 +328,13 @@ fn run(
                 if last_text.is_empty() {
                     continue;
                 }
-                // Re-shown where and how the original capture was, so
-                // switching languages does not move the bubble or change what
-                // it says about where the text came from.
-                (last_text.clone(), last_at, last_via, false)
+                // Metered, even though switching language is free: the meter
+                // is what makes it free. The text is still in today's repeat
+                // window, so the verdict is `Repeat` and nothing is charged —
+                // while there is an allowance left. Skipping the meter
+                // entirely instead made the language picker an unmetered
+                // translator: a spent install could go on pressing it.
+                (last_text.clone(), last_at, last_via, true)
             }
             Request::Selection(trigger) | Request::Hotkey(trigger) => {
                 // Applied here rather than in the tap callback, which must not

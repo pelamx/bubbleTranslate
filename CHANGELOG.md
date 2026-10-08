@@ -13,6 +13,17 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## 0.4.8 — 2026-10-08
+
+**The ten free translations a day now actually stop at ten.** Once the day's
+ten were spent, anything translated earlier that day could be translated again
+without limit — so a free copy used on the same handful of phrases was never
+asked to stop, and the daily allowance had no end to it in practice. Switching
+the target language got around it the same way. Re-reading a sentence is still
+free, as it always was, but only while there is something left in the day;
+after the tenth translation the bubble says so and offers Pro, whether the text
+is new or not.
+
 ## 0.4.7 — 2026-10-08
 
 **The icon is back in the Start menu and on the taskbar (Windows, Microsoft
