@@ -43,6 +43,11 @@ windows/preview-*.png
 bubbleTranslate.msix
 windows/store-assets/
 
+# The same package signed with a throwaway local certificate, which is the
+# only way to install it on this machine and see it run before submitting it.
+# Never uploaded -- the Store re-signs on ingestion and rejects this one.
+bubbleTranslate-selfsigned-test.msix
+
 # The listing screenshots, drawn by windows\make-store-shots.ps1 from the real
 # app. Uploaded to Partner Center once rather than shipped, and regenerated
 # whenever the interface changes, so the script is tracked and its output is
