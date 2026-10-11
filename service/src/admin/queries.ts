@@ -638,6 +638,29 @@ export async function licenceOs(env: Env): Promise<LicenceOsRow[]> {
   return results ?? [];
 }
 
+export interface LicenceCountryRow {
+  country: string;
+  live: number;
+  total: number;
+}
+
+/** Paid licences by the country of the billing address given to Paddle: those
+ *  still live, and every one ever sold. `?` is a licence whose country was
+ *  never recorded -- sold before 11 October 2026 and not renewed since. */
+export async function licenceCountries(env: Env): Promise<LicenceCountryRow[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT COALESCE(country, '?') AS country,
+            SUM(CASE WHEN status != 'refunded' AND expires_at > ?1 THEN 1 ELSE 0 END) AS live,
+            COUNT(*) AS total
+       FROM licences WHERE provider = 'paddle' AND ${NOT_MINE_LICENCE}
+      GROUP BY COALESCE(country, '?')
+      ORDER BY live DESC, total DESC, country`,
+  )
+    .bind(now(), null, null, null, null, null, null, null, ignoreList(env.ADMIN_IGNORE_EMAILS))
+    .all<LicenceCountryRow>();
+  return results ?? [];
+}
+
 /** How the app names an OS to how a person reads it. An unlisted value (a
  *  phone build, a BSD) is shown as it arrived rather than hidden. */
 export function osLabel(os: string): string {

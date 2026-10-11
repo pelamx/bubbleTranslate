@@ -195,6 +195,32 @@ export async function customerEmail(env: Env, data: any): Promise<string | null>
   }
 }
 
+/** The two-letter country of the billing address on a transaction, for the
+ *  admin panel. A webhook carries only the address id, so this asks Paddle for
+ *  the address. Nothing depends on it, so a failure is logged, not raised. */
+export async function customerCountry(env: Env, data: any): Promise<string | null> {
+  const inline = data?.address?.country_code;
+  if (inline) return String(inline);
+
+  const customerId = data?.customer_id;
+  const addressId = data?.address_id;
+  if (!customerId || !addressId || !env.PADDLE_API_KEY) return null;
+
+  try {
+    const response = await fetch(
+      `${paddleApiBase(env)}/customers/${customerId}/addresses/${addressId}`,
+      { headers: { authorization: `Bearer ${env.PADDLE_API_KEY}` } },
+    );
+    if (!response.ok) return null;
+    const body: any = await response.json();
+    const code = body?.data?.country_code;
+    return typeof code === "string" && /^[A-Z]{2}$/.test(code) ? code : null;
+  } catch (err) {
+    console.error("could not look up the Paddle address", err);
+    return null;
+  }
+}
+
 /** Cancels at the end of the paid period rather than immediately: the
  *  subscriber has paid for the rest of the term and is entitled to it, which
  *  is also why `endLicence("cancelled")` leaves `expires_at` alone. */

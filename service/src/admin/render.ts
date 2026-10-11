@@ -8,6 +8,7 @@ import { COUNTRY_POINTS, LAND_ROWS, MAP_NORTH, MAP_STEP } from "./world";
 import { DAY, LOCAL_OFFSET, PAGE_SIZE, date, startOfToday } from "./shared";
 import {
   HealthRow,
+  LicenceCountryRow,
   LicenceOsRow,
   NOT_MINE_INSTALL,
   NOT_MINE_LICENCE,
@@ -40,6 +41,7 @@ import {
   downloads,
   health,
   ignoreList,
+  licenceCountries,
   licenceOs,
   mineInstalls,
   mineBreakdown,
@@ -834,6 +836,27 @@ function countriesCard(rows: CountryRow[]): string {
      </section>`;
 }
 
+function licenceCountriesCard(rows: LicenceCountryRow[]): string {
+  const body = rows.length
+    ? rows
+        .map(
+          (r) => `<tr><td>${countryLabel(r.country)}</td>
+            <td class="num"><b>${r.live}</b></td><td class="num">${r.total}</td></tr>`,
+        )
+        .join("")
+    : `<tr><td colspan="3" class="muted">No paid licences yet.</td></tr>`;
+  return `<section class="card">
+       <p class="label">Paid licences by country</p>
+       <div class="scroll"><table>
+         <tr><th>Country</th><th class="num">Live</th><th class="num">Ever sold</th></tr>
+         ${body}
+       </table></div>
+       <p class="muted foot">From the billing address the buyer gave Paddle. Recorded from
+         11 October 2026, so a licence sold earlier shows as not recorded yet until it renews.
+         Your own licences are left out.</p>
+     </section>`;
+}
+
 /** Which version the people using the app right now are on: everyone seen
  *  this week, per version and platform, with today's part of it beside. */
 function activeVersionsCard(up: Updates, pub: Record<string, string> | null): string {
@@ -1141,7 +1164,7 @@ export function delta(today: number, yesterday: number): string {
 }
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry] = await Promise.all([
+  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, licCountry] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -1167,6 +1190,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     sources(env),
     updates(env),
     versionCountries(env),
+    licenceCountries(env),
   ]);
   const dl = downloadsNow?.total ?? null;
 
@@ -1428,6 +1452,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
 
      ${countriesCard(byCountry)}
      </div>
+
+     ${licenceCountriesCard(licCountry)}
 
      <details class="card" id="users" open>
        <summary>Users, last 30 days — ${real} real${own ? ` · ${own} yours` : ""}</summary>

@@ -33,7 +33,13 @@ CREATE TABLE IF NOT EXISTS licences (
   -- Paddle's own id for the thing that pays: the subscription id. How a
   -- renewal or a refund finds this row.
   provider_ref TEXT,
-  created_at   INTEGER NOT NULL
+  created_at   INTEGER NOT NULL,
+  -- Two-letter country of the billing address the buyer gave Paddle, for the
+  -- admin panel only. Looked up on each payment and kept once known; NULL for
+  -- a key issued by hand, or until a renewal fills it in. Added on 2026-10-11
+  -- to a live table with
+  --   ALTER TABLE licences ADD COLUMN country TEXT;
+  country      TEXT
 );
 
 CREATE INDEX IF NOT EXISTS licences_by_provider_ref ON licences (provider, provider_ref);

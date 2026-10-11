@@ -54,6 +54,7 @@ import {
   type CancelFailure,
   type Verified,
   cancelSubscription,
+  customerCountry,
   customerEmail,
   cycleFromItems,
   fromPaddle,
@@ -747,6 +748,7 @@ async function transactionCompleted(env: Env, data: any, eventAt: number): Promi
     if (existing) {
       const until = await extendTerm(env, existing, cycle);
       console.log(`extended licence ${existing.id} to ${until}`);
+      await noteCountry(env, subscriptionId, data);
       return json({ ok: true });
     }
   }
@@ -761,6 +763,7 @@ async function transactionCompleted(env: Env, data: any, eventAt: number): Promi
     email,
     providerRef: subscriptionId,
   });
+  if (subscriptionId) await noteCountry(env, subscriptionId, data);
   // First payment only: renewals return above and a retried webhook finds
   // the order already paid, so the conversion is pushed exactly once.
   if (newlyPaid) {
@@ -775,6 +778,23 @@ async function transactionCompleted(env: Env, data: any, eventAt: number): Promi
     });
   }
   return json({ ok: true });
+}
+
+/** Records which country a licence was bought from, for the admin panel. Only
+ *  fills an empty column, so a renewal also back-fills a licence sold before
+ *  the column existed. Never fails the webhook: the payment is already done. */
+async function noteCountry(env: Env, subscriptionId: string, data: any): Promise<void> {
+  try {
+    const country = await customerCountry(env, data);
+    if (!country) return;
+    await env.DB.prepare(
+      "UPDATE licences SET country = ? WHERE provider = 'paddle' AND provider_ref = ? AND country IS NULL",
+    )
+      .bind(country, subscriptionId)
+      .run();
+  } catch (err) {
+    console.error("could not record the licence's country", err);
+  }
 }
 
 // -- managing it -------------------------------------------------------------
