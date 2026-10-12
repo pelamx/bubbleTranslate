@@ -435,23 +435,23 @@ export const ADMIN_STYLE = `
   body { padding: 0; }
   .sheet.wide { max-width: none; }
   .appbar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px;
-    padding: 12px 24px; background: rgba(15,17,23,.92); backdrop-filter: blur(8px);
+    padding: 8px 24px; background: rgba(15,17,23,.92); backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--border); }
   .appbar .brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 700; }
-  .appbar .brand svg { width: 34px; height: 34px; }
+  .appbar .brand svg { width: 30px; height: 30px; }
   .appbar .tag { font-size: 11px; font-weight: 600; letter-spacing: .6px; color: var(--muted);
     background: var(--card-2); border-radius: 6px; padding: 4px 8px; }
   .appbar .spacer { flex: 1; }
   .appbar a.btn, .appbar .env { display: inline-flex; align-items: center; gap: 7px; font-size: 13px;
-    color: var(--text); text-decoration: none; border: 1px solid var(--border); border-radius: 9px; padding: 7px 12px; }
+    color: var(--text); text-decoration: none; border: 1px solid var(--border); border-radius: 9px; padding: 5px 11px; }
   .appbar a.btn:hover { border-color: var(--brand); }
   .appbar .env::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
   .appbar .env.prod { color: var(--accent); border-color: rgba(74,222,128,.45); }
   .appbar .env.prod::before { background: var(--accent); }
   .shell { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 22px; padding: 0 24px; }
-  .side { position: sticky; top: 64px; align-self: start; padding: 18px 0; display: flex; flex-direction: column; gap: 4px; }
+  .side { position: sticky; top: 52px; align-self: start; padding: 12px 0; display: flex; flex-direction: column; gap: 4px; }
   .side a { display: flex; align-items: center; gap: 10px; color: var(--muted); text-decoration: none;
-    font-size: 14px; padding: 10px 12px; border-radius: 10px; border: 1px solid transparent; }
+    font-size: 14px; padding: 8px 12px; border-radius: 10px; border: 1px solid transparent; }
   .side a:hover { color: var(--text); background: var(--card); }
   .side a.on { color: var(--brand); background: rgba(110,168,254,.1); border-color: rgba(110,168,254,.25); }
   .side a .count { margin-left: auto; font-size: 11px; color: var(--muted); }
@@ -459,20 +459,28 @@ export const ADMIN_STYLE = `
   .side a .count.warn { color: #0f1117; background: var(--orange); border-radius: 999px; padding: 0 7px; }
   .side .hint { font-size: 11px; color: var(--faint); padding: 14px 12px 0; }
   .side .hint kbd { font-family: inherit; border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
-  .main { padding: 18px 0 40px; min-width: 0; }
+  .main { padding: 12px 0 40px; min-width: 0; }
+  #overview > .card { padding: 12px 16px; margin-bottom: 12px; }
+  #overview .label { margin-bottom: 8px; }
+  /* On the entrance the figure sits beside its title, so both rows of
+     tiles and the map fit one screen. */
+  #overview .stat { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 12px; align-content: start; }
+  #overview .stat .head { display: contents; }
+  #overview .stat .v { grid-column: 3; grid-row: 1; margin: 0; text-align: right; align-self: start; }
+  #overview .stat > .d { grid-column: 2 / -1; margin: 2px 0 0; font-size: 12px; }
+  #overview .stat .osbars, #overview .stat .foot-line { grid-column: 1 / -1; }
+  #overview .stat .foot-line { margin-top: 8px; align-self: end; }
+  #overview .grid.five { grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); }
   .zone { scroll-margin-top: 76px; }
-  .pagehead { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin: 4px 0 16px; }
-  .pagehead h1 { font-size: 28px; margin: 0; }
-  .pagehead .when { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 14px; }
   .label .aside { text-transform: none; font-weight: 400; letter-spacing: 0; color: var(--faint); }
   details.card, section.card { scroll-margin-top: 76px; }
 
   /* Icons: drawn with the text colour unless a tone is given. */
   svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 2;
     stroke-linecap: round; stroke-linejoin: round; vertical-align: -4px; }
-  .ico { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px;
-    border-radius: 11px; flex: none; }
-  .ico svg.i { width: 21px; height: 21px; }
+  .ico { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px;
+    border-radius: 10px; flex: none; }
+  .ico svg.i { width: 19px; height: 19px; }
   .t-blue { color: #60a5fa; background: rgba(96,165,250,.14); }
   .t-red { color: #f87171; background: rgba(248,113,113,.14); }
   .t-green { color: #4ade80; background: rgba(74,222,128,.13); }
@@ -482,16 +490,16 @@ export const ADMIN_STYLE = `
 
   /* The stat tiles. */
   .grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
-  .stat { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .stat { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; padding: 11px 14px; }
   .stat .head { display: flex; gap: 12px; align-items: flex-start; }
-  .stat .k { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.3; }
-  .stat .k small { display: block; font-size: 12.5px; font-weight: 400; color: var(--muted); margin-top: 3px; }
+  .stat .k { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); line-height: 1.3; }
+  .stat .k small { display: block; font-size: 12px; font-weight: 400; color: var(--muted); margin-top: 1px; }
   .stat .k .info { color: var(--faint); cursor: help; font-weight: 400; }
-  .stat .v { font-size: 40px; font-weight: 800; margin-top: 10px; }
+  .stat .v { font-size: 30px; font-weight: 800; line-height: 1.15; margin-top: 6px; }
   .stat.mine { border-color: rgba(110,168,254,.55); box-shadow: 0 0 0 1px rgba(110,168,254,.15) inset; }
   .stat.alert { box-shadow: inset 3px 0 0 var(--orange); }
-  .osbars { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; display: grid; gap: 8px; }
-  .osrow { display: grid; grid-template-columns: 18px 64px 26px 1fr; align-items: center; gap: 8px; font-size: 13px; }
+  .osbars { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 7px; display: grid; gap: 3px; }
+  .osrow { display: grid; grid-template-columns: 18px 64px 26px 1fr; align-items: center; gap: 8px; font-size: 12.5px; line-height: 1.35; }
   .osrow .nm { color: var(--muted); }
   .osrow b { font-variant-numeric: tabular-nums; }
   .osrow.zero b { color: var(--faint); font-weight: 500; }
@@ -503,22 +511,22 @@ export const ADMIN_STYLE = `
   .os-linux .track i { background: #f59e0b; }
   .os-macos .ic { color: #e6e8ef; } .os-macos .track i { background: #a855f7; }
   .os-other .track i { background: var(--muted); }
-  .stat .foot-line { display: flex; gap: 8px; align-items: flex-start; margin: auto 0 0; padding-top: 10px;
-    border-top: 1px solid var(--border); margin-top: 12px; font-size: 12.5px; color: var(--muted); }
+  .stat .foot-line { display: flex; gap: 8px; align-items: flex-start; margin: auto 0 0; padding-top: 7px;
+    border-top: 1px solid var(--border); margin-top: 8px; font-size: 12px; line-height: 1.4; color: var(--muted); }
   .stat .foot-line svg.i { width: 15px; height: 15px; margin-top: 2px; }
 
   /* Today's active users by country, one small card each. */
-  .places { margin-top: 14px; background: var(--card-2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
-  .places .title { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; margin: 0 0 12px; }
+  .places { margin-top: 10px; background: var(--card-2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; }
+  .places .title { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; margin: 0 0 6px; }
   .places .title svg { color: var(--brand); }
   .places .title span { font-weight: 400; color: var(--muted); }
   .places .list { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
   .place { display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--border);
-    border-radius: 9px; padding: 7px 10px; font-size: 13px; }
+    border-radius: 9px; padding: 5px 10px; font-size: 13px; }
   .place .flag { font-size: 17px; line-height: 1; }
   .place b { margin-left: auto; font-variant-numeric: tabular-nums; }
-  .places .split { display: grid; gap: 18px; align-items: center; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
-  svg.world { width: 100%; height: auto; display: block; }
+  .places .split { display: grid; gap: 18px; align-items: center; grid-template-columns: auto minmax(0, 1fr); }
+  svg.world { height: 128px; width: auto; max-width: 100%; display: block; }
   svg.world .land { fill: none; stroke: #2c3a5e; stroke-width: .62; stroke-linecap: round; }
   svg.world .halo { fill: #4f8cff; opacity: .22; animation: halo 2.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
   svg.world .core { fill: #8ec5ff; filter: drop-shadow(0 0 1.2px #4f8cff); }
@@ -526,6 +534,14 @@ export const ADMIN_STYLE = `
   @keyframes halo { 0%, 100% { transform: scale(.8); opacity: .3; } 50% { transform: scale(1.15); opacity: .12; } }
   @media (prefers-reduced-motion: reduce) { svg.world .halo { animation: none; } }
 
+  /* Below a wide screen the side list folds to its icons, so the tiles keep
+     their width; each name is still there on hover. */
+  @media (min-width: 901px) and (max-width: 1399px) {
+    .shell { grid-template-columns: 52px minmax(0, 1fr); gap: 16px; }
+    .side a { justify-content: center; padding: 10px 0; position: relative; }
+    .side a .nav-label, .side .hint { display: none; }
+    .side a .count { position: absolute; top: 2px; right: 2px; margin: 0; font-size: 10px; }
+  }
   @media (max-width: 900px) {
     .shell { grid-template-columns: minmax(0, 1fr); padding: 0 14px; }
     .side { flex-direction: row; overflow-x: auto; top: 58px; z-index: 4; background: var(--bg); padding: 8px 0; }
@@ -534,6 +550,7 @@ export const ADMIN_STYLE = `
     .appbar { padding: 10px 14px; flex-wrap: wrap; }
     .appbar a.btn span { display: none; }
     .places .split { grid-template-columns: minmax(0, 1fr); }
+    svg.world { width: 100%; height: auto; }
   }
 `;
 
@@ -608,8 +625,9 @@ function placesPanel(rows: CountryRow[], active: number): string {
         .join("")}</div>`
     : `<p class="muted" style="margin:0">Nobody has opened the app yet today.</p>`;
   return `<div class="places">
-       <p class="title">${icon("globe")}Active users by location <span>(today's ${active} active user${active === 1 ? "" : "s"})</span></p>
-       <div class="split">${worldMap(list)}${body}</div>
+       <div class="split">${worldMap(list)}<div>
+         <p class="title">${icon("globe")}Active users by location <span>(today's ${active} active user${active === 1 ? "" : "s"})</span></p>
+         ${body}</div></div>
      </div>`;
 }
 
@@ -1293,7 +1311,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     ["tools", "tools", "Tools", ""],
     ["revenue", "wallet", "Revenue", ""],
   ]
-    .map(([id, ic, label, extra]) => `<a href="#${id}">${icon(ic)}${label}${extra}</a>`)
+    .map(([id, ic, label, extra]) => `<a href="#${id}" title="${label}">${icon(ic)}<span class="nav-label">${label}</span>${extra}</a>`)
     .join("");
 
   return page(
@@ -1321,11 +1339,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
      }
 
      <div class="zone" id="overview">
-     <div class="pagehead"><h1>Overview</h1>
-       <span class="when">${icon("calendar")}${escapeHtml(today)} · Turkey time (vs yesterday)</span></div>
-
      <section class="card">
-       <p class="label">Today <span class="aside">(Turkey time, vs yesterday)</span></p>
+       <p class="label">Today <span class="aside">· ${escapeHtml(today)} (Turkey time, vs yesterday)</span></p>
        <div class="grid">
          ${tile({ icon: "userPlus", tone: "t-blue", title: "New users", hint: "Downloaded &amp; opened",
            value: p.installs_today, extra: delta(p.installs_today, p.installs_yesterday), rows: osChips((o) => o.today) })}
@@ -1341,7 +1356,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
 
      <section class="card">
        <p class="label">Overall</p>
-       <div class="grid">
+       <div class="grid five">
          ${tile({ icon: "users", tone: "t-green", title: "Live subscribers", value: s.live,
            rows: licChips((o) => o.live), footIcon: "calendar",
            foot: `${s.monthly} monthly · ${s.yearly} yearly · ${s.fresh} new in 30d` })}
