@@ -4,6 +4,7 @@ import { type Env, USD_AMOUNT, supportEmail } from "../env";
 import { DEFAULT_SEATS, isLive } from "../licences";
 import { LOGO, escapeHtml, page } from "../pages";
 import { now } from "../tokens";
+import { COUNTRY_POINTS, LAND_ROWS, MAP_NORTH, MAP_STEP } from "./world";
 import { DAY, LOCAL_OFFSET, PAGE_SIZE, date, startOfToday } from "./shared";
 import {
   HealthRow,
@@ -516,6 +517,14 @@ export const ADMIN_STYLE = `
     border-radius: 9px; padding: 7px 10px; font-size: 13px; }
   .place .flag { font-size: 17px; line-height: 1; }
   .place b { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .places .split { display: grid; gap: 18px; align-items: center; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+  svg.world { width: 100%; height: auto; display: block; }
+  svg.world .land { fill: none; stroke: #2c3a5e; stroke-width: .62; stroke-linecap: round; }
+  svg.world .halo { fill: #4f8cff; opacity: .22; animation: halo 2.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+  svg.world .core { fill: #8ec5ff; filter: drop-shadow(0 0 1.2px #4f8cff); }
+  svg.world .spot:hover .core { fill: #fff; }
+  @keyframes halo { 0%, 100% { transform: scale(.8); opacity: .3; } 50% { transform: scale(1.15); opacity: .12; } }
+  @media (prefers-reduced-motion: reduce) { svg.world .halo { animation: none; } }
 
   @media (max-width: 900px) {
     .shell { grid-template-columns: minmax(0, 1fr); padding: 0 14px; }
@@ -524,6 +533,7 @@ export const ADMIN_STYLE = `
     .side .hint { display: none; }
     .appbar { padding: 10px 14px; flex-wrap: wrap; }
     .appbar a.btn span { display: none; }
+    .places .split { grid-template-columns: minmax(0, 1fr); }
   }
 `;
 
@@ -599,8 +609,46 @@ function placesPanel(rows: CountryRow[], active: number): string {
     : `<p class="muted" style="margin:0">Nobody has opened the app yet today.</p>`;
   return `<div class="places">
        <p class="title">${icon("globe")}Active users by location <span>(today's ${active} active user${active === 1 ? "" : "s"})</span></p>
-       ${body}
+       <div class="split">${worldMap(list)}${body}</div>
      </div>`;
+}
+
+/** The land as one path of dots, built once per isolate: it never changes. */
+let landPath = "";
+function land(): string {
+  if (landPath) return landPath;
+  const parts: string[] = [];
+  LAND_ROWS.forEach((hex, y) => {
+    const bits = [...hex].map((c) => parseInt(c, 16).toString(2).padStart(4, "0")).join("");
+    for (let x = 0; x < bits.length; x++) if (bits[x] === "1") parts.push(`M${x + 0.5} ${y + 0.5}h0`);
+  });
+  landPath = parts.join("");
+  return landPath;
+}
+
+/** The dotted world with a glowing point on each country seen today, sized by
+ *  how many. Countries with no known point -- `?`, Tor, unknown -- are left
+ *  to the list beside it. */
+function worldMap(list: CountryRow[]): string {
+  const width = LAND_ROWS[0]!.length * 4;
+  const height = LAND_ROWS.length;
+  const peak = Math.max(1, ...list.map((r) => r.today));
+  const spots = list
+    .map((r) => {
+      const at = COUNTRY_POINTS[r.country];
+      if (!at) return "";
+      const x = ((at[0] + 180) / MAP_STEP).toFixed(1);
+      const y = ((MAP_NORTH - at[1]) / MAP_STEP + 0.5).toFixed(1);
+      const size = 0.8 + Math.sqrt(r.today / peak) * 1.1;
+      const { name } = country(r.country);
+      return `<g class="spot"><title>${escapeHtml(name)}: ${r.today}</title>
+        <circle class="halo" cx="${x}" cy="${y}" r="${(size * 2.6).toFixed(2)}"/>
+        <circle class="core" cx="${x}" cy="${y}" r="${size.toFixed(2)}"/></g>`;
+    })
+    .join("");
+  return `<svg class="world" viewBox="0 0 ${width} ${height}" role="img" aria-label="Map of today's active users">
+       <path class="land" d="${land()}"/>${spots}
+     </svg>`;
 }
 
 /** Keeps the side list in step with the page: the section on screen is lit,

@@ -152,6 +152,8 @@ it("shows who ran out of the free allowance, and where installs are", async () =
   expect(html).toContain("median <b>2</b>");
   expect(html).toContain("Installs by country");
   expect(html).toContain("Germany");
+  // Seen today, so it is a point on the map too.
+  expect(html).toContain("<title>Germany: 1</title>");
 });
 
 /** An update is only visible as a known install reporting a new version, so
