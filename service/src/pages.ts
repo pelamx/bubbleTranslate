@@ -237,7 +237,7 @@ const LOCK = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" widt
 /** The site's mark, inline so the checkout page never waits on another
  *  origin to look like itself. Kept in step with `bubbletranslate.app`'s
  *  favicon.svg. */
-const LOGO = `<svg viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+export const LOGO = `<svg viewBox="0 0 64 64" aria-hidden="true" focusable="false">
   <defs><linearGradient id="btg" x1="0" y1="0" x2="1" y2="1">
     <stop offset="0" stop-color="#4f8cff"/><stop offset="1" stop-color="#7c5cff"/>
   </linearGradient>

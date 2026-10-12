@@ -12,6 +12,10 @@ const get = (path: string, e: any = withPassword, auth = "letmein") =>
     e,
   );
 
+/** A tile's words without its markup: the platform and its count sit in
+ *  separate elements, so they line up as columns. */
+const text = (html: string) => html.replace(/<[^>]+>/g, "");
+
 // The download counts come from GitHub; the panel must render without them.
 beforeEach(() => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 503 }));
@@ -124,13 +128,13 @@ it("counts the operator's own machines, by platform, apart from everyone else's"
   const html = await res.text();
 
   const tile = html.slice(html.indexOf("Your own machines"));
-  const upTo = tile.slice(0, tile.indexOf("</div></div>"));
+  const upTo = text(tile.slice(0, tile.indexOf("</div></div>")));
   expect(upTo).toContain("macOS 1");
   // The one that is not the operator's stays out of this tile...
   expect(upTo).toContain("Windows 0");
   // ...and the operator's stays out of the count it would otherwise inflate.
   const everyone = html.slice(html.indexOf("Installs ever seen"));
-  expect(everyone.slice(0, everyone.indexOf("</div></div>"))).toContain("macOS 0");
+  expect(text(everyone.slice(0, everyone.indexOf("</div></div>")))).toContain("macOS 0");
 });
 
 it("shows who ran out of the free allowance, and where installs are", async () => {
@@ -231,8 +235,8 @@ it("counts a copy as online while it keeps saying it is open", async () => {
   const tile = html.slice(html.indexOf("Online now"));
   const upTo = tile.slice(0, tile.indexOf("</div></div>"));
   expect(upTo).toContain(">1<");
-  expect(upTo).toContain("Linux 1");
-  expect(upTo).toContain("macOS 0");
+  expect(text(upTo)).toContain("Linux 1");
+  expect(text(upTo)).toContain("macOS 0");
 });
 
 /** A copy left open across midnight counts for the new day as soon as it says
@@ -240,7 +244,7 @@ it("counts a copy as online while it keeps saying it is open", async () => {
 it("counts an app still open after midnight as active today", async () => {
   const activeToday = async () => {
     const html = await (await get("/admin")).text();
-    const tile = html.slice(html.indexOf('<div class="k">Active users'));
+    const tile = html.slice(html.indexOf('<p class="k">Active users'));
     return Number(/<div class="v">(\d+)<\/div>/.exec(tile)![1]);
   };
   const before = await activeToday();

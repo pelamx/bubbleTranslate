@@ -2,9 +2,9 @@
 
 import { type Env, USD_AMOUNT, supportEmail } from "../env";
 import { DEFAULT_SEATS, isLive } from "../licences";
-import { escapeHtml, page } from "../pages";
+import { LOGO, escapeHtml, page } from "../pages";
 import { now } from "../tokens";
-import { DAY, PAGE_SIZE, date, startOfToday } from "./shared";
+import { DAY, LOCAL_OFFSET, PAGE_SIZE, date, startOfToday } from "./shared";
 import {
   HealthRow,
   LicenceOsRow,
@@ -429,6 +429,210 @@ export const ADMIN_STYLE = `
   .muted { color: var(--muted); }
   .key { color: var(--brand); background: var(--bg); border: 1px dashed var(--border); border-radius: 8px; padding: 12px 14px; letter-spacing: 1px; font-family: ui-monospace, monospace; }
   .foot { font-size: 12.5px; }
+
+  /* The frame: a header across the top, the sections listed down the left. */
+  body { padding: 0; }
+  .sheet.wide { max-width: none; }
+  .appbar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px;
+    padding: 12px 24px; background: rgba(15,17,23,.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border); }
+  .appbar .brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 700; }
+  .appbar .brand svg { width: 34px; height: 34px; }
+  .appbar .tag { font-size: 11px; font-weight: 600; letter-spacing: .6px; color: var(--muted);
+    background: var(--card-2); border-radius: 6px; padding: 4px 8px; }
+  .appbar .spacer { flex: 1; }
+  .appbar a.btn, .appbar .env { display: inline-flex; align-items: center; gap: 7px; font-size: 13px;
+    color: var(--text); text-decoration: none; border: 1px solid var(--border); border-radius: 9px; padding: 7px 12px; }
+  .appbar a.btn:hover { border-color: var(--brand); }
+  .appbar .env::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+  .appbar .env.prod { color: var(--accent); border-color: rgba(74,222,128,.45); }
+  .appbar .env.prod::before { background: var(--accent); }
+  .shell { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 22px; padding: 0 24px; }
+  .side { position: sticky; top: 64px; align-self: start; padding: 18px 0; display: flex; flex-direction: column; gap: 4px; }
+  .side a { display: flex; align-items: center; gap: 10px; color: var(--muted); text-decoration: none;
+    font-size: 14px; padding: 10px 12px; border-radius: 10px; border: 1px solid transparent; }
+  .side a:hover { color: var(--text); background: var(--card); }
+  .side a.on { color: var(--brand); background: rgba(110,168,254,.1); border-color: rgba(110,168,254,.25); }
+  .side a .count { margin-left: auto; font-size: 11px; color: var(--muted); }
+  .side a .count.bad { color: #0f1117; background: var(--red); border-radius: 999px; padding: 0 7px; }
+  .side a .count.warn { color: #0f1117; background: var(--orange); border-radius: 999px; padding: 0 7px; }
+  .side .hint { font-size: 11px; color: var(--faint); padding: 14px 12px 0; }
+  .side .hint kbd { font-family: inherit; border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
+  .main { padding: 18px 0 40px; min-width: 0; }
+  .zone { scroll-margin-top: 76px; }
+  .pagehead { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin: 4px 0 16px; }
+  .pagehead h1 { font-size: 28px; margin: 0; }
+  .pagehead .when { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 14px; }
+  .label .aside { text-transform: none; font-weight: 400; letter-spacing: 0; color: var(--faint); }
+  details.card, section.card { scroll-margin-top: 76px; }
+
+  /* Icons: drawn with the text colour unless a tone is given. */
+  svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 2;
+    stroke-linecap: round; stroke-linejoin: round; vertical-align: -4px; }
+  .ico { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px;
+    border-radius: 11px; flex: none; }
+  .ico svg.i { width: 21px; height: 21px; }
+  .t-blue { color: #60a5fa; background: rgba(96,165,250,.14); }
+  .t-red { color: #f87171; background: rgba(248,113,113,.14); }
+  .t-green { color: #4ade80; background: rgba(74,222,128,.13); }
+  .t-teal { color: #2dd4bf; background: rgba(45,212,191,.13); }
+  .t-violet { color: #a78bfa; background: rgba(167,139,250,.15); }
+  .t-orange { color: #fb923c; background: rgba(251,146,60,.14); }
+
+  /* The stat tiles. */
+  .grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+  .stat { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .stat .head { display: flex; gap: 12px; align-items: flex-start; }
+  .stat .k { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.3; }
+  .stat .k small { display: block; font-size: 12.5px; font-weight: 400; color: var(--muted); margin-top: 3px; }
+  .stat .k .info { color: var(--faint); cursor: help; font-weight: 400; }
+  .stat .v { font-size: 40px; font-weight: 800; margin-top: 10px; }
+  .stat.mine { border-color: rgba(110,168,254,.55); box-shadow: 0 0 0 1px rgba(110,168,254,.15) inset; }
+  .stat.alert { box-shadow: inset 3px 0 0 var(--orange); }
+  .osbars { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; display: grid; gap: 8px; }
+  .osrow { display: grid; grid-template-columns: 18px 64px 26px 1fr; align-items: center; gap: 8px; font-size: 13px; }
+  .osrow .nm { color: var(--muted); }
+  .osrow b { font-variant-numeric: tabular-nums; }
+  .osrow.zero b { color: var(--faint); font-weight: 500; }
+  .osrow .ic { display: inline-flex; justify-content: center; font-size: 14px; line-height: 1; }
+  .osrow .ic svg { width: 15px; height: 15px; }
+  .track { height: 6px; background: var(--bg); border-radius: 99px; overflow: hidden; }
+  .track i { display: block; height: 100%; border-radius: 99px; min-width: 0; }
+  .os-windows .ic { color: #3b9cff; } .os-windows .track i { background: #3b9cff; }
+  .os-linux .track i { background: #f59e0b; }
+  .os-macos .ic { color: #e6e8ef; } .os-macos .track i { background: #a855f7; }
+  .os-other .track i { background: var(--muted); }
+  .stat .foot-line { display: flex; gap: 8px; align-items: flex-start; margin: auto 0 0; padding-top: 10px;
+    border-top: 1px solid var(--border); margin-top: 12px; font-size: 12.5px; color: var(--muted); }
+  .stat .foot-line svg.i { width: 15px; height: 15px; margin-top: 2px; }
+
+  /* Today's active users by country, one small card each. */
+  .places { margin-top: 14px; background: var(--card-2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .places .title { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; margin: 0 0 12px; }
+  .places .title svg { color: var(--brand); }
+  .places .title span { font-weight: 400; color: var(--muted); }
+  .places .list { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+  .place { display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 9px; padding: 7px 10px; font-size: 13px; }
+  .place .flag { font-size: 17px; line-height: 1; }
+  .place b { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+  @media (max-width: 900px) {
+    .shell { grid-template-columns: minmax(0, 1fr); padding: 0 14px; }
+    .side { flex-direction: row; overflow-x: auto; top: 58px; z-index: 4; background: var(--bg); padding: 8px 0; }
+    .side a { white-space: nowrap; padding: 7px 10px; }
+    .side .hint { display: none; }
+    .appbar { padding: 10px 14px; flex-wrap: wrap; }
+    .appbar a.btn span { display: none; }
+  }
+`;
+
+/** Line icons for the panel, drawn inline so the page fetches nothing. */
+const ICON_PATHS: Record<string, string> = {
+  grid: '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
+  chart: '<path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
+  bars: '<path d="M6 20v-6"/><path d="M12 20V8"/><path d="M18 20V4"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>',
+  userPlus: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  cart: '<circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>',
+  signal: '<path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+  laptop: '<rect width="16" height="11" x="4" y="4" rx="2"/><path d="M2 20h20"/>',
+  file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  card: '<rect width="20" height="14" x="2" y="5" rx="2"/><path d="M2 10h20"/>',
+  key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
+  wallet: '<path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+  tools: '<path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M2 14h4"/><path d="M10 8h4"/><path d="M18 16h4"/>',
+  calendar: '<rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>',
+  apple: '<path d="M12 6.5V3a1 1 0 0 1 1-1"/><path d="M18.2 21A15 15 0 0 0 22 11a6 6 0 0 0-10-4.5A6 6 0 0 0 2 11a15 15 0 0 0 3.8 10 3 3 0 0 0 3.6.6 5.5 5.5 0 0 1 5.2 0 3 3 0 0 0 3.6-.6"/>',
+};
+
+const icon = (name: string) =>
+  `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON_PATHS[name] ?? ""}</svg>`;
+
+/** Windows' four panes, filled rather than outlined, as the logo is. */
+const WINDOWS_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M3 5.5 10.5 4.4v7.1H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg>`;
+
+function osIcon(os: string): string {
+  if (os === "windows") return WINDOWS_ICON;
+  if (os === "linux") return "🐧";
+  if (os === "macos") return icon("apple");
+  return "•";
+}
+
+/** One stat tile: an icon, a title, the figure, and whatever goes under it. */
+function tile(t: {
+  icon: string;
+  tone: string;
+  title: string;
+  hint?: string;
+  value: number;
+  extra?: string;
+  rows: string;
+  foot?: string;
+  footIcon?: string;
+  cls?: string;
+}): string {
+  return `<div class="stat${t.cls ? ` ${t.cls}` : ""}">
+           <div class="head"><span class="ico ${t.tone}">${icon(t.icon)}</span>
+             <p class="k">${t.title}${t.hint ? `<small>${t.hint}</small>` : ""}</p></div>
+           <div class="v">${t.value}</div>${t.extra ?? ""}
+           ${t.rows}
+           ${t.foot ? `<p class="foot-line">${icon(t.footIcon ?? "bars")}<span>${t.foot}</span></p>` : ""}
+         </div>`;
+}
+
+/** Today's active users as one small card per country, largest first. */
+function placesPanel(rows: CountryRow[], active: number): string {
+  const list = rows.filter((r) => r.today > 0).sort((a, b) => b.today - a.today);
+  const body = list.length
+    ? `<div class="list">${list
+        .map((r) => {
+          const { flag, name } = country(r.country);
+          const code = r.country === "?" ? "unknown" : r.country;
+          return `<div class="place" title="${escapeHtml(name)}"><span class="flag">${flag}</span>${escapeHtml(code)}<b>${r.today}</b></div>`;
+        })
+        .join("")}</div>`
+    : `<p class="muted" style="margin:0">Nobody has opened the app yet today.</p>`;
+  return `<div class="places">
+       <p class="title">${icon("globe")}Active users by location <span>(today's ${active} active user${active === 1 ? "" : "s"})</span></p>
+       ${body}
+     </div>`;
+}
+
+/** Keeps the side list in step with the page: the section on screen is lit,
+ *  and following a link to a folded section unfolds it. `/` jumps to the
+ *  licence search. */
+const SHELL_SCRIPT = `
+  (() => {
+    const links = [...document.querySelectorAll('.side a[href^="#"]')];
+    const open = (id) => {
+      const el = document.getElementById(id);
+      if (el && el.tagName === 'DETAILS') el.open = true;
+    };
+    for (const a of links) a.addEventListener('click', () => open(a.hash.slice(1)));
+    if (location.hash) open(location.hash.slice(1));
+    const zones = links.map((a) => document.getElementById(a.hash.slice(1))).filter(Boolean);
+    const light = () => {
+      let current = zones[0];
+      for (const z of zones) if (z.getBoundingClientRect().top < 140) current = z;
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = zones[zones.length - 1];
+      for (const a of links) a.classList.toggle('on', current && a.hash === '#' + current.id);
+    };
+    addEventListener('scroll', light, { passive: true });
+    light();
+    addEventListener('keydown', (e) => {
+      if (e.key !== '/' || /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName ?? '')) return;
+      e.preventDefault();
+      open('licences');
+      const q = document.getElementById('q');
+      q?.scrollIntoView({ block: 'center' });
+      q?.focus();
+    });
+  })();
 `;
 
 const usd = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
@@ -986,8 +1190,15 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     const extra = [...new Set(list.map((o) => o.os))].filter(
       (os) => !["windows", "linux", "macos"].includes(os) && count(os) > 0,
     );
-    return `<div>${["windows", "linux", "macos", ...extra]
-      .map((os) => `<span class="os${count(os) ? "" : " zero"}">${escapeHtml(osLabel(os))} ${count(os)}</span>`)
+    const oses = ["windows", "linux", "macos", ...extra];
+    // Each bar is that platform's share of the tile's figure.
+    const most = Math.max(1, oses.reduce((a, os) => a + count(os), 0));
+    return `<div class="osbars">${oses
+      .map((os) => {
+        const n = count(os);
+        const kind = ["windows", "linux", "macos"].includes(os) ? os : "other";
+        return `<div class="osrow os-${kind}${n ? "" : " zero"}"><span class="ic">${osIcon(os)}</span><span class="nm">${escapeHtml(osLabel(os))}</span> <b>${n}</b><span class="track"><i style="width:${Math.round((n / most) * 100)}%"></i></span></div>`;
+      })
       .join("")}</div>`;
   };
   const osChips = (pick: (o: OsRow) => number) => chipsFor(byOs, pick);
@@ -1020,14 +1231,38 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
        </table></div></details>`
     : "";
 
+  const online = byOs.reduce((a, o) => a + (o.online ?? 0), 0);
+  const today = new Date((startOfToday() + LOCAL_OFFSET) * 1000).toLocaleDateString("en-GB", {
+    weekday: "long", day: "numeric", month: "long", timeZone: "UTC",
+  });
+  const navCount = (n: number, tone = "") => (n > 0 ? `<span class="count${tone ? ` ${tone}` : ""}">${n}</span>` : "");
+  const nav = [
+    ["overview", "grid", "Overview", ""],
+    ["analytics", "chart", "Analytics", ""],
+    ["users", "user", "Users", navCount(real)],
+    ["payments", "card", "Payments", hooks.bad ? navCount(hooks.bad, "bad") : navCount(ending.length, ending.length ? "warn" : "")],
+    ["licences", "key", "Licences", ""],
+    ["tools", "tools", "Tools", ""],
+    ["revenue", "wallet", "Revenue", ""],
+  ]
+    .map(([id, ic, label, extra]) => `<a href="#${id}">${icon(ic)}${label}${extra}</a>`)
+    .join("");
+
   return page(
     "Admin — bubbleTranslate",
-    `<div class="topbar">
-       <h1>bubbleTranslate admin</h1><span class="spacer"></span>
-       <a class="pill" href="/admin/export.csv?what=licences">Licences CSV</a>
-       <a class="pill" href="/admin/export.csv?what=customers">Customers CSV</a>
-       <span class="pill${prod ? " prod" : ""}">${escapeHtml(env.PADDLE_ENV ?? "sandbox")}</span>
-     </div>
+    `<header class="appbar">
+       <span class="brand">${LOGO}bubbleTranslate</span><span class="tag">ADMIN</span>
+       <span class="spacer"></span>
+       <a class="btn" href="/admin/export.csv?what=licences" title="Licences CSV">${icon("file")}<span>Licences CSV</span></a>
+       <a class="btn" href="/admin/export.csv?what=customers" title="Customers CSV">${icon("file")}<span>Customers CSV</span></a>
+       <span class="env${prod ? " prod" : ""}">${escapeHtml(env.PADDLE_ENV ?? "sandbox")}</span>
+     </header>
+     <div class="shell">
+     <nav class="side" aria-label="Sections">
+       ${nav}
+       <p class="hint">Press <kbd>/</kbd> to search licences</p>
+     </nav>
+     <main class="main">
      ${notice.message ? `<p class="ok">${escapeHtml(notice.message)}</p>` : ""}
      ${notice.error ? `<p class="err">${escapeHtml(notice.error)}</p>` : ""}
      ${
@@ -1037,49 +1272,51 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
          : ""
      }
 
+     <div class="zone" id="overview">
+     <div class="pagehead"><h1>Overview</h1>
+       <span class="when">${icon("calendar")}${escapeHtml(today)} · Turkey time (vs yesterday)</span></div>
+
      <section class="card">
-       <p class="label">Today <span style="text-transform:none;font-weight:400">(Turkey time, vs yesterday)</span></p>
+       <p class="label">Today <span class="aside">(Turkey time, vs yesterday)</span></p>
        <div class="grid">
-         <div class="stat"><div class="k">New users <span class="muted">(downloaded &amp; opened)</span></div><div class="v">${p.installs_today}</div>
-           ${delta(p.installs_today, p.installs_yesterday)}
-           ${osChips((o) => o.today)}</div>
-         <div class="stat"><div class="k">New paying customers</div><div class="v">${p.subs_today}</div>
-           ${delta(p.subs_today, p.subs_yesterday)}
-           ${licChips((o) => o.today)}</div>
-         <div class="stat"><div class="k">Online now</div><div class="v">${byOs.reduce((a, o) => a + (o.online ?? 0), 0)}</div>
-           <div class="sub">app open in the last 10 minutes</div>
-           ${osChips((o) => o.online ?? 0)}</div>
-         <div class="stat"><div class="k">Active users</div><div class="v">${p.active_today}</div>
-           <div class="sub">opened the app today</div>
-           ${osChips((o) => o.active_today)}
-           ${countryChips(byCountry, (r) => r.today)}</div>
+         ${tile({ icon: "userPlus", tone: "t-blue", title: "New users", hint: "Downloaded &amp; opened",
+           value: p.installs_today, extra: delta(p.installs_today, p.installs_yesterday), rows: osChips((o) => o.today) })}
+         ${tile({ icon: "cart", tone: "t-red", title: "New paying customers",
+           value: p.subs_today, extra: delta(p.subs_today, p.subs_yesterday), rows: licChips((o) => o.today) })}
+         ${tile({ icon: "signal", tone: "t-green", title: "Online now", hint: "App open in the last 10 minutes",
+           value: online, rows: osChips((o) => o.online ?? 0) })}
+         ${tile({ icon: "users", tone: "t-teal", title: "Active users", hint: "Opened the app today",
+           value: p.active_today, rows: osChips((o) => o.active_today) })}
        </div>
+       ${placesPanel(byCountry, p.active_today)}
      </section>
 
      <section class="card">
        <p class="label">Overall</p>
        <div class="grid">
-         <div class="stat"><div class="k">Live subscribers</div><div class="v">${s.live}</div>
-           ${licChips((o) => o.live)}
-           <div class="sub">${s.monthly} monthly · ${s.yearly} yearly · ${s.fresh} new in 30d</div></div>
-         <div class="stat"><div class="k">Active this week</div><div class="v">${u.weekly}</div>
-           ${osChips((o) => o.active)}
-           <div class="sub">${u.free_weekly} free · ${u.new_weekly} new this week</div></div>
-         <div class="stat"><div class="k">Installs ever seen</div><div class="v">${u.total}</div>
-           ${osChips((o) => o.total)}
-           <div class="sub">${u.monthly} active this month</div></div>
-         <div class="stat${s.expiring > 0 ? " alert" : ""}"><div class="k">Ending in 7 days</div><div class="v">${s.expiring}</div>
-           ${licChips((o) => o.expiring)}
-           <div class="sub">${s.winding_down} cancelled, still paid</div></div>
-         <div class="stat"><div class="k">Your own machines</div><div class="v">${mineTotal}</div>
-           ${mineChips((o) => o.total)}
-           <div class="sub">${mineActive} active this week · left out of every count above</div></div>
+         ${tile({ icon: "users", tone: "t-green", title: "Live subscribers", value: s.live,
+           rows: licChips((o) => o.live), footIcon: "calendar",
+           foot: `${s.monthly} monthly · ${s.yearly} yearly · ${s.fresh} new in 30d` })}
+         ${tile({ icon: "bars", tone: "t-violet", title: "Active this week", value: u.weekly,
+           rows: osChips((o) => o.active), footIcon: "users",
+           foot: `${u.free_weekly} free · ${u.new_weekly} new this week` })}
+         ${tile({ icon: "download", tone: "t-blue", title: "Installs ever seen", value: u.total,
+           rows: osChips((o) => o.total), footIcon: "chart", foot: `${u.monthly} active this month` })}
+         ${tile({ icon: "clock", tone: "t-orange", title: "Ending in 7 days", value: s.expiring,
+           cls: s.expiring > 0 ? "alert" : "", rows: licChips((o) => o.expiring), footIcon: "card",
+           foot: `${s.winding_down} cancelled, still paid` })}
+         ${tile({ icon: "laptop", tone: "t-blue", cls: "mine",
+           title: `Your own machines <span class="info" title="Machines you marked as yours. They are left out of every other count on this page.">ⓘ</span>`,
+           value: mineTotal, rows: mineChips((o) => o.total), footIcon: "laptop",
+           foot: `${mineActive} active this week · excluded from counts above` })}
        </div>
        <p class="label" style="margin-top:20px">New installs, last 14 days</p>
        <div class="bars">${bars}</div>
        <div class="bars-axis"><span>14 days ago</span><span>today</span></div>
      </section>
+     </div>
 
+     <div class="zone" id="analytics">
      ${backendsCard(backends)}
 
      <section class="card">
@@ -1127,6 +1364,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
      ${sourcesCard(bySource)}
 
      ${countriesCard(byCountry)}
+     </div>
 
      <details class="card" id="users" open>
        <summary>Users, last 30 days — ${real} real${own ? ` · ${own} yours` : ""}</summary>
@@ -1137,9 +1375,11 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
        </div>
      </details>
 
+     <div class="zone" id="payments">
      ${webhookCard(hooks)}
      ${failureTable}
      ${endingCard(ending)}
+     </div>
 
      <details class="card" id="licences"${query ? " open" : ""}>
        <summary>Licences${query ? ` — results for “${escapeHtml(query)}”` : ""}</summary>
@@ -1159,6 +1399,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
        </div>
      </details>
 
+     <div class="zone" id="tools">
      <details class="card">
        <summary>Issue a licence</summary>
        <div class="body">
@@ -1196,6 +1437,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
      </details>
 
      ${historyCard(log)}
+     </div>
 
      ${revenueCard(money, share)}
 
@@ -1203,7 +1445,10 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
        Refunds and cancellations should normally be done in Paddle — its
        webhook updates this automatically. The Refund button here only marks the
        licence, and does not move any money. Support: ${escapeHtml(supportEmail(env))}
-     </p>`,
+     </p>
+     </main>
+     </div>
+     <script>${SHELL_SCRIPT}</script>`,
     `<style>${ADMIN_STYLE}</style>`,
     true,
   );
