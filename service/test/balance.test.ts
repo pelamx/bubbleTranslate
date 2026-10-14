@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { afterEach, expect, it, vi } from "vitest";
 import worker from "../src/index";
-import { paddleBalance, summarise, toRow } from "../src/admin/balance";
+import { keyKind, paddleBalance, summarise, toRow } from "../src/admin/balance";
 
 // The live account on 2026-10-14: one sale from Australia, four test
 // purchases refunded. Paddle's dashboard said $13.38.
@@ -61,9 +61,17 @@ it("passes on Paddle's own reason when it refuses the key", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
     Response.json({ error: { code: "forbidden", detail: "You aren't permitted to perform this request." } }, { status: 403 }),
   );
-  expect(await paddleBalance({ ...env, PADDLE_API_KEY: "k" } as any)).toBe(
-    "Paddle answered 403 (forbidden): You aren't permitted to perform this request.",
+  expect(await paddleBalance({ ...env, PADDLE_API_KEY: "live_abc" } as any)).toBe(
+    "Paddle answered 403 (forbidden): You aren't permitted to perform this request. " +
+      "The installed key is a client-side token, which is for checkout and not the API.",
   );
+});
+
+it("names the kind of key without showing it", () => {
+  expect(keyKind("pdl_live_apikey_01abc_secret")).toBe("The installed key is a live API key.");
+  expect(keyKind("pdl_live_apikey_01abc_secret\n")).toContain("line break");
+  expect(keyKind("pdl_sdbx_apikey_01abc")).toContain("SANDBOX");
+  expect(keyKind("pdl_live_apikey_01abc_secret")).not.toContain("secret");
 });
 
 it("still gives the figures when the key may not read customers", async () => {

@@ -137,6 +137,21 @@ async function paddleError(response: Response): Promise<string> {
   return `Paddle answered ${response.status}${code ? ` (${code})` : ""}${detail ? `: ${detail}` : "."}`;
 }
 
+/** What kind of key the service holds, never any of the key itself: which
+ *  of Paddle's prefixes it has, and whether stray whitespace came with the
+ *  paste. A secret cannot be read back out of Cloudflare, so this is how a
+ *  refusal is told apart from a wrong key. */
+export function keyKind(key: string): string {
+  const kind = /^pdl_live_apikey_/.test(key.trim())
+    ? "a live API key"
+    : /^pdl_sdbx_apikey_/.test(key.trim())
+      ? "a SANDBOX API key, which the live API refuses"
+      : /^(live|test)_/.test(key.trim())
+        ? "a client-side token, which is for checkout and not the API"
+        : "not a Paddle API key";
+  return `The installed key is ${kind}${key !== key.trim() ? ", with spaces or a line break around it" : ""}.`;
+}
+
 /** Every completed transaction from Paddle, as a balance. A string is the
  *  reason it could not be read, for the card to show. */
 export async function paddleBalance(env: Env): Promise<Balance | string> {
@@ -153,7 +168,7 @@ export async function paddleBalance(env: Env): Promise<Balance | string> {
     if (!got.startsWith("Paddle answered 403")) return got;
     refusal = got;
   }
-  return refusal;
+  return `${refusal} ${keyKind(env.PADDLE_API_KEY)}`;
 }
 
 async function readAll(env: Env, include: string): Promise<Balance | string> {
