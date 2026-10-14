@@ -25,26 +25,11 @@ It needs no Rust toolchain; building from source is covered below.
 
 Open the DMG and drag **bubbleTranslate.app** onto the Applications folder.
 
-The app is ad-hoc signed rather than notarized, so macOS blocks the first
-launch with *"Apple could not verify bubbleTranslate is free of malware."*
-That is Gatekeeper reacting to the missing Apple Developer signature, not to
-anything the app does. To get past it:
-
-1. Double-click the app and dismiss the warning.
-2. Open **System Settings › Privacy & Security**, scroll to Security, and click
-   **Open Anyway** next to the message about bubbleTranslate.
-3. Confirm once more when the app launches.
-
-On macOS 15 and later, Control-clicking the app and choosing *Open* no longer
-bypasses this — Open Anyway is the route. If you would rather not go through
-Settings, stripping the quarantine flag has the same effect:
-
-```sh
-xattr -dr com.apple.quarantine /Applications/bubbleTranslate.app
-```
-
-This step is only needed once, and only for a build downloaded from the
-internet. Building from source skips it entirely.
+The app is signed with a Developer ID and notarized by Apple, so it opens like
+any other download — no "could not verify" warning, nothing to clear in
+System Settings. That holds from 0.4.9; a DMG of 0.4.8 or older still needs
+**System Settings › Privacy & Security › Open Anyway** once on its first
+launch.
 
 Then grant Accessibility — the one permission the app needs, and the subject of
 [the next section](#granting-accessibility-macos). Without it macOS will not
@@ -404,12 +389,15 @@ Everything below is about the DMG.
 ./release.sh          # -> bubbleTranslate.dmg
 ```
 
-Drag-to-Applications layout. Without an Apple developer account the app is
-ad-hoc signed, so the DMG installs fine but Gatekeeper blocks the first launch
-and the user has to clear it once — see [macOS — from the DMG](#macos--from-the-dmg).
+Drag-to-Applications layout. The published DMG is signed with a
+`Developer ID Application` certificate and notarized, so it opens with no
+warning. `release.sh` finds both on its own: the first Developer ID in the
+keychain, and the `bubbleTranslate-notary` profile if it has been stored. Set
+`SIGN_IDENTITY` / `NOTARY_PROFILE` to choose others. Without them the app is
+ad-hoc signed, the DMG still installs, and Gatekeeper blocks the first launch
+until it is cleared once — and its "Read me first" says how.
 
-With a `Developer ID Application` certificate ($99/year Apple Developer
-Program) the same script produces a release that opens with no warning:
+Setting it up on a release machine, once:
 
 ```sh
 xcrun notarytool store-credentials bubbleTranslate-notary \

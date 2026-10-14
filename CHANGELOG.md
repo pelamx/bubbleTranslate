@@ -13,6 +13,21 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## 0.4.9 — 2026-10-14
+
+**The Mac download opens without a warning (macOS).** Until now the first
+launch was blocked with "Apple could not verify bubbleTranslate is free of
+malware", and the only way past it was a trip to System Settings to press Open
+Anyway — enough to make a careful person give up, or wonder whether the
+download was safe. bubbleTranslate is now signed with an Apple Developer ID and
+checked by Apple before it is published, so it opens like any other app.
+
+Because the app is signed differently, macOS asks for the Accessibility
+permission once more after this update. If bubbleTranslate already shows as on
+in System Settings › Privacy & Security › Accessibility but no bubble appears,
+remove it from that list with the minus button and turn it on again. Updates
+after this one keep the permission.
+
 ## 0.4.8 — 2026-10-08
 
 **The ten free translations a day now actually stop at ten.** Once the day's

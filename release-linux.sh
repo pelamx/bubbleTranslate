@@ -112,6 +112,10 @@ echo "uploaded $OUT to v$VERSION in $REPO"
 # line is touched: the other platforms are released on their own machines.
 ./scripts/publish-manifest.sh linux "$VERSION" "$OUT"
 
+# Then only this release is left to download: the other platforms' lines are
+# moved onto it and every older release is deleted.
+./scripts/prune-releases.sh "v$VERSION"
+
 echo
 echo "built and published $OUT ($(du -h "$OUT" | cut -f1)), version $VERSION"
 echo "the version in Cargo.toml is the only thing left to commit here"

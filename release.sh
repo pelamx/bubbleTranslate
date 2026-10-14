@@ -1,12 +1,9 @@
 #!/bin/bash
 # Builds bubbleTranslate.dmg — a drag-to-Applications installer.
 #
-# Works with no Apple developer account: the app is ad-hoc signed and the DMG
-# installs fine, but Gatekeeper warns on first launch and the user has to
-# clear it once via System Settings › Privacy & Security › Open Anyway.
-#
-# With an account, set both variables and the same script produces a release
-# that opens with no warning at all:
+# Signs with the first Developer ID Application certificate in the keychain
+# and notarizes with the bubbleTranslate-notary profile, when they are there,
+# so the DMG opens with no warning at all. Either can be named instead:
 #
 #   SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
 #   NOTARY_PROFILE=bubbleTranslate-notary \
@@ -15,6 +12,10 @@
 # The notary profile is created once with:
 #   xcrun notarytool store-credentials bubbleTranslate-notary \
 #     --apple-id you@example.com --team-id TEAMID --password <app-specific-password>
+#
+# Without them the app is ad-hoc signed and the DMG still installs, but
+# Gatekeeper warns on first launch and the user clears it once via System
+# Settings › Privacy & Security › Open Anyway; the DMG's read-me says how.
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -27,6 +28,18 @@ trap 'rm -rf "$(dirname "$STAGE")"' EXIT
 
 SIGN_IDENTITY="${SIGN_IDENTITY:-}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-}"
+
+# Found rather than remembered: the published DMG is signed and notarized, and
+# a release that forgot the two variables would quietly bring the Gatekeeper
+# warning back for everyone who downloads it.
+if [[ -z "$SIGN_IDENTITY" ]]; then
+    SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+        | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)"
+fi
+if [[ -z "$NOTARY_PROFILE" && -n "$SIGN_IDENTITY" ]] \
+    && xcrun notarytool history --keychain-profile bubbleTranslate-notary >/dev/null 2>&1; then
+    NOTARY_PROFILE="bubbleTranslate-notary"
+fi
 
 # --- the record -------------------------------------------------------------
 #
@@ -82,6 +95,25 @@ cp -R "$APP" "$STAGE/"
 # The symlink is what makes the window a drag-to-install target.
 ln -s /Applications "$STAGE/Applications"
 
+# A notarized app opens without a warning, so the step that clears one is only
+# written into an installer that needs it.
+if [[ -n "$NOTARY_PROFILE" ]]; then
+cat > "$STAGE/Read me first.txt" <<'TXT'
+bubbleTranslate - by pelamx
+
+
+Two steps and about a minute.
+
+
+--- 1. Install -------------------------------------------------------------
+
+Drag bubbleTranslate.app onto the Applications folder, here in this window,
+then open it from Applications.
+
+
+--- 2. Turn on Accessibility -----------------------------------------------
+TXT
+else
 cat > "$STAGE/Read me first.txt" <<'TXT'
 bubbleTranslate - by pelamx
 
@@ -120,6 +152,9 @@ above, and the app opens normally from then on:
 
 
 --- 3. Turn on Accessibility -----------------------------------------------
+TXT
+fi
+cat >> "$STAGE/Read me first.txt" <<'TXT'
 
 bubbleTranslate works by reading the text you select, and macOS keeps that
 behind the Accessibility permission. The app asks on first launch and opens
@@ -129,6 +164,11 @@ the right page for you:
 
 Turn bubbleTranslate on there. It starts watching the moment you do -
 nothing to quit, nothing to relaunch.
+
+Updating from 0.4.8 or older? The app is now signed differently, so macOS
+asks once more. If bubbleTranslate already shows as on but no bubble
+appears, select it in that list, remove it with the minus button, and turn
+it on again.
 
 
 --- Done -------------------------------------------------------------------
@@ -151,8 +191,25 @@ hdiutil create \
 
 if [[ -n "$SIGN_IDENTITY" ]]; then
     codesign --force --sign "$SIGN_IDENTITY" "$DMG"
-    # Verifies the DMG the way Gatekeeper will on the user's machine.
-    spctl -a -vvv -t install "$DMG" || true
+fi
+
+# The DMG is notarized too, not only the app inside it. A downloaded disk
+# image is checked when it is opened, before anyone reaches the app, and a
+# signed but unnotarized one is rejected there -- which brings back the very
+# warning notarizing the app was meant to remove. 0.4.9 went out that way for
+# a few minutes.
+if [[ -n "$NOTARY_PROFILE" ]]; then
+    xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+    xcrun stapler staple "$DMG"
+    # Checked the way Gatekeeper checks a download, and refused rather than
+    # warned: nothing below this line is undone by a failure further down.
+    CHECK="$(mktemp -d)/$DMG"
+    cp "$DMG" "$CHECK"
+    xattr -w com.apple.quarantine "0081;$(printf %x "$(date +%s)");Safari;" "$CHECK"
+    if ! spctl -a -vv -t open --context context:primary-signature "$CHECK"; then
+        echo "error: Gatekeeper rejects $DMG as a download; nothing was published" >&2
+        exit 1
+    fi
 fi
 
 # --- tell installed copies ---------------------------------------------------
@@ -182,6 +239,10 @@ echo "uploaded $DMG to v$VERSION in $REPO"
 
 # And the promise last of all.
 ./scripts/publish-manifest.sh macos "$VERSION" "$DMG"
+
+# Then only this release is left to download: the other platforms' lines are
+# moved onto it and every older release is deleted.
+./scripts/prune-releases.sh "v$VERSION"
 
 echo
 echo "built and published $DMG ($(du -h "$DMG" | cut -f1)), version $VERSION"

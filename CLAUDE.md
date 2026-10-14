@@ -98,13 +98,30 @@ startup, so anything that takes it offline or renames it stops the update
 notice for every copy already out there. Keeping the two apart is what lets
 this repository be made private again without taking the downloads with it.
 
+**Only the current release can be downloaded.** Each release script ends with
+`scripts/prune-releases.sh`, which moves every platform's line of `latest.json`
+onto the new release (fill-release has already copied their files into it) and
+then deletes every older `v*` release and its tag. Old builds are not offered
+to anyone. `ocr-models-1` is never deleted: the Linux app downloads its OCR
+files from it at run time.
+
+Nothing is deleted before it is kept. On the Mac the script downloads every
+release into `~/bubbleTranslate-archive/pelamx/<tag>/` first, checks each file
+against GitHub's size and keeps any release that did not arrive whole. That
+folder is the only copy of an old build, so on Windows and Linux the script
+moves `latest.json` and stops; the old release stays up until
+`scripts/prune-releases.sh <tag>` is run on the Mac. Everything up to 0.4.8,
+from both downloads repositories, was archived there on 2026-10-13.
+
 They lived in `bubbleTranslate/downloads` until 0.3.6, under a second GitHub
-account. That repository is frozen — point nothing new at it — but its assets
-and its `latest.json` stay where they are, because copies of 0.3.5 and older ask
-it for the manifest and will go on doing so for as long as they are running.
-Its manifest was pointed at `pelamx/downloads` on 2026-09-25, which is what
-tells those copies an update exists and where to get it; leaving it at 0.3.6
-keeps answering them correctly, so it needs no upkeep.
+account. That repository is frozen — point nothing new at it — and its old
+releases were deleted on 2026-10-13, all but `ocr-models-1`, which older Linux
+copies still download from. Its `latest.json` stays where it is, because copies
+of 0.3.5 and older ask it for the manifest and will go on doing so for as long
+as they are running. It points at `pelamx/downloads`'s
+`/releases/latest/download/…` links, so it follows every release without
+upkeep; its version stays at 0.3.6, which is enough to tell those copies an
+update exists.
 
 `pelamx` is a collaborator there with write access since 2026-09-25, so it can
 be corrected from any release machine without the second account's token. That
