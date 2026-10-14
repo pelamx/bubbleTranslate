@@ -1,7 +1,7 @@
 # bubbleTranslate
 
 Select text anywhere — a PDF, a terminal, a browser, an editor — with a key
-held (Shift by default) and a small bubble appears at the cursor with the
+held (Alt by default, Option on a Mac) and a small bubble appears at the cursor with the
 translation. Runs on macOS, Windows and Linux.
 
 The translator, the provider chain and the interface are the same code on all
@@ -568,7 +568,7 @@ mymemory_email = ""         # raises the MyMemory quota
 license_key = ""            # Pro key; the signed token it buys lives elsewhere
 auto_translate = true       # bubble on selection
 dictionary = true           # a single word also lists its other meanings
-trigger_key = "shift"       # hold this while selecting; "always" for no key
+trigger_key = "alt"         # hold this while selecting; "always" for no key
 min_chars = 2
 max_chars = 4000            # keeps a stray Cmd+A out of the queue
 debounce_ms = 180           # settle time before reading the selection
@@ -587,8 +587,12 @@ already captured.
 ### The trigger key
 
 Text gets selected all day for reasons that have nothing to do with translating
-it, so by default the bubble only appears for a selection made with **Shift**
-held. Any of `shift`, `ctrl`, `alt` or `super` will do — Control, Option and
+it, so by default the bubble only appears for a selection made with **Alt**
+held — **Option** on macOS. Shift was the default until this one, and a saved
+config keeps it: only new installs start on Alt. Shift held through a click
+extends the selection already there, so a double-click with it could select
+from the old selection to the new word; Alt leaves a drag and a double-click
+selecting what they would without it. Any of `shift`, `ctrl`, `alt` or `super` will do — Control, Option and
 Command on macOS — and `always` restores the old behaviour of translating every
 selection.
 

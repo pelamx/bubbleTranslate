@@ -357,6 +357,9 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
                     trigger_key().label()
                 );
             } else if dragged || multi_click {
+                // Clicks are not keystrokes, so an application may still read
+                // the release of Alt that ends this gesture as Alt tapped alone.
+                capture::mask_lone_modifier();
                 fire(Trigger {
                     at: Some(at),
                     clipboard_before: press.map(|press| press.clipboard),

@@ -13,6 +13,17 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**New copies use Alt to translate — Option on a Mac — instead of Shift.** Hold
+Alt and select, or hold it and double-click a word, and the bubble appears.
+Shift had a catch: it is also the key that extends a selection, so a
+double-click with it held often selected everything from the last selection up
+to the new word, and translated all of that instead of the word. Alt leaves
+the selection exactly as you made it. If you already use bubbleTranslate,
+nothing changes: it keeps the key you have, and the window's Behaviour section
+is where you switch to Alt.
+
 ## 0.4.9 — 2026-10-14
 
 **The Mac download opens without a warning (macOS).** Until now the first

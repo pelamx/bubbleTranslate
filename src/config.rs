@@ -114,9 +114,9 @@ pub enum TriggerKey {
 
 impl TriggerKey {
     pub const ALL: &'static [TriggerKey] = &[
+        TriggerKey::Alt,
         TriggerKey::Shift,
         TriggerKey::Ctrl,
-        TriggerKey::Alt,
         TriggerKey::Super,
         TriggerKey::Always,
     ];
@@ -278,10 +278,13 @@ pub struct Config {
     pub dictionary: bool,
     /// Which key has to be held while selecting for the bubble to appear.
     ///
-    /// Shift by default: it is already a selection key everywhere — holding it
-    /// extends a selection rather than doing something else — so the gesture
-    /// stays one gesture. Set to [`TriggerKey::Always`] to go back to
-    /// translating every selection.
+    /// Alt (Option on macOS) by default. Shift was the default before it, but
+    /// Shift held through a click extends the selection that is already there,
+    /// so a double-click with it often selected from the old selection to the
+    /// new word instead of the word alone. Alt leaves both a drag and a
+    /// double-click selecting exactly what they would without it. A saved
+    /// config keeps the key it has: only new installs start on Alt. Set to
+    /// [`TriggerKey::Always`] to go back to translating every selection.
     pub trigger_key: TriggerKey,
     /// Where the feedback box opens the message. See [`FeedbackVia`].
     pub feedback_via: FeedbackVia,
@@ -379,7 +382,7 @@ impl Default for Config {
             license_key: String::new(),
             auto_translate: true,
             dictionary: true,
-            trigger_key: TriggerKey::Shift,
+            trigger_key: TriggerKey::Alt,
             feedback_via: FeedbackVia::MailApp,
             min_chars: 2,
             max_chars: 4000,
@@ -533,14 +536,21 @@ pub fn language_name(code: &str) -> &str {
 mod tests {
     use super::*;
 
-    /// A config written before the trigger key existed gains Shift, not
-    /// "no key". Worth pinning: it is the one upgrade in this change that a
-    /// user feels — selections stop translating until Shift is held — and it
-    /// is deliberate rather than an oversight in the defaults.
+    /// A config written before the trigger key existed gains a key, not
+    /// "no key": selections stop translating until it is held, which is
+    /// deliberate rather than an oversight in the defaults.
     #[test]
-    fn an_older_config_gains_the_shift_gate() {
+    fn an_older_config_gains_the_alt_gate() {
         let cfg: Config = toml::from_str("target_lang = \"tr\"\n").unwrap();
         assert_eq!(cfg.target_lang, "tr");
+        assert_eq!(cfg.trigger_key, TriggerKey::Alt);
+    }
+
+    /// Someone who has been holding Shift keeps holding Shift: the new
+    /// default is for new installs, not a change made under existing ones.
+    #[test]
+    fn a_saved_shift_stays_shift() {
+        let cfg: Config = toml::from_str("trigger_key = \"shift\"\n").unwrap();
         assert_eq!(cfg.trigger_key, TriggerKey::Shift);
     }
 

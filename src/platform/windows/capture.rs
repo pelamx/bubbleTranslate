@@ -277,12 +277,31 @@ fn clipboard_selection() -> Option<String> {
 
 /// The modifiers that must not still be down when Ctrl+C is sent.
 ///
-/// This is not tidiness. The trigger key is Shift by default and the user is
+/// This is not tidiness. The trigger key is often Shift, and the user is
 /// usually still holding it as the gesture ends, which would turn our copy
 /// into Ctrl+Shift+C — "inspect element" in every Chromium browser, and
 /// something else again in a dozen other applications. Alt and the Windows key
 /// are released for the same reason.
 const INTERFERING: [VIRTUAL_KEY; 4] = [VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN];
+
+/// A virtual key Windows leaves unassigned, pressed only to be seen.
+const MASK_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0xE8);
+
+/// Keeps a held Alt or Windows key from counting as a tap of its own.
+///
+/// Windows reads Alt pressed and released with nothing in between as a
+/// request for the menu bar — the menu in Notepad and Explorer, the key tips in
+/// Office — and the Windows key the same way as a request for Start. With Alt
+/// as the trigger key, letting go of it after a selection, or our own release
+/// and press around the copy, would be exactly that. A keystroke nothing
+/// answers to, sent while the key is still down, makes it a chord instead. The
+/// same trick AutoHotkey uses, with the same key.
+pub fn mask_lone_modifier() {
+    if held(VK_MENU) || held(VK_LWIN) || held(VK_RWIN) {
+        send_key(MASK_KEY, false);
+        send_key(MASK_KEY, true);
+    }
+}
 
 /// Whether a key is physically down right now.
 fn held(key: VIRTUAL_KEY) -> bool {
@@ -302,6 +321,7 @@ fn post_ctrl_c() -> bool {
     // down with nothing to put either right.
     let interfering: Vec<VIRTUAL_KEY> = INTERFERING.into_iter().filter(|k| held(*k)).collect();
 
+    mask_lone_modifier();
     let mut released = true;
     for key in &interfering {
         if !send_key(*key, true) {
@@ -340,6 +360,8 @@ fn post_ctrl_c() -> bool {
             send_key(*key, false);
         }
     }
+    // The press just put back has nothing after it until the user lets go.
+    mask_lone_modifier();
     released && chord_sent
 }
 
