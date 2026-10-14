@@ -104,21 +104,42 @@ fi
 
 ARCHIVE="$HOME/bubbleTranslate-archive/pelamx"
 
+# sha256 of a file in the archive, or nothing when it is not there.
+sha_of() { [[ -f "$1" ]] && shasum -a 256 "$1" | cut -d' ' -f1; }
+
 # Downloads a release into the archive and says whether every file arrived
-# whole. A file already there at the right size is not fetched again.
+# whole, by GitHub's own sha256 of each asset rather than its size. Size is not
+# enough: a platform is re-released into an existing tag under the same file
+# name, and a rebuilt binary is often the same number of bytes -- v0.4.9's
+# Linux and Windows files were, and the archive held the builds they replaced.
+# A file already there with the right digest is not fetched again; one with a
+# different digest is kept beside it as <name>.replaced-<time>, because it may
+# be the only copy of what was published first.
 archive() {
-    local tag="$1" dir="$ARCHIVE/$1" name size have ok=0
+    local tag="$1" dir="$ARCHIVE/$1" name size digest have ok=0
+    local assets
     mkdir -p "$dir"
     gh release view "$tag" -R "$REPO" --json name,body,publishedAt,assets > "$dir/release.json"
+    assets="$(gh release view "$tag" -R "$REPO" --json assets \
+        --jq '.assets[] | .name + "\t" + (.size | tostring) + "\t" + ((.digest // "") | ltrimstr("sha256:"))')"
+    while IFS=$'\t' read -r name size digest; do
+        [[ -f "$dir/$name" ]] || continue
+        if [[ -n "$digest" && "$(sha_of "$dir/$name")" != "$digest" ]]; then
+            mv "$dir/$name" "$dir/$name.replaced-$(date +%Y%m%d%H%M%S)"
+            echo "  $tag/$name changed on GitHub; the older copy is kept beside it"
+        fi
+    done <<<"$assets"
     gh release download "$tag" -R "$REPO" -D "$dir" --skip-existing >/dev/null
-    while IFS=$'\t' read -r name size; do
+    while IFS=$'\t' read -r name size digest; do
         have="$(stat -f %z "$dir/$name" 2>/dev/null || echo 0)"
         if [[ "$have" != "$size" ]]; then
             echo "error: $tag/$name is $have bytes in the archive, $size on GitHub" >&2
             ok=1
+        elif [[ -n "$digest" && "$(sha_of "$dir/$name")" != "$digest" ]]; then
+            echo "error: $tag/$name in the archive does not match GitHub's sha256" >&2
+            ok=1
         fi
-    done < <(gh release view "$tag" -R "$REPO" --json assets \
-        --jq '.assets[] | .name + "\t" + (.size | tostring)')
+    done <<<"$assets"
     return "$ok"
 }
 
@@ -127,10 +148,12 @@ archive() {
 archive "$TAG" && echo "  archived $TAG in $ARCHIVE/$TAG"
 
 deleted=0
+kept=0
 for old in $(gh release list -R "$REPO" -L 1000 --json tagName --jq '.[].tagName'); do
     [[ "$old" == v* && "$old" != "$TAG" ]] || continue
     if ! archive "$old"; then
         echo "error: $old was not archived whole, so it was not deleted" >&2
+        kept=$((kept + 1))
         continue
     fi
     gh release delete "$old" -R "$REPO" --cleanup-tag --yes
@@ -138,4 +161,8 @@ for old in $(gh release list -R "$REPO" -L 1000 --json tagName --jq '.[].tagName
     deleted=$((deleted + 1))
 done
 
+if [[ "$kept" -gt 0 ]]; then
+    echo "$REPO still offers $kept older release(s) besides $TAG; fix the archive and run this again" >&2
+    exit 1
+fi
 echo "$REPO now offers $TAG only ($deleted older release(s) deleted)"
