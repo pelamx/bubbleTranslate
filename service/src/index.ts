@@ -714,15 +714,18 @@ async function handlePaddleEvent(env: Env, event: Verified): Promise<Response> {
       // `pending_approval` and may yet be rejected, so it counts once it is
       // approved — which is why the update is listened to as well. A partial
       // refund is a goodwill credit, not the purchase undone, and leaves the
-      // licence alone. A chargeback is the buyer taking the money back without
-      // asking, and ends it the same as a refund.
+      // licence alone -- unless every item on it is refunded in `full`, which
+      // is what the Paddle dashboard sends for a whole refund: `type` is
+      // "partial" because it was made per item, but the purchase is undone.
+      // A chargeback is the buyer taking the money back without asking, and
+      // ends it the same as a refund.
       //
       // Every adjustment is recorded for the panel's refund tracker first,
       // whatever happens to the licence below.
       await mirrorAdjustment(env, data, eventAt);
       const action = String(data.action ?? "");
       const status = String(data.status ?? "");
-      const ends = (action === "refund" && data.type !== "partial") || action === "chargeback";
+      const ends = (action === "refund" && refundsWholePurchase(data)) || action === "chargeback";
       if (!ends) return json({ ok: true, ignored: data.type === "partial" ? "partial refund" : action });
       if (status !== "approved") return json({ ok: true, ignored: `${action} ${status}` });
       const subscriptionId = data.subscription_id ? String(data.subscription_id) : null;
@@ -735,6 +738,16 @@ async function handlePaddleEvent(env: Env, event: Verified): Promise<Response> {
     default:
       return json({ ok: true, ignored: event.eventType });
   }
+}
+
+/** Whether a refund gives back the whole purchase. True for `type: "full"`,
+ *  and for a "partial" refund whose every item is refunded in full -- the
+ *  shape the Paddle dashboard uses for a whole refund. A transaction here
+ *  carries the one plan item, so all items full is the whole purchase. */
+export function refundsWholePurchase(data: any): boolean {
+  if (data?.type !== "partial") return true;
+  const items: any[] = Array.isArray(data?.items) ? data.items : [];
+  return items.length > 0 && items.every((i) => i?.type === "full");
 }
 
 /** A payment: the first one sells a licence, every later one renews it. */

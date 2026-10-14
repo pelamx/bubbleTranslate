@@ -206,6 +206,30 @@ describe("POST /webhooks/paddle", () => {
     await deliver(completed("r1", "sub_1"));
     await deliver(adjustment("adjustment.created", { action: "refund", type: "partial", status: "approved" }));
     expect(await statusOfSub1()).toBe("active");
+    await deliver(
+      adjustment("adjustment.created", {
+        action: "refund",
+        type: "partial",
+        status: "approved",
+        items: [{ item_id: "txnitm_1", type: "partial", amount: "50" }],
+      }),
+    );
+    expect(await statusOfSub1()).toBe("active");
+  });
+
+  it("ends the licence on a dashboard refund: partial, but every item in full", async () => {
+    await order("r1");
+    await deliver(completed("r1", "sub_1"));
+    const dashboardRefund = (status: string) => ({
+      action: "refund",
+      type: "partial",
+      status,
+      items: [{ item_id: "txnitm_1", type: "full", amount: "2000" }],
+    });
+    await deliver(adjustment("adjustment.created", dashboardRefund("pending_approval")));
+    expect(await statusOfSub1()).toBe("active");
+    await deliver(adjustment("adjustment.updated", dashboardRefund("approved")));
+    expect(await statusOfSub1()).toBe("refunded");
   });
 
   it("ends the licence on a chargeback", async () => {
