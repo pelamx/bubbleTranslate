@@ -880,6 +880,20 @@ export async function adjustments(env: Env, limit = 50): Promise<AdjustmentRow[]
   return results ?? [];
 }
 
+/** Each Paddle subscription's licence, and whether the operator marked it as
+ *  their own, so a Paddle transaction can be shown against both. */
+export async function licencesBySubscription(
+  env: Env,
+): Promise<Map<string, { id: string; mine: boolean }>> {
+  const { results } = await env.DB.prepare(
+    `SELECT l.provider_ref AS sub, l.id,
+            EXISTS (SELECT 1 FROM ignored_licences i WHERE i.licence_id = l.id) AS mine
+       FROM licences l
+      WHERE l.provider = 'paddle' AND l.provider_ref IS NOT NULL`,
+  ).all<{ sub: string; id: string; mine: number }>();
+  return new Map((results ?? []).map((r) => [r.sub, { id: r.id, mine: !!r.mine }]));
+}
+
 // -- money -------------------------------------------------------------------
 
 export interface EndingRow extends Row {

@@ -4,6 +4,7 @@ import { type Env, USD_AMOUNT, supportEmail } from "../env";
 import { DEFAULT_SEATS, isLive } from "../licences";
 import { LOGO, escapeHtml, page } from "../pages";
 import { now } from "../tokens";
+import { type Balance, paddleBalance } from "./balance";
 import { COUNTRY_POINTS, LAND_ROWS, MAP_NORTH, MAP_STEP } from "./world";
 import { DAY, LOCAL_OFFSET, PAGE_SIZE, date, startOfToday } from "./shared";
 import {
@@ -18,6 +19,7 @@ import {
   type AdminLogRow,
   type AdjustmentRow,
   adjustments,
+  licencesBySubscription,
   type Downloads,
   type EndingRow,
   type Revenue,
@@ -1193,6 +1195,66 @@ export function refundsCard(list: AdjustmentRow[]): string {
   </details>`;
 }
 
+/** The Paddle balance, sale by sale: what each buyer paid, the tax and fee
+ *  Paddle took, what was earned, what a refund took back, and the running
+ *  balance. Paddle's own figures, read live. */
+export function balanceCard(
+  b: Balance | string,
+  licences: Map<string, { id: string; mine: boolean }>,
+): string {
+  if (typeof b === "string") {
+    return `<details class="card" id="balance"><summary>Paddle balance</summary>
+      <div class="body"><p class="muted">${escapeHtml(b)}</p></div></details>`;
+  }
+  const m = (v: number, c = b.currency) => minorAmount(v, c);
+  const neg = (v: number, c = b.currency) => (v ? `−${m(v, c)}` : `<span class="muted">—</span>`);
+  const body = b.rows
+    .map((r) => {
+      const lic = r.subscription_id ? licences.get(r.subscription_id) : undefined;
+      const kind = r.origin === "subscription_recurring" ? "renewal" : r.origin === "web" ? "new" : (r.origin ?? "—");
+      const taken = r.refunded + r.retained_fee + r.chargeback_fee;
+      return `<tr${lic?.mine ? ' class="mine"' : ""}>
+        <td title="${escapeHtml(new Date(r.at * 1000).toISOString())}">${escapeHtml(date(r.at))}</td>
+        <td>${escapeHtml(r.email ?? "—")}${lic?.mine ? ` <span class="badge you">you</span>` : ""}<div class="muted">${
+          lic ? `<a href="/admin?q=${encodeURIComponent(lic.id)}#licences"><code>${escapeHtml(lic.id)}</code></a> · ` : ""
+        }<code>${escapeHtml(r.transaction_id)}</code></div></td>
+        <td>${escapeHtml(kind)}${r.country ? ` <span class="muted">${escapeHtml(r.country)}</span>` : ""}</td>
+        <td class="num">${m(r.paid, r.currency)}</td>
+        <td class="num">${neg(r.tax, r.currency)}</td>
+        <td class="num">${neg(r.fee, r.balance_currency)}</td>
+        <td class="num">${m(r.earnings, r.balance_currency)}</td>
+        <td class="num">${neg(taken, r.balance_currency)}${
+          r.retained_fee ? `<div class="muted">fee kept ${m(r.retained_fee, r.balance_currency)}</div>` : ""
+        }${r.chargeback_fee ? `<div class="muted">chargeback fee ${m(r.chargeback_fee, r.balance_currency)}</div>` : ""}</td>
+        <td class="num"><b>${m(r.net, r.balance_currency)}</b></td></tr>`;
+    })
+    .join("");
+  const taken = b.refunded + b.retained_fee + b.chargeback_fee;
+  const total = `<tr><td colspan="3"><b>Total</b> <span class="muted">${b.rows.length} sales</span></td>
+    <td class="num"><b>${m(b.paid)}</b></td><td class="num">${neg(b.tax)}</td><td class="num">${neg(b.fee)}</td>
+    <td class="num"><b>${m(b.earnings)}</b></td><td class="num">${neg(taken)}</td>
+    <td class="num"><b>${m(b.balance)}</b></td></tr>`;
+  return `<details class="card" id="balance">
+    <summary>Paddle balance — ${m(b.balance)}</summary>
+    <div class="body">${
+      b.rows.length
+        ? `<p style="margin-top:0">Earned <b>${m(b.earnings)}</b> from ${m(b.paid)} paid ·
+             Paddle fees <b>${m(b.fee)}</b>${b.retained_fee ? ` (+${m(b.retained_fee)} kept on refunds)` : ""} ·
+             tax ${m(b.tax)} · refunds took ${m(taken)} · balance <b>${m(b.balance)}</b></p>
+           ${b.truncated ? `<p class="warn">Only the first 600 transactions were read; the totals are incomplete.</p>` : ""}
+           <div class="scroll"><table><tr><th>Date</th><th>Buyer</th><th>Kind</th><th class="num">Paid</th>
+             <th class="num">Tax</th><th class="num">Paddle fee</th><th class="num">Earned</th>
+             <th class="num">Refunded</th><th class="num">Net</th></tr>${body}${total}</table></div>
+           <p class="muted foot">Paddle's own figures, read live. <b>Paid</b> is what the buyer was charged, tax included.
+             <b>Earned</b> is what is left after tax and Paddle's fee (5% + 50¢). <b>Refunded</b> is those earnings
+             taken back plus the fee Paddle keeps. <b>Net</b> is what the sale leaves in the balance, and the
+             total of Net is the balance. It is before payouts — Paddle's API does not list
+             them, so after the first payout it will read higher than the dashboard by what was paid out.</p>`
+        : `<p class="muted">No completed sales yet.</p>`
+    }</div>
+  </details>`;
+}
+
 /** What the operator did here, newest first. */
 export function historyCard(log: AdminLogRow[]): string {
   const body = log
@@ -1240,7 +1302,7 @@ export function delta(today: number, yesterday: number): string {
 }
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, licCountry, refunds] = await Promise.all([
+  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, licCountry, refunds, balance, licBySub] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -1268,6 +1330,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     versionCountries(env),
     licenceCountries(env),
     adjustments(env),
+    paddleBalance(env),
+    licencesBySubscription(env),
   ]);
   const dl = downloadsNow?.total ?? null;
 
@@ -1542,6 +1606,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
      </details>
 
      <div class="zone" id="payments">
+     ${balanceCard(balance, licBySub)}
      ${refundsCard(refunds)}
      ${webhookCard(hooks)}
      ${failureTable}
