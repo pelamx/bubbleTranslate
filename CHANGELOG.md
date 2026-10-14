@@ -13,6 +13,18 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**The window shows bubbleTranslate's icon in its corner. (Windows)** The
+window that opens from the tray had an empty space at the top left where every
+other program has its icon. It now carries the speech bubble with the globe.
+
+**bubbleTranslate has its own icon on the Mac. (macOS)** Until now the app
+had none, so in System Settings — under Accessibility and Screen Recording,
+exactly where you are asked to find it and switch it on — it showed up as a
+blank square that was easy to miss. It now shows the speech bubble with the
+globe, the same mark as on Windows and Linux.
+
 ## 0.4.10 — 2026-10-14
 
 **New copies use Alt to translate — Option on a Mac — instead of Shift.** Hold

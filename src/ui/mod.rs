@@ -35,6 +35,19 @@ const CURSOR_OFFSET: (f32, f32) = (14.0, 20.0);
 /// How often a visible bubble re-checks whether the pointer is over it.
 const HOVER_POLL: Duration = Duration::from_millis(150);
 
+/// The mark in the window's own title bar, and on Windows its taskbar button.
+///
+/// Named here rather than left to the toolkit, because the toolkit gives a
+/// second window only the icon of the first, and the first is the bubble,
+/// which has none: on Windows the window came up with an empty space where
+/// the icon belongs. The picture inside the `.exe` does not reach it either --
+/// a window takes its icon from what it is told, not from the file it came
+/// from.
+fn window_icon() -> Arc<egui::IconData> {
+    let png = include_bytes!("../../brand/window-icon.png");
+    Arc::new(eframe::icon_data::from_png_bytes(png).unwrap_or_default())
+}
+
 /// How often to re-ask whether the permission the app is missing has been
 /// granted. Only asked while it is missing, and only while something is
 /// drawing — which is the case that matters, since that is when someone is
@@ -631,7 +644,8 @@ impl BubbleApp {
         let builder = egui::ViewportBuilder::default()
             .with_title("bubbleTranslate")
             .with_inner_size(main_window::WINDOW_SIZE)
-            .with_min_inner_size([400.0, 420.0]);
+            .with_min_inner_size([400.0, 420.0])
+            .with_icon(window_icon());
 
         let state = self.main.clone();
         let config = self.config_for_main.clone();
