@@ -260,3 +260,29 @@ it("counts an app still open after midnight as active today", async () => {
     .run();
   expect(await activeToday()).toBe(before + 1);
 });
+
+it("lists Paddle refunds with what went back and what left the balance", async () => {
+  const { id } = await issueLicence(env, {
+    provider: "paddle",
+    cycle: "yearly",
+    email: "buyer@example.com",
+    providerRef: "sub_1",
+  });
+  await env.DB.prepare(
+    `INSERT INTO paddle_adjustments
+       (adjustment_id, transaction_id, subscription_id, action, type, status, currency,
+        total, tax, balance_currency, earnings, retained_fee, paddle_created, event_at, created_at, updated_at)
+     VALUES ('adj_1', 'txn_1', 'sub_1', 'refund', 'partial', 'approved', 'USD',
+        2000, 333, 'USD', 1517, 150, 1760443334, 1, 1, 1),
+            ('adj_2', 'txn_2', 'sub_2', 'refund', 'full', 'pending_approval', 'USD',
+        200, 33, 'USD', 107, 0, 1760443335, 1, 1, 1)`,
+  ).run();
+  const html = await (await get("/admin")).text();
+  expect(html).toContain("Refunds (2 · 1 waiting for Paddle)");
+  expect(html).toContain(id);
+  expect(html).toContain("buyer@example.com");
+  expect(html).toContain("−$16.67");
+  expect(html).toContain("fee kept $1.50");
+  // Only the approved refund counts in the totals.
+  expect(text(html)).toContain("$20.00 back to buyers · $16.67 out of the balance, $1.50 of it Paddle's kept fees");
+});

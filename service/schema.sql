@@ -149,6 +149,44 @@ CREATE TABLE IF NOT EXISTS paddle_subscriptions (
 CREATE INDEX IF NOT EXISTS paddle_subscriptions_by_customer
   ON paddle_subscriptions (customer_id);
 
+-- Refunds, chargebacks and credits, one row per Paddle adjustment, for the
+-- admin panel's refund tracker. Written from `adjustment.created` and
+-- `.updated` whatever the licence handler then decides, so a refund the
+-- licence ignores (a partial one, say) is still on the panel.
+--
+-- Amounts are minor units, as Paddle sends them. `total` is what goes back
+-- to the buyer, tax included, in the transaction's currency. `earnings` and
+-- `retained_fee` are in the balance currency (`balance_currency`): together
+-- they are what the adjustment takes out of the Paddle balance, because
+-- Paddle keeps its fee on a refund. Added on 2026-10-14.
+CREATE TABLE IF NOT EXISTS paddle_adjustments (
+  adjustment_id    TEXT PRIMARY KEY,
+  transaction_id   TEXT,
+  subscription_id  TEXT,
+  customer_id      TEXT,
+  -- refund | chargeback | credit | *_reverse | chargeback_warning
+  action           TEXT NOT NULL,
+  -- full | partial
+  type             TEXT,
+  -- pending_approval | approved | rejected | reversed
+  status           TEXT NOT NULL,
+  reason           TEXT,
+  currency         TEXT,
+  total            INTEGER,
+  tax              INTEGER,
+  balance_currency TEXT,
+  earnings         INTEGER,
+  retained_fee     INTEGER,
+  -- Paddle's created_at, in unix seconds.
+  paddle_created   INTEGER,
+  event_at         INTEGER NOT NULL DEFAULT 0,
+  created_at       INTEGER NOT NULL,
+  updated_at       INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS paddle_adjustments_by_created
+  ON paddle_adjustments (paddle_created);
+
 -- One row per install that has sent the daily usage ping (see
 -- `license::ping` in the client). `install` is a salted hash that cannot be
 -- joined to `seats.device`. Holds no text, no languages and no licence.

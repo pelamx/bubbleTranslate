@@ -128,6 +128,77 @@ export async function mirrorSubscription(env: Env, data: any, eventAt: number): 
     .run();
 }
 
+/** Records a refund, chargeback or credit for the admin panel's tracker.
+ *  Every adjustment is kept, including the ones the licence handler ignores,
+ *  and a later status (approved, rejected) replaces an earlier one. */
+export async function mirrorAdjustment(env: Env, data: any, eventAt: number): Promise<void> {
+  const id = data?.id ? String(data.id) : null;
+  const action = data?.action ? String(data.action) : null;
+  const status = data?.status ? String(data.status) : null;
+  if (!id || !action || !status) {
+    console.error(`Paddle adjustment event missing id, action or status: ${id ?? "?"}`);
+    return;
+  }
+
+  const str = (v: unknown) => (v === undefined || v === null || v === "" ? null : String(v));
+  const int = (v: unknown) => {
+    const n = Number(v);
+    return v === undefined || v === null || v === "" || !Number.isFinite(n) ? null : Math.round(n);
+  };
+  const totals = data?.totals ?? {};
+  // The balance side is in the payout currency; a payload without it is in
+  // the transaction's own, which is the same currency for a USD-only shop.
+  const payout = data?.payout_totals ?? totals;
+  const created = Date.parse(data?.created_at ?? "");
+
+  await env.DB.prepare(
+    `INSERT INTO paddle_adjustments
+       (adjustment_id, transaction_id, subscription_id, customer_id, action, type,
+        status, reason, currency, total, tax, balance_currency, earnings,
+        retained_fee, paddle_created, event_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (adjustment_id) DO UPDATE SET
+       transaction_id   = excluded.transaction_id,
+       subscription_id  = excluded.subscription_id,
+       customer_id      = excluded.customer_id,
+       action           = excluded.action,
+       type             = excluded.type,
+       status           = excluded.status,
+       reason           = excluded.reason,
+       currency         = excluded.currency,
+       total            = excluded.total,
+       tax              = excluded.tax,
+       balance_currency = excluded.balance_currency,
+       earnings         = excluded.earnings,
+       retained_fee     = excluded.retained_fee,
+       paddle_created   = excluded.paddle_created,
+       event_at         = excluded.event_at,
+       updated_at       = excluded.updated_at
+     WHERE excluded.event_at >= paddle_adjustments.event_at`,
+  )
+    .bind(
+      id,
+      str(data?.transaction_id),
+      str(data?.subscription_id),
+      str(data?.customer_id),
+      action,
+      str(data?.type),
+      status,
+      str(data?.reason)?.slice(0, 200) ?? null,
+      str(totals.currency_code ?? data?.currency_code),
+      int(totals.total),
+      int(totals.tax),
+      str(payout.currency_code ?? totals.currency_code ?? data?.currency_code),
+      int(payout.earnings),
+      int(payout.retained_fee),
+      Number.isFinite(created) ? Math.floor(created / 1000) : eventAt || now(),
+      eventAt,
+      now(),
+      now(),
+    )
+    .run();
+}
+
 // -- reading -----------------------------------------------------------------
 
 export const subscriptionById = (env: Env, id: string) =>

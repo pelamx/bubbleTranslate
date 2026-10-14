@@ -63,6 +63,7 @@ import {
 } from "./paddle";
 import {
   grantsAccess,
+  mirrorAdjustment,
   mirrorCustomer,
   mirrorSubscription,
   noteCustomer,
@@ -715,6 +716,10 @@ async function handlePaddleEvent(env: Env, event: Verified): Promise<Response> {
       // refund is a goodwill credit, not the purchase undone, and leaves the
       // licence alone. A chargeback is the buyer taking the money back without
       // asking, and ends it the same as a refund.
+      //
+      // Every adjustment is recorded for the panel's refund tracker first,
+      // whatever happens to the licence below.
+      await mirrorAdjustment(env, data, eventAt);
       const action = String(data.action ?? "");
       const status = String(data.status ?? "");
       const ends = (action === "refund" && data.type !== "partial") || action === "chargeback";

@@ -16,6 +16,8 @@ import {
   PLATFORMS,
   Row,
   type AdminLogRow,
+  type AdjustmentRow,
+  adjustments,
   type Downloads,
   type EndingRow,
   type Revenue,
@@ -1117,6 +1119,80 @@ export function webhookCard(hooks: { rows: WebhookRow[]; bad: number }): string 
   </details>`;
 }
 
+/** Minor units as "$2.00" for USD, "2.00 EUR" otherwise. */
+function minorAmount(minor: number | null, currency: string | null): string {
+  if (minor === null) return "—";
+  const v = (minor / 100).toFixed(2);
+  return !currency || currency === "USD" ? `$${v}` : `${v} ${currency}`;
+}
+
+/** Refunds and chargebacks from Paddle: what went back to each buyer, what it
+ *  took out of the balance, and where Paddle's approval stands. Open, and
+ *  amber, while any refund is still waiting for Paddle to approve it. */
+export function refundsCard(list: AdjustmentRow[]): string {
+  const cls: Record<string, string> = { approved: "ok", pending_approval: "warn", rejected: "err" };
+  const takesMoney = (a: AdjustmentRow) =>
+    a.status === "approved" && (a.action === "refund" || a.action === "chargeback");
+  const pending = list.filter((a) => a.status === "pending_approval").length;
+  // Totals of what was actually approved, per currency: a refund pending or
+  // rejected has not moved anything yet.
+  const sums = new Map<string, { back: number; balance: number; fee: number }>();
+  for (const a of list.filter(takesMoney)) {
+    const key = a.balance_currency ?? a.currency ?? "USD";
+    const s = sums.get(key) ?? { back: 0, balance: 0, fee: 0 };
+    if (a.currency === key) s.back += a.total ?? 0;
+    s.balance += (a.earnings ?? 0) + (a.retained_fee ?? 0);
+    s.fee += a.retained_fee ?? 0;
+    sums.set(key, s);
+  }
+  const body = list
+    .map((a) => {
+      const balance = (a.earnings ?? 0) + (a.retained_fee ?? 0);
+      const when = a.paddle_created ?? a.updated_at;
+      return `<tr${a.mine ? ' class="mine"' : ""}>
+        <td title="${escapeHtml(new Date(when * 1000).toISOString())}">${escapeHtml(date(when))} <span class="muted">${ago(when)}</span></td>
+        <td>${escapeHtml(a.action)}${a.type ? ` <span class="muted">${escapeHtml(a.type)}</span>` : ""}</td>
+        <td class="${cls[a.status] ?? "muted"}">${escapeHtml(a.status.replace("_", " "))}</td>
+        <td>${
+          a.licence_id
+            ? `<a href="/admin?q=${encodeURIComponent(a.licence_id)}#licences"><code>${escapeHtml(a.licence_id)}</code></a>${
+                a.mine ? ` <span class="badge you">you</span>` : ""
+              }`
+            : "—"
+        }<div class="muted">${escapeHtml(a.email ?? "")}</div></td>
+        <td class="num">${minorAmount(a.total, a.currency)}${
+          a.tax ? `<div class="muted">tax ${minorAmount(a.tax, a.currency)}</div>` : ""
+        }</td>
+        <td class="num">${
+          a.earnings === null ? "—" : `−${minorAmount(balance, a.balance_currency)}`
+        }${a.retained_fee ? `<div class="muted">fee kept ${minorAmount(a.retained_fee, a.balance_currency)}</div>` : ""}</td>
+        <td><code>${escapeHtml(a.adjustment_id)}</code>${
+          a.transaction_id ? `<div class="muted"><code>${escapeHtml(a.transaction_id)}</code></div>` : ""
+        }${a.reason ? `<div class="muted">${escapeHtml(a.reason)}</div>` : ""}</td></tr>`;
+    })
+    .join("");
+  const summary = [...sums]
+    .map(
+      ([cur, s]) =>
+        `${minorAmount(s.back, cur)} back to buyers · ${minorAmount(s.balance, cur)} out of the balance, ${minorAmount(s.fee, cur)} of it Paddle's kept fees`,
+    )
+    .join("<br>");
+  return `<details class="card${pending ? " warnbox" : ""}" id="refunds"${pending ? " open" : ""}>
+    <summary>Refunds (${list.length}${pending ? ` · ${pending} waiting for Paddle` : ""})</summary>
+    <div class="body">${
+      list.length
+        ? `${summary ? `<p style="margin-top:0"><b>Approved:</b> ${summary}</p>` : ""}
+           <div class="scroll"><table><tr><th>Created</th><th>Kind</th><th>Status</th><th>Licence</th>
+             <th class="num">To buyer</th><th class="num">From balance</th><th>Paddle ids</th></tr>${body}</table></div>
+           <p class="muted foot"><b>To buyer</b> is the whole refund, tax included, back on their card.
+             <b>From balance</b> is your earnings on the sale plus the fee Paddle keeps on a refund.
+             <b>Pending approval</b> means Paddle has not reviewed it yet; nothing has moved.
+             <b>Partial</b> only means it was made per item — check the amount.</p>`
+        : `<p class="muted">No refunds or chargebacks yet. They appear here as Paddle sends them.</p>`
+    }</div>
+  </details>`;
+}
+
 /** What the operator did here, newest first. */
 export function historyCard(log: AdminLogRow[]): string {
   const body = log
@@ -1164,7 +1240,7 @@ export function delta(today: number, yesterday: number): string {
 }
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, licCountry] = await Promise.all([
+  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, licCountry, refunds] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -1191,6 +1267,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     updates(env),
     versionCountries(env),
     licenceCountries(env),
+    adjustments(env),
   ]);
   const dl = downloadsNow?.total ?? null;
 
@@ -1465,6 +1542,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
      </details>
 
      <div class="zone" id="payments">
+     ${refundsCard(refunds)}
      ${webhookCard(hooks)}
      ${failureTable}
      ${endingCard(ending)}

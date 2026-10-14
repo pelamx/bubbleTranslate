@@ -228,6 +228,33 @@ describe("POST /webhooks/paddle", () => {
     expect((await licenceById(env, first.id))!.expires_at).toBe(first.expires_at + TERM_SECONDS.monthly);
   });
 
+  it("records every adjustment for the refund tracker, latest status winning", async () => {
+    const refund = (status: string, at: string) => ({
+      event_type: status === "pending_approval" ? "adjustment.created" : "adjustment.updated",
+      occurred_at: at,
+      data: {
+        id: "adj_1",
+        action: "refund",
+        type: "partial",
+        status,
+        transaction_id: "txn_1",
+        subscription_id: "sub_1",
+        created_at: "2026-10-14T12:02:14Z",
+        totals: { total: "2000", tax: "333", earnings: "1517", retained_fee: "0", currency_code: "USD" },
+        payout_totals: { earnings: "1517", retained_fee: status === "approved" ? "150" : "0", currency_code: "USD" },
+      },
+    });
+    const row = () => env.DB.prepare("SELECT * FROM paddle_adjustments WHERE adjustment_id = 'adj_1'").first<any>();
+
+    await deliver(refund("pending_approval", "2026-10-14T12:02:15Z"));
+    expect(await row()).toMatchObject({ status: "pending_approval", total: 2000, tax: 333, retained_fee: 0 });
+    await deliver(refund("approved", "2026-10-14T12:30:00Z"));
+    expect(await row()).toMatchObject({ status: "approved", earnings: 1517, retained_fee: 150, type: "partial" });
+    // A late redelivery of the older event does not undo the approval.
+    await deliver(refund("pending_approval", "2026-10-14T12:02:15Z"));
+    expect((await row()).status).toBe("approved");
+  });
+
   it("does not end a licence on an adjustment that is not a refund", async () => {
     await order("r1");
     await deliver(completed("r1", "sub_1"));

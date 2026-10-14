@@ -837,6 +837,49 @@ export async function webhookEvents(env: Env): Promise<{ rows: WebhookRow[]; bad
   return { rows: list.results ?? [], bad: bad?.n ?? 0 };
 }
 
+export interface AdjustmentRow {
+  adjustment_id: string;
+  transaction_id: string | null;
+  subscription_id: string | null;
+  action: string;
+  type: string | null;
+  status: string;
+  reason: string | null;
+  currency: string | null;
+  total: number | null;
+  tax: number | null;
+  balance_currency: string | null;
+  earnings: number | null;
+  retained_fee: number | null;
+  paddle_created: number | null;
+  updated_at: number;
+  /** The licence the subscription paid for, if any. */
+  licence_id: string | null;
+  email: string | null;
+  mine: number;
+}
+
+/** Refunds, chargebacks and credits from Paddle, newest first, each with the
+ *  licence and buyer behind it where the mirror knows them. */
+export async function adjustments(env: Env, limit = 50): Promise<AdjustmentRow[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT a.adjustment_id, a.transaction_id, a.subscription_id, a.action, a.type,
+            a.status, a.reason, a.currency, a.total, a.tax, a.balance_currency,
+            a.earnings, a.retained_fee, a.paddle_created, a.updated_at,
+            l.id AS licence_id,
+            COALESCE(l.email, c.email) AS email,
+            EXISTS (SELECT 1 FROM ignored_licences i WHERE i.licence_id = l.id) AS mine
+       FROM paddle_adjustments a
+       LEFT JOIN licences l ON l.provider = 'paddle' AND l.provider_ref = a.subscription_id
+       LEFT JOIN paddle_customers c ON c.customer_id = a.customer_id
+      ORDER BY a.paddle_created DESC, a.adjustment_id DESC
+      LIMIT ?`,
+  )
+    .bind(limit)
+    .all<AdjustmentRow>();
+  return results ?? [];
+}
+
 // -- money -------------------------------------------------------------------
 
 export interface EndingRow extends Row {
