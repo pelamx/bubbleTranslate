@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.4.10 — 2026-10-14
 
 **New copies use Alt to translate — Option on a Mac — instead of Shift.** Hold
 Alt and select, or hold it and double-click a word, and the bubble appears.
