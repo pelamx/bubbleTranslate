@@ -1031,7 +1031,9 @@ async function route(request: Request, env: Env): Promise<Response> {
                 value: USD_AMOUNT[order.cycle],
               }
             : null;
-        return donePage(ctx, ref, supportEmail(env), conversion);
+        const sale =
+          order && isCycle(order.cycle) ? { cycle: order.cycle, value: USD_AMOUNT[order.cycle] } : null;
+        return donePage(ctx, ref, supportEmail(env), conversion, sale);
       }
       if (pathname.startsWith("/v1/order/")) {
         return orderStatus(env, pathname.slice("/v1/order/".length));

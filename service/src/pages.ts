@@ -284,6 +284,39 @@ function legalFooter(lang: Lang): string {
   ].join("")}</footer>`;
 }
 
+/** The site's Google Tag Manager container, the same one the marketing site
+ *  loads, so a visit that goes on to buy is one journey in GTM. */
+const GTM_ID = "GTM-MLKTRCKQ";
+
+/** Consent Mode defaults, then Tag Manager. Every consent type is denied
+ *  unless the visitor allowed it on the marketing site. That choice is a
+ *  cookie on the parent domain precisely so it reaches this subdomain; there
+ *  is no banner here, so no choice means denied, and Google gets only a
+ *  cookieless ping. The defaults have to be in the data layer before GTM
+ *  loads, or its tags would start with no consent state at all. */
+const consentAndTagManager = `<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  const granted = /(?:^|; )bt_consent=granted(?:;|$)/.test(document.cookie) ? 'granted' : 'denied';
+  gtag('consent', 'default', {
+    ad_storage: granted, ad_user_data: granted,
+    ad_personalization: granted, analytics_storage: granted
+  });
+  gtag('set', 'ads_data_redaction', true);
+</script>
+<!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','${GTM_ID}');</script>
+<!-- End Google Tag Manager -->`;
+
+const tagManagerNoscript = `<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=${GTM_ID}"
+height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) -->`;
+
 export function page(
   title: string,
   body: string,
@@ -311,6 +344,8 @@ export function page(
     headers["set-cookie"] =
       `lang=${lang}; Path=/; Max-Age=31536000; SameSite=Lax; Secure; HttpOnly`;
   }
+  // Tag Manager, like the font below, only on the pages a buyer sees (the
+  // ones with a context); the admin panel stays free of third-party script.
   // Inter is the site's typeface, so a buyer arriving one click later reads
   // the same letterforms. Only on the pages a buyer sees: the admin panel
   // has no reason to wait on a font from another origin, and the stack falls
@@ -321,11 +356,11 @@ export function page(
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">`
     : "";
   return new Response(
-    `<!doctype html><html lang="${lang}"><head><meta charset="utf-8">
+    `<!doctype html><html lang="${lang}"><head><meta charset="utf-8">${ctx ? consentAndTagManager : ""}
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/svg+xml" href="${SITE}/favicon.svg">
 <title>${escapeHtml(title)}</title>${font}<style>${STYLE}</style>${head}</head>
-<body>${switcher}<div class="sheet${wide ? " wide" : ""}">${ctx ? brandBar() : ""}${body}</div>${legalFooter(lang)}</body></html>`,
+<body>${ctx ? tagManagerNoscript : ""}${switcher}<div class="sheet${wide ? " wide" : ""}">${ctx ? brandBar() : ""}${body}</div>${legalFooter(lang)}</body></html>`,
     { headers },
   );
 }
@@ -526,24 +561,24 @@ export interface Conversion {
   value: number;
 }
 
-/** The Google tag, with every consent type denied unless the visitor allowed
- *  it on the marketing site. That choice is a cookie on the parent domain
- *  precisely so it reaches this subdomain; there is no banner here, so no
- *  choice means denied, and Google gets only a cookieless ping. */
+/** The Google tag, loaded on the success page to report the purchase. Consent
+ *  comes from `consentAndTagManager`, which page() puts first in the head. */
 function googleTag(tagId: string): string {
+  // The consent default is already set: page() writes it at the top of the
+  // head of every page a buyer sees, ahead of Tag Manager.
   return `<script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    const granted = /(?:^|; )bt_consent=granted(?:;|$)/.test(document.cookie) ? 'granted' : 'denied';
-    gtag('consent', 'default', {
-      ad_storage: granted, ad_user_data: granted,
-      ad_personalization: granted, analytics_storage: granted
-    });
-    gtag('set', 'ads_data_redaction', true);
     gtag('js', new Date());
     gtag('config', ${jsonForScript(tagId)});
   </script>
   <script async src="https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(tagId)}"></script>`;
+}
+
+/** What was bought, for the `purchase` event the success page pushes to the
+ *  data layer for Tag Manager. */
+export interface Sale {
+  cycle: Cycle;
+  /** List price in USD, the same figure the Google Ads conversion carries. */
+  value: number;
 }
 
 export function donePage(
@@ -551,6 +586,7 @@ export function donePage(
   ref: string,
   support: string,
   conversion: Conversion | null = null,
+  sale: Sale | null = null,
 ): Response {
   const s = t(ctx.lang);
   // The page is rendered before the outcome is known: the buyer may well
@@ -587,6 +623,7 @@ export function donePage(
        const support = ${jsonForScript(support)};
        const w = ${jsonForScript(words)};
        const conversion = ${jsonForScript(conversion && { send_to: conversion.sendTo, value: conversion.value })};
+       const sale = ${jsonForScript(sale)};
        const body = document.getElementById('body');
        let tries = 0;
        async function poll() {
@@ -609,6 +646,20 @@ export function donePage(
              gtag('event', 'conversion', {
                send_to: conversion.send_to, value: conversion.value,
                currency: 'USD', transaction_id: ref
+             });
+           }
+           // The same sale for Tag Manager, as a GA4 ecommerce purchase.
+           // The licence key stays out of it: only the order ref and the plan.
+           if (sale) {
+             window.dataLayer = window.dataLayer || [];
+             dataLayer.push({ ecommerce: null });
+             dataLayer.push({
+               event: 'purchase',
+               ecommerce: {
+                 transaction_id: ref, value: sale.value, currency: 'USD',
+                 items: [{ item_id: 'pro-' + sale.cycle, item_name: 'bubbleTranslate Pro (' + sale.cycle + ')',
+                           price: sale.value, quantity: 1 }]
+               }
              });
            }
            return;
