@@ -57,9 +57,29 @@ it("reads every page from Paddle", async () => {
   expect(typeof b === "string" ? b : b.balance).toBe(1338);
 });
 
-it("says why when Paddle refuses the key", async () => {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 403 }));
-  expect(await paddleBalance({ ...env, PADDLE_API_KEY: "k" } as any)).toContain("transaction.read");
+it("passes on Paddle's own reason when it refuses the key", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+    Response.json({ error: { code: "forbidden", detail: "You aren't permitted to perform this request." } }, { status: 403 }),
+  );
+  expect(await paddleBalance({ ...env, PADDLE_API_KEY: "k" } as any)).toBe(
+    "Paddle answered 403 (forbidden): You aren't permitted to perform this request.",
+  );
+});
+
+it("still gives the figures when the key may not read customers", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+    new URL(String(input)).searchParams.get("include")!.includes("customer")
+      ? Response.json({ error: { code: "forbidden", detail: "no customer.read" } }, { status: 403 })
+      : Response.json({
+          data: LIVE.map(({ customer, address, ...t }) => t),
+          meta: { pagination: { has_more: false } },
+        }),
+  );
+  const b = await paddleBalance({ ...env, PADDLE_API_KEY: "k" } as any);
+  if (typeof b === "string") throw new Error(b);
+  expect(b.balance).toBe(1338);
+  expect(b.rows[0].email).toBeNull();
+  expect(b.note).toContain("customer.read");
 });
 
 it("shows the balance card on the panel", async () => {

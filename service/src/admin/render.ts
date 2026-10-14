@@ -1242,6 +1242,7 @@ export function balanceCard(
              Paddle fees <b>${m(b.fee)}</b>${b.retained_fee ? ` (+${m(b.retained_fee)} kept on refunds)` : ""} ·
              tax ${m(b.tax)} · refunds took ${m(taken)} · balance <b>${m(b.balance)}</b></p>
            ${b.truncated ? `<p class="warn">Only the first 600 transactions were read; the totals are incomplete.</p>` : ""}
+           ${b.note ? `<p class="warn">${escapeHtml(b.note)}</p>` : ""}
            <div class="scroll"><table><tr><th>Date</th><th>Buyer</th><th>Kind</th><th class="num">Paid</th>
              <th class="num">Tax</th><th class="num">Paddle fee</th><th class="num">Earned</th>
              <th class="num">Refunded</th><th class="num">Net</th></tr>${body}${total}</table></div>

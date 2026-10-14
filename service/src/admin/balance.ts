@@ -48,6 +48,8 @@ export interface Balance {
   balance: number;
   /** True when there were more transactions than were read. */
   truncated: boolean;
+  /** Something the card should say about how complete the rows are. */
+  note?: string;
 }
 
 const int = (v: unknown) => {
@@ -120,17 +122,48 @@ export function summarise(rows: BalanceRow[], truncated = false): Balance {
  *  subrequest allowance. Past that the card says it is incomplete. */
 const MAX_PAGES = 20;
 
+/** What to ask Paddle to include, best first. Each included entity needs its
+ *  own permission on the key -- `customer` needs customer.read, `address`
+ *  needs address.read -- and Paddle refuses the whole request without it. The
+ *  money is all on the transaction, so a key that may not read customers
+ *  still gets the figures, only without the buyer's email and country. */
+const INCLUDES = ["customer,address,adjustments_totals", "adjustments_totals"];
+
+/** Paddle's own words for a refusal: `{ error: { code, detail } }`. */
+async function paddleError(response: Response): Promise<string> {
+  const body: any = await response.json().catch(() => null);
+  const code = body?.error?.code ? String(body.error.code) : null;
+  const detail = body?.error?.detail ? String(body.error.detail) : null;
+  return `Paddle answered ${response.status}${code ? ` (${code})` : ""}${detail ? `: ${detail}` : "."}`;
+}
+
 /** Every completed transaction from Paddle, as a balance. A string is the
  *  reason it could not be read, for the card to show. */
 export async function paddleBalance(env: Env): Promise<Balance | string> {
   if (!env.PADDLE_API_KEY) return "No Paddle API key is configured.";
+  let refusal = "";
+  for (const include of INCLUDES) {
+    const got = await readAll(env, include);
+    if (typeof got !== "string") {
+      if (refusal) got.note = `Buyer and country are blank: ${refusal} Add customer.read and address.read to the key to fill them in.`;
+      return got;
+    }
+    // Only a refusal is worth retrying with less; anything else would fail
+    // the same way again.
+    if (!got.startsWith("Paddle answered 403")) return got;
+    refusal = got;
+  }
+  return refusal;
+}
+
+async function readAll(env: Env, include: string): Promise<Balance | string> {
   const rows: BalanceRow[] = [];
   let after: string | null = null;
   try {
     for (let page = 0; page < MAX_PAGES; page++) {
       const url = new URL(`${paddleApiBase(env)}/transactions`);
       url.searchParams.set("status", "completed");
-      url.searchParams.set("include", "customer,address,adjustments_totals");
+      url.searchParams.set("include", include);
       url.searchParams.set("order_by", "id[ASC]");
       url.searchParams.set("per_page", "30");
       if (after) url.searchParams.set("after", after);
@@ -138,11 +171,7 @@ export async function paddleBalance(env: Env): Promise<Balance | string> {
         headers: { authorization: `Bearer ${env.PADDLE_API_KEY}` },
         signal: AbortSignal.timeout(8000),
       });
-      if (!response.ok) {
-        return response.status === 403
-          ? "Paddle refused: the API key needs the transaction.read permission."
-          : `Paddle answered ${response.status}.`;
-      }
+      if (!response.ok) return await paddleError(response);
       const body: any = await response.json();
       const data: any[] = Array.isArray(body?.data) ? body.data : [];
       for (const t of data) rows.push(toRow(t));
