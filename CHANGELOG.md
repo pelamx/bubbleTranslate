@@ -25,6 +25,14 @@ exactly where you are asked to find it and switch it on — it showed up as a
 blank square that was easy to miss. It now shows the speech bubble with the
 globe, the same mark as on Windows and Linux.
 
+**The icon in the title bar and the taskbar is the bubble again, with the
+world inside it (Windows).** At those sizes it had been the globe on its own:
+the bubble around it was dropped because shrinking the full mark left four grey
+smudges and a globe too small to recognise. Drawing it for the small grid
+rather than shrinking it onto one gets both — the bubble reaches the edges of
+the icon, the tail is wide enough to survive, and the globe keeps the three
+lines that still read at sixteen pixels.
+
 ## 0.4.10 — 2026-10-14
 
 **New copies use Alt to translate — Option on a Mac — instead of Shift.** Hold

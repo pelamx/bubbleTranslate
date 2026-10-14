@@ -80,11 +80,46 @@ function Draw-Mark($g) {
     Draw-Globe $g 64 58 26 4 $INK
 }
 
-# Small sizes: the globe alone, heavier, with a dark ring under the light
-# strokes so it stays legible on a light taskbar as well as a dark one.
+# Small sizes: the same bubble, redrawn rather than shrunk.
+#
+# Shrinking the full mark is what fails at 16 pixels, not the bubble itself.
+# The card there carries margins it cannot afford, which leaves the globe
+# inside it about five pixels across. So the card is pushed out to the edges of
+# the canvas, the tail is widened until it survives the grid, and the globe
+# keeps only the three lines that still read at that size — its outline, its
+# meridian and its equator. The two parallels of the full mark close up into a
+# smudge long before the rest of it does.
 function Draw-Small($g) {
-    Draw-Globe $g 64 64 52 16 $BUBBLE
-    Draw-Globe $g 64 64 52 9 $INK
+    $fill = New-Object System.Drawing.SolidBrush($BUBBLE)
+    $edge = New-Object System.Drawing.Pen($EDGE, 7)
+    $edge.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
+
+    # Tail first, and its top edge along the card's bottom edge, so the two
+    # outlines overlap there rather than meeting in a seam.
+    $tail = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $tail.AddPolygon(@(
+        (New-Object System.Drawing.PointF(30, 90)),
+        (New-Object System.Drawing.PointF(30, 124)),
+        (New-Object System.Drawing.PointF(66, 90))
+    ))
+    $g.FillPath($fill, $tail)
+    $g.DrawPath($edge, $tail)
+
+    $card = New-Object System.Drawing.Drawing2D.GraphicsPath
+    Add-RoundedRect $card 4 6 120 84 20
+    $g.FillPath($fill, $card)
+    $g.DrawPath($edge, $card)
+
+    $pen = New-Object System.Drawing.Pen($INK, 9)
+    $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+    $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+    $cx = 64.0; $cy = 49.0; $r = 29.0
+    $g.DrawEllipse($pen, $cx - $r, $cy - $r, $r * 2, $r * 2)
+    $g.DrawEllipse($pen, $cx - $r * 0.42, $cy - $r, $r * 0.84, $r * 2)
+    $g.DrawLine($pen, $cx - $r, $cy, $cx + $r, $cy)
+    $pen.Dispose()
+    $edge.Dispose()
+    $fill.Dispose()
 }
 
 $entries = @()
