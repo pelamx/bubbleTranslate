@@ -579,7 +579,11 @@ export function buyPage(opts: BuyOptions): Response {
         });
       });
     </script>`;
-  return page(s.proTitle, body, paddleScript, false, ctx);
+  // One canonical per language. The app and the site link here with
+  // ?src=... (to measure where buyers come from), and without this every
+  // such link reached Google as a separate copy of the page.
+  const canonical = `<link rel="canonical" href="${escapeHtml(ctx.url.origin + withLang("/buy", ctx.lang))}">`;
+  return page(s.proTitle, body, canonical + paddleScript, false, ctx);
 }
 
 
