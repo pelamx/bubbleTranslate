@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.4.11 — 2026-10-15
 
 **When only a few free translations are left, the bubble offers Pro beside the
 count.** The "3 free translations left today" note now has a Go Pro link next
