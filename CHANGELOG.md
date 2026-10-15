@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.4.12 — 2026-10-15
 
 **When the free translations run out, the bubble shows what the yearly plan
 saves.** It now reads "$20/year (2 months free) or $2/month", yearly first.
