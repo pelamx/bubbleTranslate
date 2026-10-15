@@ -15,6 +15,11 @@ days before the others.
 
 ## Unreleased
 
+**When only a few free translations are left, the bubble offers Pro beside the
+count.** The "3 free translations left today" note now has a Go Pro link next
+to it. Until now the way past the daily limit only appeared after the last
+translation was gone, when the bubble had nothing else to give you.
+
 **The window shows bubbleTranslate's icon in its corner. (Windows)** The
 window that opens from the tray had an empty space at the top left where every
 other program has its icon. It now carries the speech bubble with the globe.
