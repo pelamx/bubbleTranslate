@@ -10,7 +10,7 @@
 // the site's typeface, so the checkout reads as the same product one click
 // after the site, and Paddle.js, on the one page that opens a checkout.
 
-import type { Cycle } from "./env";
+import { type Cycle, USD_AMOUNT } from "./env";
 import { TIERS } from "./tiers";
 import { DEFAULT_LANG, LANGS, type Lang, type Strings, switchedTo, t, withLang } from "./i18n";
 
@@ -483,6 +483,7 @@ export function buyPage(opts: BuyOptions): Response {
         }
         return out;
       })();
+      const usd = ${jsonForScript(USD_AMOUNT)};
       const prices = {
         monthly: ${jsonForScript(opts.priceMonthly ?? "")},
         yearly: ${jsonForScript(opts.priceYearly ?? "")},
@@ -535,6 +536,19 @@ export function buyPage(opts: BuyOptions): Response {
           body: JSON.stringify({ cycle, email: email.value }),
         }).then((r) => r.json());
         if (!created.ref) { alert(created.error || words.checkoutFailed); return; }
+        // For Tag Manager: the checkout is opening, the step between viewing
+        // this page and the purchase the welcome page reports. Same item and
+        // the same USD list price as that purchase, so the funnel lines up.
+        window.dataLayer = window.dataLayer || [];
+        dataLayer.push({ ecommerce: null });
+        dataLayer.push({
+          event: 'begin_checkout',
+          ecommerce: {
+            value: usd[cycle], currency: 'USD',
+            items: [{ item_id: 'pro-' + cycle, item_name: 'bubbleTranslate Pro (' + cycle + ')',
+                      price: usd[cycle], quantity: 1 }]
+          }
+        });
         Paddle.Checkout.open({
           items: [{ priceId: prices[cycle], quantity: 1 }],
           customer: { email: email.value },
