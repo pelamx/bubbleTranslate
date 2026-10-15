@@ -13,6 +13,18 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**When the free translations run out, the bubble shows what the yearly plan
+saves.** It now reads "$20/year (2 months free) or $2/month", yearly first.
+Someone who uses up the day's translations is using the app every day, which
+is exactly who the yearly plan is cheaper for — and the bubble never said so.
+
+**Cancelling asks why, if you want to say.** The cancel form on the account
+page now has an optional question and a box for a few words. Nothing is
+required: the cancellation goes through whatever you answer, or if you answer
+nothing. What people say is how we find out what to fix.
+
 ## 0.4.11 — 2026-10-15
 
 **When only a few free translations are left, the bubble offers Pro beside the

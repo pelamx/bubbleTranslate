@@ -131,16 +131,30 @@ impl BubbleApp {
                 );
                 ui.add_space(3.0);
                 ui.label(
+                    // Yearly first, with what it saves: someone who has run
+                    // out is someone who uses it daily, which is who the
+                    // yearly plan is cheaper for.
                     egui::RichText::new(format!(
-                        "{} {} {} {}.",
+                        "{} {} ({}) {} {}.",
                         t(
                             "They come back at midnight. Pro removes the limit —",
                             "Gece yarısı yenilenir. Pro sınırı kaldırır —",
                             "Vuelven a medianoche. Pro quita el límite —",
                         ),
-                        license::PRICE_MONTHLY,
-                        t("or", "ya da", "o"),
                         license::PRICE_YEARLY,
+                        match crate::i18n::lang() {
+                            crate::i18n::UiLang::En => {
+                                format!("{} months free", license::YEARLY_MONTHS_FREE)
+                            }
+                            crate::i18n::UiLang::Tr => {
+                                format!("{} ay bedava", license::YEARLY_MONTHS_FREE)
+                            }
+                            crate::i18n::UiLang::Es => {
+                                format!("{} meses gratis", license::YEARLY_MONTHS_FREE)
+                            }
+                        },
+                        t("or", "ya da", "o"),
+                        license::PRICE_MONTHLY,
                     ))
                     .size(12.0)
                     .color(pal().text_muted),

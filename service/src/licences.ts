@@ -271,15 +271,47 @@ export const REVEAL_SECONDS = 3600;
  *  key to whoever holds it — so it is unguessable: bare hex, 128 bits of it. */
 export const newOrderRef = () => randomHex(16);
 
+/** The answers the cancel form offers, in the order it offers them. Stored as
+ *  these ids; each page and the admin panel words them for themselves. */
+export const CANCEL_REASONS = [
+  "price",
+  "rarely",
+  "free-enough",
+  "quality",
+  "broken",
+  "other-tool",
+  "other",
+] as const;
+export type CancelReason = (typeof CANCEL_REASONS)[number];
+export const isCancelReason = (value: unknown): value is CancelReason =>
+  typeof value === "string" && (CANCEL_REASONS as readonly string[]).includes(value);
+
 export async function createOrder(
   env: Env,
-  order: { ref: string; provider: string; cycle: Cycle; email?: string | null; amount: number; currency: string },
+  order: {
+    ref: string;
+    provider: string;
+    cycle: Cycle;
+    email?: string | null;
+    amount: number;
+    currency: string;
+    src?: string | null;
+  },
 ) {
   await env.DB.prepare(
-    `INSERT INTO orders (ref, provider, cycle, email, status, amount, currency, created_at)
-     VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)`,
+    `INSERT INTO orders (ref, provider, cycle, email, status, amount, currency, created_at, src)
+     VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
   )
-    .bind(order.ref, order.provider, order.cycle, order.email ?? null, order.amount, order.currency, now())
+    .bind(
+      order.ref,
+      order.provider,
+      order.cycle,
+      order.email ?? null,
+      order.amount,
+      order.currency,
+      now(),
+      order.src ?? null,
+    )
     .run();
 }
 

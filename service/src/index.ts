@@ -36,6 +36,7 @@ import {
   endLicence,
   extendTerm,
   grantToken,
+  isCancelReason,
   isLive,
   issueLicence,
   licenceByKey,
@@ -470,6 +471,15 @@ async function buy(env: Env, request: Request, url: URL): Promise<Response> {
   });
 }
 
+/** Where a buy page link was. The app sends `bubble`, `bubble-low` or
+ *  `window`; anything else is a link somebody wrote, and the panel only needs
+ *  to know it was not the app. The same value goes on the visit and on the
+ *  order, so the two can be lined up per source. */
+export function buySource(raw: unknown): string {
+  const src = String(raw ?? "").trim() || "direct";
+  return /^[a-z][a-z-]{0,15}$/.test(src) ? src : "other";
+}
+
 /** One row in `buy_visits` for the admin panel's funnel. Never fails the
  *  page: a buyer must not be turned away because a counter could not be
  *  written. */
@@ -479,9 +489,7 @@ async function logBuyVisit(env: Env, request: Request, src: string, lang: string
     const cf = (request as { cf?: { country?: unknown } }).cf;
     const country =
       typeof cf?.country === "string" && /^[A-Z]{2}$/.test(cf.country) ? cf.country : null;
-    // The app sends `bubble` or `window`; anything else is a link somebody
-    // wrote, and the panel only needs to know it was not the app.
-    const from = /^[a-z]{1,16}$/.test(src) ? src : "other";
+    const from = buySource(src);
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO buy_visits (at, src, lang, country) VALUES (?, ?, ?, ?)`).bind(
         t,
@@ -514,6 +522,7 @@ async function checkoutPaddle(env: Env, request: Request): Promise<Response> {
     // dollar price is recorded for reconciliation, not to charge against.
     amount: USD_AMOUNT[cycle] * 100,
     currency: "USD",
+    src: buySource(body.src),
   });
   return json({ ref });
 }
@@ -912,12 +921,37 @@ async function accountCancel(env: Env, request: Request, url: URL): Promise<Resp
 
   const failure = await cancelSubscription(env, licence.provider_ref);
   if (failure) return accountView(env, ctx, licence, key, undefined, s[failure]);
+  await recordCancelReason(env, licence, form.get("reason"), form.get("note"));
 
   // Paddle will also send `subscription.canceled`; recording it now means the
   // page the user is about to see tells the truth without waiting for it.
   await endLicence(env, licence, "cancelled");
   const updated = (await licenceById(env, licence.id)) ?? licence;
   return accountView(env, ctx, updated, key, s.cancelled(updated.renews_at ?? s.endOfPaidPeriod));
+}
+
+/** Keeps the answer to "why are you leaving?", when there is one. Only after
+ *  Paddle has accepted the cancellation, so a failed one leaves no reason
+ *  behind, and never in the way of it: the subscription is already cancelled
+ *  by the time this could fail. */
+async function recordCancelReason(
+  env: Env,
+  licence: Licence,
+  rawReason: unknown,
+  rawNote: unknown,
+): Promise<void> {
+  const reason = typeof rawReason === "string" ? rawReason : "";
+  const note = typeof rawNote === "string" ? rawNote.trim().slice(0, 500) : "";
+  if (!isCancelReason(reason) && !note) return;
+  try {
+    await env.DB.prepare(
+      `INSERT INTO cancel_reasons (at, licence_id, cycle, reason, note) VALUES (?, ?, ?, ?, ?)`,
+    )
+      .bind(now(), licence.id, licence.cycle, isCancelReason(reason) ? reason : "other", note || null)
+      .run();
+  } catch (err) {
+    console.error("could not record a cancel reason", err);
+  }
 }
 
 /** Opens the Paddle-hosted customer portal, where the customer updates a card,

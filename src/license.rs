@@ -39,6 +39,11 @@ pub const FREE_DAILY_TRANSLATIONS: u32 = 10;
 /// this is what the app says rather than what the card is debited.
 pub const PRICE_MONTHLY: &str = "$2/month";
 pub const PRICE_YEARLY: &str = "$20/year";
+/// What the yearly price saves against twelve monthly ones, in months: the
+/// bubble says it when the allowance runs out. A test below holds it to the
+/// two prices above, so changing one without the other fails rather than
+/// promising a saving that is not there.
+pub const YEARLY_MONTHS_FREE: u32 = 2;
 
 /// Where the app sends someone who wants to subscribe, and where it sends a
 /// subscriber who wants to cancel. Both take a `?src=` so the funnel can be
@@ -920,6 +925,22 @@ pub mod dev {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The saving the bubble promises is the one the prices give.
+    #[test]
+    fn yearly_saving_matches_the_prices() {
+        let dollars = |p: &str| -> u32 {
+            p.trim_start_matches('$')
+                .split('/')
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap()
+        };
+        let monthly = dollars(PRICE_MONTHLY);
+        let yearly = dollars(PRICE_YEARLY);
+        assert_eq!((12 * monthly - yearly) / monthly, YEARLY_MONTHS_FREE);
+    }
 
     /// The placeholder must never verify anything. If this ever passes by
     /// accident, every build ships an entitlement anyone can mint.

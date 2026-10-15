@@ -12,6 +12,7 @@
 
 import { type Cycle, USD_AMOUNT } from "./env";
 import { TIERS } from "./tiers";
+import { CANCEL_REASONS } from "./licences";
 import { DEFAULT_LANG, LANGS, type Lang, type Strings, switchedTo, t, withLang } from "./i18n";
 
 /// What the free tier allows per day. Display only: the number the client
@@ -551,7 +552,7 @@ export function buyPage(opts: BuyOptions): Response {
         const created = await fetch('/checkout/paddle', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ cycle, email: email.value }),
+          body: JSON.stringify({ cycle, email: email.value, src: ${jsonForScript(opts.src)} }),
         }).then((r) => r.json());
         if (!created.ref) { alert(created.error || words.checkoutFailed); return; }
         // For Tag Manager: the checkout is opening, the step between viewing
@@ -788,7 +789,14 @@ export function accountPage(
     ? `<form method="post" action="/account/cancel" style="margin-top:18px">
          <input type="hidden" name="key" value="${escapeHtml(view.key)}">
          <input type="hidden" name="lang" value="${ctx.lang}">
-         <button class="quiet" type="submit">${s.cancelSubscription}</button>
+         <label class="field" for="reason">${s.cancelWhy}</label>
+         <select id="reason" name="reason">
+           <option value=""></option>
+           ${CANCEL_REASONS.map((r) => `<option value="${r}">${escapeHtml(s.cancelReasons[r])}</option>`).join("")}
+         </select>
+         <label class="field" for="note" style="margin-top:10px">${s.cancelNote}</label>
+         <textarea id="note" name="note" rows="2" maxlength="500"></textarea>
+         <button class="quiet" type="submit" style="margin-top:10px">${s.cancelSubscription}</button>
          <p class="muted" style="margin-top:8px">
            ${s.keepProUntil(escapeHtml(view.renews ?? s.endOfPaidPeriod))}
          </p>

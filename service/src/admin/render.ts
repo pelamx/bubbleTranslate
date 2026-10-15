@@ -42,6 +42,8 @@ import {
   updates,
   type BuyFunnel,
   buyFunnel,
+  cancelReasons,
+  type CancelReasons,
   downloads,
   health,
   ignoreList,
@@ -1001,7 +1003,9 @@ function limitCard(hits: LimitHits): string {
 
 const SRC_LABEL: Record<string, string> = {
   bubble: "App bubble, out of free translations",
+  "bubble-low": "App bubble, three or fewer left",
   window: "App window",
+  unknown: "Not recorded (orders before 2026-10-15)",
   direct: "No source (website, typed, bookmarked)",
 };
 
@@ -1014,7 +1018,8 @@ function funnelCard(f: BuyFunnel): string {
   }
   const srcRows = f.bySrc
     .map(
-      (r) => `<tr><td>${escapeHtml(SRC_LABEL[r.src] ?? r.src)}</td><td class="num"><b>${r.n}</b></td></tr>`,
+      (r) => `<tr><td>${escapeHtml(SRC_LABEL[r.src] ?? r.src)}</td><td class="num"><b>${r.n}</b></td>
+        <td class="num">${r.started}</td><td class="num">${r.paid ? `<b>${r.paid}</b>` : `<span class="muted">0</span>`}</td></tr>`,
     )
     .join("");
   const langs = f.byLang.map((r) => `${escapeHtml(r.lang.toUpperCase())} ${r.n}`).join(" · ");
@@ -1027,11 +1032,56 @@ function funnelCard(f: BuyFunnel): string {
              <td>${ratio(f.paid, f.started)}</td></tr>
        </table></div>
        <div class="scroll" style="margin-top:14px"><table>
-         <tr><th>Came from</th><th class="num">Visits</th></tr>
+         <tr><th>Came from</th><th class="num">Visits</th><th class="num">Started</th><th class="num">Paid</th></tr>
          ${srcRows}
        </table></div>
        <p class="muted foot">Shown in: ${langs || "—"}. Every page load counts, including yours and
          any crawler's, so a handful of visits with no payment is not yet a verdict.</p>
+     </section>`;
+}
+
+const CANCEL_LABEL: Record<string, string> = {
+  price: "Costs too much",
+  rarely: "Doesn't use it often enough",
+  "free-enough": "Free translations are enough",
+  quality: "Translations not good enough",
+  broken: "Something didn't work",
+  "other-tool": "Using something else",
+  other: "Another reason",
+};
+
+function cancelReasonsCard(c: CancelReasons): string {
+  const total = c.byReason.reduce((a, r) => a + r.n, 0);
+  if (total === 0) {
+    return `<section class="card">
+       <p class="label">Why people cancel, last 90 days</p>
+       <p class="sub">No answers yet. The account page's cancel form asks; Paddle's own portal does not.</p>
+     </section>`;
+  }
+  const rows = c.byReason
+    .map(
+      (r) => `<tr><td>${escapeHtml(CANCEL_LABEL[r.reason] ?? r.reason)}</td><td class="num"><b>${r.n}</b></td></tr>`,
+    )
+    .join("");
+  const notes = c.notes
+    .map(
+      (n) => `<tr><td>${escapeHtml(new Date(n.at * 1000).toISOString().slice(0, 10))}</td>
+        <td>${escapeHtml(CANCEL_LABEL[n.reason] ?? n.reason)}${n.cycle ? ` · ${escapeHtml(n.cycle)}` : ""}</td>
+        <td>${escapeHtml(n.note)}</td></tr>`,
+    )
+    .join("");
+  return `<section class="card">
+       <p class="label">Why people cancel, last 90 days — ${total} answered</p>
+       <div class="scroll"><table>
+         <tr><th>Reason</th><th class="num">Answers</th></tr>
+         ${rows}
+       </table></div>
+       ${notes ? `<div class="scroll" style="margin-top:14px"><table>
+         <tr><th>When</th><th>Reason</th><th>In their words</th></tr>
+         ${notes}
+       </table></div>` : ""}
+       <p class="muted foot">Asked on the account page's cancel form, and optional. A cancellation
+         made in Paddle's own portal is not asked, so this is a sample, not every one.</p>
      </section>`;
 }
 
@@ -1303,7 +1353,7 @@ export function delta(today: number, yesterday: number): string {
 }
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, licCountry, refunds, balance, licBySub] = await Promise.all([
+  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, licCountry, refunds, balance, licBySub, whyCancel] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -1333,6 +1383,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     adjustments(env),
     paddleBalance(env),
     licencesBySubscription(env),
+    cancelReasons(env),
   ]);
   const dl = downloadsNow?.total ?? null;
 
@@ -1609,6 +1660,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
      <div class="zone" id="payments">
      ${balanceCard(balance, licBySub)}
      ${refundsCard(refunds)}
+     ${cancelReasonsCard(whyCancel)}
      ${webhookCard(hooks)}
      ${failureTable}
      ${endingCard(ending)}

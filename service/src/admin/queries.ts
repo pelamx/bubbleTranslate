@@ -320,8 +320,10 @@ export async function limitHits(env: Env): Promise<LimitHits> {
 }
 
 export interface BuyFunnel {
-  /** Buy page opened, by where the link was: `bubble`, `window`, `direct`… */
-  bySrc: { src: string; n: number }[];
+  /** Buy page opened, by where the link was: `bubble`, `window`, `direct`…,
+   *  with how many of those orders were started and paid. Orders older than
+   *  the column have no source and are counted under `unknown`. */
+  bySrc: { src: string; n: number; started: number; paid: number }[];
   byLang: { lang: string; n: number }[];
   visits: number;
   /** Pressed "Continue to payment": an order row exists. */
@@ -333,7 +335,7 @@ export interface BuyFunnel {
  *  per page load, not per person, and cannot tell your own visits apart. */
 export async function buyFunnel(env: Env): Promise<BuyFunnel> {
   const since = now() - 30 * DAY;
-  const [src, lang, orders] = await env.DB.batch([
+  const [src, lang, orders, orderSrc] = await env.DB.batch([
     env.DB.prepare(
       `SELECT src, COUNT(*) AS n FROM buy_visits WHERE at >= ? GROUP BY src ORDER BY n DESC`,
     ).bind(since),
@@ -344,8 +346,22 @@ export async function buyFunnel(env: Env): Promise<BuyFunnel> {
       `SELECT COUNT(*) AS started, COALESCE(SUM(status = 'paid'), 0) AS paid
          FROM orders WHERE created_at >= ?`,
     ).bind(since),
+    env.DB.prepare(
+      `SELECT COALESCE(src, 'unknown') AS src, COUNT(*) AS started,
+              COALESCE(SUM(status = 'paid'), 0) AS paid
+         FROM orders WHERE created_at >= ? GROUP BY 1`,
+    ).bind(since),
   ]);
-  const bySrc = (src?.results ?? []) as { src: string; n: number }[];
+  const visits = (src?.results ?? []) as { src: string; n: number }[];
+  const sales = (orderSrc?.results ?? []) as { src: string; started: number; paid: number }[];
+  const bySrc = visits.map((v) => {
+    const o = sales.find((r) => r.src === v.src);
+    return { src: v.src, n: v.n, started: o?.started ?? 0, paid: o?.paid ?? 0 };
+  });
+  // An order whose source had no visit in the window still sold something.
+  for (const o of sales) {
+    if (!bySrc.some((r) => r.src === o.src)) bySrc.push({ ...o, n: 0 });
+  }
   const o = (orders?.results?.[0] ?? {}) as { started?: number; paid?: number };
   return {
     bySrc,
@@ -353,6 +369,32 @@ export async function buyFunnel(env: Env): Promise<BuyFunnel> {
     visits: bySrc.reduce((a, r) => a + r.n, 0),
     started: o.started ?? 0,
     paid: o.paid ?? 0,
+  };
+}
+
+export interface CancelReasons {
+  /** Last 90 days, most common first. */
+  byReason: { reason: string; n: number }[];
+  /** The newest things people typed, newest first. */
+  notes: { at: number; reason: string; cycle: string | null; note: string }[];
+}
+
+/** What the account page's cancel form was told. A sample: a cancellation
+ *  made in Paddle's portal never passes through it. */
+export async function cancelReasons(env: Env): Promise<CancelReasons> {
+  const since = now() - 90 * DAY;
+  const [by, notes] = await env.DB.batch([
+    env.DB.prepare(
+      `SELECT reason, COUNT(*) AS n FROM cancel_reasons WHERE at >= ? GROUP BY reason ORDER BY n DESC`,
+    ).bind(since),
+    env.DB.prepare(
+      `SELECT at, reason, cycle, note FROM cancel_reasons
+        WHERE at >= ? AND note IS NOT NULL ORDER BY at DESC LIMIT 20`,
+    ).bind(since),
+  ]);
+  return {
+    byReason: (by?.results ?? []) as CancelReasons["byReason"],
+    notes: (notes?.results ?? []) as CancelReasons["notes"],
   };
 }
 

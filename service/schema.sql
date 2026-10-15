@@ -84,7 +84,13 @@ CREATE TABLE IF NOT EXISTS orders (
   licence_key  TEXT,
   reveal_until INTEGER,
   failure      TEXT,
-  created_at   INTEGER NOT NULL
+  created_at   INTEGER NOT NULL,
+  -- Where the buy page was opened from, the same value `buy_visits.src`
+  -- records, so the funnel can say which link sells rather than only which
+  -- one is clicked. NULL for orders older than the column, added on
+  -- 2026-10-15 to a live table with
+  --   ALTER TABLE orders ADD COLUMN src TEXT;
+  src          TEXT
 );
 
 CREATE INDEX IF NOT EXISTS orders_by_reveal ON orders (reveal_until);
@@ -347,6 +353,22 @@ CREATE TABLE IF NOT EXISTS buy_visits (
 );
 
 CREATE INDEX IF NOT EXISTS buy_visits_by_at ON buy_visits (at);
+
+-- Why someone cancelled, when they said. Asked on the account page's cancel
+-- form and optional: the cancellation goes through whatever is answered. A
+-- cancellation made in Paddle's own portal never passes through here, so this
+-- is a sample of the reasons, not every one. `note` is free text the customer
+-- typed, capped at 500 characters, and is joined to nothing but the licence.
+CREATE TABLE IF NOT EXISTS cancel_reasons (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  at          INTEGER NOT NULL,
+  licence_id  TEXT NOT NULL,
+  cycle       TEXT,
+  reason      TEXT NOT NULL,
+  note        TEXT
+);
+
+CREATE INDEX IF NOT EXISTS cancel_reasons_by_at ON cancel_reasons (at);
 
 -- Every press of a download button on the website, and where the visitor came
 -- from: the `utm_source` / `ref` of the link that brought them, or the site
