@@ -1028,6 +1028,14 @@ async function route(request: Request, env: Env): Promise<Response> {
       if (pathname === "/terms" || pathname === "/privacy" || pathname === "/refunds") {
         return redirect(SITE + pathname);
       }
+      // Only the buy page is worth finding in a search. The welcome page is
+      // one buyer's order, the account page is a form, and the rest is API.
+      if (pathname === "/robots.txt") {
+        return new Response(
+          "User-agent: *\nAllow: /buy\nDisallow: /\n\nSitemap: " + SITE + "/sitemap.xml\n",
+          { headers: { "content-type": "text/plain; charset=utf-8" } },
+        );
+      }
       if (pathname === "/buy") return buy(env, request, url);
       if (pathname === "/account") {
         return accountPage(pageContext(request, url), null, supportEmail(env));
