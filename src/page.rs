@@ -135,7 +135,24 @@ pub fn lines_from_words(lines: Vec<Vec<Word>>) -> Vec<Line> {
             // Code is recognised on the whole of each item, before anything
             // is taken out of it: `if` on its own is a word, and only beside
             // `translate_page(&cfg) {` is it plainly a program.
-            let whole = piece
+            // An icon at either end of an item — a button's glyph the reader
+            // turned into "[£]" or "®" — is not part of what it says, and
+            // must not make "Comment" look like code.
+            let glyph = |w: &Word| {
+                !w.text.chars().any(char::is_alphabetic)
+                    && w.text
+                        .chars()
+                        .any(|c| "£©®¥@&§¶™°•●▪■□▶►✓✔✕✖★☆€$%".contains(c))
+            };
+            let words_only: Vec<&Word> = {
+                let start = piece.iter().position(|w| !glyph(w)).unwrap_or(piece.len());
+                let end = piece
+                    .iter()
+                    .rposition(|w| !glyph(w))
+                    .map_or(start, |e| e + 1);
+                piece[start..end.max(start)].iter().collect()
+            };
+            let whole = words_only
                 .iter()
                 .map(|w| w.text.as_str())
                 .collect::<Vec<_>>()
@@ -153,9 +170,13 @@ pub fn lines_from_words(lines: Vec<Vec<Word>>) -> Vec<Line> {
                     // A letter or two the reader was unsure of at either end
                     // of a line is a radio button, a bullet, an icon before a
                     // label; in the middle it is a short word.
+                    // A single character the reader was unsure of at either end
+                    // of a line is a radio button, a bullet, an icon before a
+                    // label. Two letters are a word — "By", "On" — however
+                    // unsure.
                     let edge = *at == 0 || *at == last_at;
                     let short = w.text.chars().count() <= 2;
-                    if short && edge && w.confidence < 60.0 {
+                    if w.text.chars().count() == 1 && edge && w.confidence < 60.0 {
                         return false;
                     }
                     // A radio button or a bullet in front of a label, read
@@ -169,7 +190,12 @@ pub fn lines_from_words(lines: Vec<Vec<Word>>) -> Vec<Line> {
                     // A bracket or a quote makes a token taller without
                     // making it an icon: "(9", "“A".
                     let punctuated = w.text.chars().any(|c| "()[]{}\"'“”‘’«»".contains(c));
-                    let taller = w.rect.height * 4 > median * 5 && !punctuated;
+                    // Taller than its neighbours is an icon only when it does
+                    // not read as a word: "Q,", "3p", a lone letter. "By" and
+                    // "On" stand taller than "the" because of their capitals.
+                    let wordlike =
+                        w.text.chars().count() == 2 && w.text.chars().all(char::is_alphabetic);
+                    let taller = w.rect.height * 4 > median * 5 && !punctuated && !wordlike;
                     !(short && (taller || w.confidence < 30.0))
                 })
                 .map(|(_, w)| w)
@@ -209,6 +235,66 @@ pub fn lines_from_words(lines: Vec<Vec<Word>>) -> Vec<Line> {
             }
             out.push(Line { rect, text });
         }
+    }
+    out
+}
+
+/// Puts back together a line the reader cut in two.
+///
+/// A reader that lays a page out first sometimes sees a column break where
+/// there is none — down the middle of a page of print — and hands each line
+/// back as two, the cut sometimes inside a word: "just a g" and "impse of what
+/// was". Translated apart they are nonsense, and set in two faces. Two pieces
+/// on the same line, the same size, no further apart than a space, are one
+/// line; items with a real gap between them — links, tabs, cells — stay apart.
+pub fn join_split_lines(mut lines: Vec<Line>) -> Vec<Line> {
+    let middle = |l: &Line| l.rect.y + l.rect.height / 2;
+    let letter = |l: &Line| l.rect.width as f32 / l.text.chars().count().max(1) as f32;
+    // Rows first — pieces whose middles are within a quarter of a line of
+    // each other — and each row left to right: the half of a line read a
+    // pixel higher than the other must still come after it.
+    lines.sort_by_key(|line| middle(line));
+    let mut rows: Vec<Vec<Line>> = Vec::new();
+    for line in lines {
+        match rows.last_mut() {
+            Some(row)
+                if row.iter().any(|other| {
+                    middle(other).abs_diff(middle(&line)) * 4
+                        <= other.rect.height.max(line.rect.height)
+                }) =>
+            {
+                row.push(line)
+            }
+            _ => rows.push(vec![line]),
+        }
+    }
+    let mut out = Vec::new();
+    for mut row in rows {
+        row.sort_by_key(|line| line.rect.x);
+        let mut joined: Vec<Line> = Vec::new();
+        for line in row {
+            match joined.last_mut() {
+                Some(before)
+                    if {
+                        let (a, b) = (&before.rect, &line.rect);
+                        let gap = b.x as f32 - a.right() as f32;
+                        a.height.max(b.height) * 10 <= a.height.min(b.height) * 13
+                            && gap >= -2.0
+                            && gap <= letter(before).max(letter(&line)) * 2.2
+                    } =>
+                {
+                    let gap = line.rect.x as f32 - before.rect.right() as f32;
+                    // Cut inside a word: no space between the halves.
+                    if gap >= letter(before) * 0.3 {
+                        before.text.push(' ');
+                    }
+                    before.text.push_str(line.text.trim());
+                    before.rect = before.rect.union(&line.rect);
+                }
+                _ => joined.push(line),
+            }
+        }
+        out.extend(joined);
     }
     out
 }
@@ -259,6 +345,14 @@ fn leading(all: &[Word], rect: &Rect) -> String {
                 && rect.x - w.rect.right() <= reach
         })
         .collect();
+    // A button's icon is not the start of a program.
+    before.retain(|w| {
+        w.text.chars().any(char::is_alphanumeric)
+            || !w
+                .text
+                .chars()
+                .any(|c| "£©®¥@&§¶™°•●▪■□▶►✓✔✕✖★☆€$%[]".contains(c))
+    });
     before.sort_by_key(|w| w.rect.x);
     // Only the run that reaches up to the line: a word further left with a
     // wide gap after it belongs to something else.
@@ -535,10 +629,17 @@ fn is_identifier(word: &str) -> bool {
     let middle: String = word.chars().skip(1).take(count.saturating_sub(2)).collect();
     let inner = |c: char| middle.contains(c);
     let letters = word.chars().filter(|c| c.is_alphabetic()).count();
-    let camel = word
-        .chars()
-        .zip(word.chars().skip(1))
-        .any(|(a, b)| a.is_lowercase() && b.is_uppercase());
+    // `fetchUser`, `pagesTried`: two lowercase letters or more before the
+    // first capital, and lowercase again after it. Not `eSignature`,
+    // `iPhone` or `macOS`, which are names.
+    let chars: Vec<char> = word.chars().collect();
+    let camel = chars.windows(2).enumerate().any(|(at, pair)| {
+        pair[0].is_lowercase()
+            && pair[1].is_uppercase()
+            && at >= 1
+            && chars[..=at].iter().filter(|c| c.is_lowercase()).count() >= 2
+            && chars[at + 2..].iter().any(|c| c.is_lowercase())
+    });
     word.contains("://")
         || (inner('_') && letters > 1)
         || (middle.matches('/').count() >= 2 && letters > 1)
@@ -578,6 +679,17 @@ fn continues(last: &Line, next: &Line, room: u32) -> bool {
     // Lined up on the left, or sharing most of the narrower one's width:
     // centred text wraps without a common left edge.
     let (l, n) = (&last.rect, &next.rect);
+    // The first line of a new paragraph, set in from the left after a line
+    // that finished a sentence: print's way of starting a paragraph without
+    // a blank line.
+    let indented = n.x > l.x + a / 2;
+    let finished = last
+        .text
+        .trim_end()
+        .ends_with(['.', '!', '?', ':', '"', '”', '’', ')']);
+    if indented && finished {
+        return false;
+    }
     let left_aligned = l.x.abs_diff(n.x) <= a * 2;
     let overlap = i64::from(l.right().min(n.right())) - i64::from(l.x.max(n.x));
     if !left_aligned && overlap * 2 <= i64::from(l.width.min(n.width)) {
@@ -1141,6 +1253,8 @@ struct Style {
     /// carrying the gradient across, not by painting it over.
     smooth: bool,
     ink: [u8; 3],
+    /// How well the face fitted, from 0 to 1.
+    fit: f32,
 }
 
 /// How well a line's text, set in the face that fits it best, has to cover
@@ -1471,6 +1585,7 @@ impl Pixels<'_> {
                 paper,
                 smooth,
                 ink,
+                fit: score,
             };
             // Faces are tried in the desktop's own order, its defaults first,
             // and a later one has to fit clearly better to be chosen: two
@@ -1507,6 +1622,7 @@ impl Pixels<'_> {
                     paper,
                     smooth,
                     ink,
+                    fit: 0.0,
                 },
             ))
         })
@@ -1904,10 +2020,21 @@ impl Canvas<'_> {
         let mut sizes: Vec<f32> = styles.iter().map(|s| s.px).collect();
         sizes.sort_by(f32::total_cmp);
         let original = sizes[sizes.len() / 2];
+        // Chosen by how much of the paragraph each face fits, and how well:
+        // a long line that is plainly serif outweighs the two words of its
+        // last line that fit a sans-serif as well as anything.
+        let weight = |face: Face| -> f32 {
+            styles
+                .iter()
+                .zip(&block.lines)
+                .filter(|(s, _)| s.face.same_font(face))
+                .map(|(s, line)| s.fit * line.text.chars().count() as f32)
+                .sum()
+        };
         let face = styles
             .iter()
             .map(|s| s.face)
-            .max_by_key(|f| styles.iter().filter(|s| s.face.same_font(*f)).count())
+            .max_by(|a, b| weight(*a).total_cmp(&weight(*b)))
             .unwrap_or(fonts.plain());
 
         // Where the rows go: the original lines, then up to two more in
@@ -1952,8 +2079,15 @@ impl Canvas<'_> {
 
         // How wide each row may be: on to the right as far as its paper is
         // empty, less a letter's breathing room before whatever is there.
+        // A paragraph of several lines keeps to its own column: a justified
+        // page's margin is empty paper too, and a translation running into
+        // it no longer looks like the page. A line on its own may run on.
+        let column = (block.lines.len() > 1).then(|| block.rect.right() + (original * 0.5) as u32);
         let available = |rect: Rect, style: &Style| -> f32 {
-            let end = pixels.empty_until(rect, style.paper);
+            let mut end = pixels.empty_until(rect, style.paper);
+            if let Some(column) = column {
+                end = end.min(column);
+            }
             let margin = (style.px * 0.3) as u32;
             (end.saturating_sub(margin).max(rect.right()) - rect.x) as f32
         };
@@ -2194,6 +2328,8 @@ mod tests {
             "Free trial: 2 of 3 left — unlimited with Pro.",
             "It works now. Try it again.",
             "Farbe (Beta)",
+            "4 Request eSignature",
+            "Open it on your iPhone or on macOS",
             "(Anfang)",
             "Mundarten/Sprachen",
             "Read and/or write the file.",
@@ -2262,6 +2398,78 @@ mod tests {
             no_room,
         );
         assert_eq!(blocks.len(), 1);
+    }
+
+    #[test]
+    fn a_line_cut_in_two_is_put_back_together() {
+        let lines = join_split_lines(vec![
+            line(
+                947,
+                564,
+                681,
+                25,
+                "nobody could be sure the attack was over, or if it was just a g",
+            ),
+            line(1637, 564, 206, 25, "impse of what was"),
+            // Links in a header, a gap of several letters apart, stay apart.
+            line(919, 27, 90, 14, "Donate now"),
+            line(1040, 27, 150, 14, "Create account"),
+        ]);
+        assert_eq!(
+            lines.len(),
+            3,
+            "the header links stay two, the cut line is one"
+        );
+        assert!(
+            lines[2].text.starts_with("nobody could") && lines[2].text.ends_with("of what was")
+        );
+        let lines = join_split_lines(vec![
+            line(
+                990,
+                531,
+                639,
+                25,
+                "the time my plane touched down in Kyiv—in the dead",
+            ),
+            line(1645, 530, 200, 20, "of winter 2019—"),
+        ]);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            lines[0].text,
+            "the time my plane touched down in Kyiv—in the dead of winter 2019—"
+        );
+    }
+
+    #[test]
+    fn an_indented_line_after_a_full_stop_starts_a_paragraph() {
+        let blocks = paragraphs(
+            vec![
+                line(
+                    947,
+                    10,
+                    680,
+                    25,
+                    "wisp of a model gripped my arm, and began to pray.",
+                ),
+                line(
+                    985,
+                    43,
+                    640,
+                    25,
+                    "Three hundred feet below, Ukraine had gone into",
+                ),
+                line(
+                    947,
+                    76,
+                    680,
+                    25,
+                    "orange alert. An abrupt windstorm was ripping",
+                ),
+            ],
+            no_room,
+        );
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[1].lines.len(), 2);
     }
 
     #[test]
@@ -2568,7 +2776,7 @@ mod tests {
             height,
             bgrx: &bgrx,
         };
-        let lines = lines
+        let lines = join_split_lines(lines)
             .into_iter()
             .map(|line| pixels.tighten(line))
             .filter(|line| pixels.replaceable(fonts(), line))

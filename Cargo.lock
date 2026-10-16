@@ -504,7 +504,7 @@ dependencies = [
 
 [[package]]
 name = "bubbleTranslate"
-version = "0.4.15"
+version = "0.4.16"
 dependencies = [
  "ab_glyph",
  "anyhow",

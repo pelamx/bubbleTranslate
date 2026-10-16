@@ -105,7 +105,12 @@ pub fn read_page(shot: &PageShot) -> Vec<Block> {
         }
     }
     let fonts = crate::page::fonts();
-    let tightened = lines.into_iter().map(|line| pixels.tighten(line)).collect();
+    // A line the reader handed back as two halves is put back together
+    // first; see [`crate::page::join_split_lines`].
+    let tightened = crate::page::join_split_lines(lines)
+        .into_iter()
+        .map(|line| pixels.tighten(line))
+        .collect();
     // Vision occasionally reports the same line twice; dropping the overlaps
     // before anything is measured keeps a word from being painted over itself.
     let lines = crate::page::without_duplicates(tightened)

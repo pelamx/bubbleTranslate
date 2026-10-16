@@ -313,7 +313,9 @@ pub fn read_page(shot: &PageShot) -> Vec<crate::page::Block> {
         }
     }
     let fonts = crate::page::fonts();
-    let lines = lines
+    // A line the reader handed back as two halves is put back together
+    // first; see [`crate::page::join_split_lines`].
+    let lines = crate::page::join_split_lines(lines)
         .into_iter()
         .map(|line| pixels.tighten(line))
         .filter(|line| pixels.replaceable(fonts, line))

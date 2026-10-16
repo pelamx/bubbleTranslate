@@ -532,7 +532,7 @@ pub fn read_page(shot: &PageShot) -> Vec<crate::page::Block> {
         }
     }
     let fonts = crate::page::fonts();
-    let lines = lines
+    let lines = crate::page::join_split_lines(lines)
         .into_iter()
         .map(|line| pixels.tighten(line))
         .filter(|line| pixels.replaceable(fonts, line))
@@ -545,6 +545,11 @@ pub fn read_page(shot: &PageShot) -> Vec<crate::page::Block> {
 pub fn show_page(shot: PageShot, translated: &[(crate::page::Block, String)], note: Option<&str>) {
     let PageShot(mut shot) = shot;
     let scale = shot.scale() as f32;
+    // With tracing on, the screen before and after, so a page that came out
+    // wrong can be looked at rather than described.
+    if crate::trace::enabled() {
+        keep_picture(&shot.frame, "bubbleTranslate-page-before.png");
+    }
     let fonts = crate::page::fonts();
     let mut canvas = crate::page::Canvas {
         width: shot.frame.width,
@@ -557,7 +562,33 @@ pub fn show_page(shot: PageShot, translated: &[(crate::page::Block, String)], no
     if let Some(note) = note {
         canvas.note(fonts, note, scale);
     }
+    if crate::trace::enabled() {
+        keep_picture(&shot.frame, "bubbleTranslate-page-after.png");
+    }
     overlay::show(&shot.frame, shot.placement);
+}
+
+/// Writes `frame` as a PNG in the user's runtime directory, for tracing.
+fn keep_picture(frame: &ocr::Frame, name: &str) {
+    let dir = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let path = dir.join(name);
+    let rgb: Vec<u8> = frame
+        .bgrx
+        .chunks(4)
+        .flat_map(|p| [p[2], p[1], p[0]])
+        .collect();
+    let written = std::fs::File::create(&path).ok().and_then(|file| {
+        let mut encoder = png::Encoder::new(file, frame.width, frame.height);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_compression(png::Compression::Fast);
+        encoder.write_header().ok()?.write_image_data(&rgb).ok()
+    });
+    if written.is_some() {
+        crate::trace!("page      kept the picture at {}", path.display());
+    }
 }
 
 /// The reader's lines for a picture given as bytes, for the page test.

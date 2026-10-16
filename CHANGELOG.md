@@ -13,6 +13,20 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## 0.4.16 — 2026-10-16
+
+**Translating the whole screen keeps a printed page's paragraphs whole.** On a
+page of print — a PDF in Google's viewer, a book — a line was sometimes read
+as two halves, cut down the middle of the page, and the halves were translated
+apart: the sentence came out in pieces, half in one typeface and half in
+another. They are now put back together first, so each paragraph is translated
+as one, in the typeface and size it was printed in, inside its own column; and
+a paragraph that starts with an indent stays a paragraph of its own instead of
+running on from the one above. A short word at the start of a line, like
+"By", and a label with an icon in front of it, like a "Comment" button, are no
+longer left untranslated, and words like "eSignature" or "iPhone" are no longer
+mistaken for code.
+
 ## 0.4.15 — 2026-10-16
 
 **The translate box is first in the window, and the shortcuts are said
