@@ -67,6 +67,20 @@ impl Region {
 /// the region, only the end of a stray drag.
 const MIN_SIDE: i32 = 8;
 
+/// A picture in memory: `width * height * 4` bytes, B, G, R and one unused,
+/// top row first.
+///
+/// That is the layout `BitBlt` leaves a 32-bit DIB section in, and it is also
+/// [`BitmapPixelFormat::Bgra8`] — what the OCR engine takes — and also what
+/// [`crate::page::Pixels`] reads and [`crate::page::Canvas`] draws into. So
+/// the pixels copied off the screen are read, written over and shown again
+/// without being converted once.
+pub struct Frame {
+    pub width: u32,
+    pub height: u32,
+    pub bgrx: Vec<u8>,
+}
+
 /// The largest region that will be read, as a pixel count.
 ///
 /// The whole of a 4K desktop is about 8 megapixels and takes an appreciable
@@ -99,6 +113,20 @@ pub fn recognize(region: Region) -> Option<String> {
     }
 
     let pixels = grab(region)?;
+
+    // Google Vision, when the user has entered a key of their own. It reads
+    // faint text, small text and scripts the engine on the machine has no
+    // pack for, and it reads them in about a second. The picture is sent to
+    // Google to do it, which the window and the settings both say; without a
+    // key nothing leaves the machine. Anything that goes wrong is not an
+    // error anyone is shown — the screen is read here instead.
+    if let Some(key) = crate::vision::key() {
+        match crate::vision::read_text(&key, region.width as u32, region.height as u32, &pixels) {
+            Ok(text) => return Some(crate::page::join_lines(&text)),
+            Err(err) => crate::trace!("vision    {err}; reading here instead"),
+        }
+    }
+
     let bitmap = to_bitmap(&pixels, region.width, region.height).ok()?;
 
     let engine = match OcrEngine::TryCreateFromUserProfileLanguages() {
@@ -255,6 +283,129 @@ pub fn languages() -> Vec<String> {
 /// Whether reading the screen will work at all on this machine.
 pub fn available() -> bool {
     OcrEngine::TryCreateFromUserProfileLanguages().is_ok()
+}
+
+/// Copies `region` off the screen as a picture to read, write over and show.
+///
+/// The same `BitBlt` the rectangle gesture uses, kept as a [`Frame`] rather
+/// than loose bytes because translating the whole screen passes the picture
+/// through three hands — the reader, the painter and the window that shows it
+/// — and each needs its size.
+pub fn grab_frame(region: Region) -> Option<Frame> {
+    let bgrx = grab(region)?;
+    Some(Frame {
+        width: region.width.max(0) as u32,
+        height: region.height.max(0) as u32,
+        bgrx,
+    })
+}
+
+/// Every line of text in `frame`, and where each one is.
+///
+/// The other half of [`recognize`]: that answers what the text says, this
+/// also answers where it was, which is what writing a translation back over
+/// it needs. Google Vision when the user has set a key, the engine Windows
+/// ships otherwise.
+///
+/// `None` when there is no reader at all. An empty list is a real answer.
+pub fn recognize_lines(frame: &Frame) -> Option<Vec<crate::page::Line>> {
+    if let Some(key) = crate::vision::key() {
+        match crate::vision::read_words(&key, frame.width, frame.height, &frame.bgrx) {
+            Ok(words) => return Some(crate::page::lines_from_words(words)),
+            Err(err) => crate::trace!("vision    {err}; reading here instead"),
+        }
+    }
+    read_lines_here(frame)
+}
+
+/// How sure the words out of `Windows.Media.Ocr` are taken to be.
+///
+/// It reports no confidence at all — there is no such property on an
+/// `OcrWord` — so every word it finds arrives as certain. That costs two of
+/// the three ways [`crate::page::lines_from_words`] throws out an icon read
+/// as a letter; the third, a short token standing taller than the words
+/// beside it, does not need a confidence and still applies. What actually
+/// keeps a misread picture from being "translated" is the check after it:
+/// whether the text, set in the face that fits it, lands on the letters at
+/// all. See [`crate::page::Pixels::replaceable`].
+const CERTAIN: f32 = 100.0;
+
+/// Reads `frame` with the engine on the machine, keeping every word's box.
+fn read_lines_here(frame: &Frame) -> Option<Vec<crate::page::Line>> {
+    let longest = frame.width.max(frame.height);
+    match OcrEngine::MaxImageDimension() {
+        Ok(limit) if longest > limit => {
+            // Not reachable through the key — one screen is captured, not the
+            // whole desktop — but the engine refuses the picture outright
+            // rather than reading part of it, and a silent nothing is worth a
+            // line in the trace.
+            crate::trace!("ocr       {longest}px is past the engine's {limit}px limit");
+            return None;
+        }
+        _ => {}
+    }
+
+    let bitmap = to_bitmap(&frame.bgrx, frame.width as i32, frame.height as i32).ok()?;
+    let engine = match OcrEngine::TryCreateFromUserProfileLanguages() {
+        Ok(engine) => engine,
+        Err(error) => {
+            crate::trace!(
+                "ocr       no engine for the user's languages ({error}); installed: {:?}",
+                languages()
+            );
+            return None;
+        }
+    };
+    let result = engine
+        .RecognizeAsync(&bitmap)
+        .and_then(|pending| pending.join())
+        .ok()?;
+
+    // A word's box arrives in the picture's own pixels, as floats, and is
+    // trusted no further than that: a box that reaches past the edge would
+    // index past the end of the pixels every measurement below reads.
+    let clamp = |at: f32, limit: u32| (at.max(0.0) as u32).min(limit);
+    let mut lines = Vec::new();
+    for line in result.Lines().into_iter().flatten() {
+        let mut words = Vec::new();
+        for word in line.Words().into_iter().flatten() {
+            let (Ok(box_), Ok(text)) = (word.BoundingRect(), word.Text()) else {
+                continue;
+            };
+            let x = clamp(box_.X, frame.width);
+            let y = clamp(box_.Y, frame.height);
+            let rect = crate::page::Rect {
+                x,
+                y,
+                width: clamp(box_.X + box_.Width, frame.width).saturating_sub(x),
+                height: clamp(box_.Y + box_.Height, frame.height).saturating_sub(y),
+            };
+            if rect.width == 0 || rect.height == 0 {
+                continue;
+            }
+            words.push(crate::page::Word {
+                rect,
+                text: text.to_string_lossy(),
+                confidence: CERTAIN,
+            });
+        }
+        if !words.is_empty() {
+            lines.push(words);
+        }
+    }
+    crate::trace!(
+        "ocr       read {} lines off {}x{}",
+        lines.len(),
+        frame.width,
+        frame.height
+    );
+    Some(crate::page::lines_from_words(lines))
+}
+
+/// Whether the whole screen can be read at all: an engine on the machine, or
+/// a Google Vision key to send the picture to.
+pub fn page_readable() -> bool {
+    available() || crate::vision::key().is_some()
 }
 
 #[cfg(test)]

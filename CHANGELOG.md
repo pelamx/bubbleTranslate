@@ -13,6 +13,31 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**Translate the whole screen at once with Ctrl+Shift+F. (Windows)** Every
+paragraph on the screen is replaced by its translation, in place — in the same
+font, size and colour it was printed in, on the lines it was on, the way a
+translated web page looks. It works on anything the screen shows: a PDF, a
+terminal, a game, an app that was never translated. Code, file names and
+commands are left as they are, and so is anything that could not be replaced
+cleanly. Press any key or click to put it away. It arrived on Linux in 0.4.13
+and does the same thing here; until now, a page on Windows meant drawing a box
+with Ctrl+Shift+E over each part of it in turn. It is also in the window, under
+"Translate text you cannot select".
+
+The screen is read by the text recognition built into Windows, so nothing
+leaves the computer and there is nothing to install — on a machine that reads
+only one language, that is the one language it will read, which is the same
+list Ctrl+Shift+E has always used.
+
+**A Google Vision key now works on Windows. (Windows)** The settings have
+offered one for a while and the window said the picture was sent to Google to
+be read; on Windows it was not, and the key did nothing. Now it is used for
+both ways of reading the screen — the box and the whole of it — and faint text,
+small text and scripts Windows has no pack for come out right. Without a key
+nothing changes and nothing leaves the computer.
+
 ## 0.4.13 — 2026-10-16
 
 **The window now says how to use it, at the top.** Hold Alt — Option on a

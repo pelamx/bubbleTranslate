@@ -101,7 +101,7 @@ pub fn screen_reading(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
     );
 
     // The whole screen at once. Only where it is built yet.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     {
         ui.add_space(10.0);
         ui.horizontal_wrapped(|ui| {

@@ -28,7 +28,7 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::UI::HiDpi::GetDpiForSystem;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetDoubleClickTime, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey,
-    VIRTUAL_KEY, VK_A, VK_C, VK_CONTROL, VK_DOWN, VK_E, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT,
+    VIRTUAL_KEY, VK_A, VK_C, VK_CONTROL, VK_DOWN, VK_E, VK_END, VK_ESCAPE, VK_F, VK_HOME, VK_LEFT,
     VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -111,6 +111,34 @@ fn ask_region() {
             Err(_) => crate::trace!("region    the callback lock was poisoned"),
         },
         None => crate::trace!("region    nobody registered for the key"),
+    }
+}
+
+/// Told when Ctrl+Shift+F is pressed: translate the whole screen.
+///
+/// Its own slot rather than a second kind of region request, because the two
+/// gestures share nothing after the key — one asks for a rectangle and the
+/// other asks for no choice at all.
+static ON_PAGE: OnceLock<Mutex<Box<dyn Fn() + Send>>> = OnceLock::new();
+
+/// The ids the two registered hotkeys are known by, which is how `WM_HOTKEY`
+/// says which of them was pressed.
+const HOTKEY_REGION: i32 = 1;
+const HOTKEY_PAGE: i32 = 2;
+
+/// Registers the callback for the translate-the-whole-screen key.
+pub fn on_page_request(ask: impl Fn() + Send + 'static) {
+    let _ = ON_PAGE.set(Mutex::new(Box::new(ask)));
+}
+
+/// Passes Ctrl+Shift+F on, from the hook or from the registered hotkey.
+fn ask_page() {
+    match ON_PAGE.get() {
+        Some(ask) => match ask.lock() {
+            Ok(ask) => ask(),
+            Err(_) => crate::trace!("page      the callback lock was poisoned"),
+        },
+        None => crate::trace!("page      nobody registered for the key"),
     }
 }
 
@@ -267,22 +295,28 @@ fn run() {
         }
     }
 
-    // Ctrl+Shift+E a second time, as a registered hotkey. The keyboard hook
-    // is blind to keys typed into a window running as administrator — Visual
-    // Studio, an elevated terminal — because Windows keeps a lower process
-    // from watching a higher one. A registered hotkey is answered by Windows
-    // itself, whatever is in front. Everywhere else the hook sees the press
-    // first and swallows it, so this never fires twice for one press.
-    // Without a window it arrives on this thread's queue, as `WM_HOTKEY`.
-    if let Err(err) = unsafe {
-        RegisterHotKey(
-            None,
-            1,
-            MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
-            VK_E.0 as u32,
-        )
-    } {
-        crate::trace!("hotkey    not registered — {err}");
+    // Ctrl+Shift+E and Ctrl+Shift+F a second time, as registered hotkeys. The
+    // keyboard hook is blind to keys typed into a window running as
+    // administrator — Visual Studio, an elevated terminal — because Windows
+    // keeps a lower process from watching a higher one. A registered hotkey is
+    // answered by Windows itself, whatever is in front. Everywhere else the
+    // hook sees the press first and swallows it, so these never fire twice for
+    // one press. Without a window they arrive on this thread's queue as
+    // `WM_HOTKEY`, and the id in it says which was pressed.
+    for (id, key, name) in [
+        (HOTKEY_REGION, VK_E, "ctrl+shift+e"),
+        (HOTKEY_PAGE, VK_F, "ctrl+shift+f"),
+    ] {
+        if let Err(err) = unsafe {
+            RegisterHotKey(
+                None,
+                id,
+                MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
+                key.0 as u32,
+            )
+        } {
+            crate::trace!("hotkey    {name} not registered — {err}");
+        }
     }
 
     // The hooks are only ever called while this thread is pumping messages,
@@ -298,8 +332,16 @@ fn run() {
             break;
         }
         if message.message == WM_HOTKEY {
-            crate::trace!("hotkey    ctrl+shift+e -> READ SCREEN");
-            ask_region();
+            match message.wParam.0 as i32 {
+                HOTKEY_PAGE => {
+                    crate::trace!("hotkey    ctrl+shift+f -> TRANSLATE SCREEN");
+                    ask_page();
+                }
+                _ => {
+                    crate::trace!("hotkey    ctrl+shift+e -> READ SCREEN");
+                    ask_region();
+                }
+            }
         }
     }
 }
@@ -436,6 +478,16 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
         if wparam.0 as u32 == WM_KEYDOWN {
             crate::trace!("key-down  ctrl+shift+e -> READ SCREEN");
             ask_region();
+        }
+        return LRESULT(1);
+    }
+
+    // Ctrl+Shift+F: translate everything on the screen, rather than a
+    // rectangle of it. Swallowed the same way and for the same reason.
+    if key == VK_F && held(VK_CONTROL) && held(VK_SHIFT) {
+        if wparam.0 as u32 == WM_KEYDOWN {
+            crate::trace!("key-down  ctrl+shift+f -> TRANSLATE SCREEN");
+            ask_page();
         }
         return LRESULT(1);
     }

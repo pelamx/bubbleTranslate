@@ -28,6 +28,7 @@ pub mod ocr;
 pub mod overlay;
 pub mod shell;
 pub mod speech;
+pub mod still;
 
 use std::sync::atomic::{AtomicIsize, Ordering};
 
@@ -41,7 +42,7 @@ use ::windows::Win32::Graphics::Gdi::{
 use ::windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
 };
-use ::windows::Win32::UI::HiDpi::GetDpiForWindow;
+use ::windows::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForWindow, MDT_EFFECTIVE_DPI};
 use ::windows::Win32::UI::Shell::{IVirtualDesktopManager, VirtualDesktopManager};
 use ::windows::Win32::UI::WindowsAndMessaging::{
     GWL_EXSTYLE, GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowLongPtrW,
@@ -238,6 +239,133 @@ fn bubble_anchor(region: ocr::Region) -> Option<(f64, f64)> {
         f64::from(region.x) + REGION_INSET,
         f64::from(region.y) + REGION_INSET,
     ))
+}
+
+/// The screen, photographed for translating all of it.
+pub struct PageShot {
+    frame: ocr::Frame,
+    /// Where the photograph's top-left corner is on the virtual desktop, so
+    /// the still goes back exactly where it was taken from.
+    at: (i32, i32),
+    /// How many of the photograph's pixels make one of the toolkit's points:
+    /// 2 on a display at 200%. Only the note along the bottom needs it, which
+    /// has to come out the same size to the eye on every display.
+    scale: f32,
+}
+
+/// Photographs the screen the pointer is on, for translating all of it.
+///
+/// One screen rather than the whole virtual desktop, which is what the Linux
+/// side does too and for the better of two reasons: a translation of the
+/// monitor you are not looking at is no use, and three 4K displays side by
+/// side are wider than the recognition engine will accept a picture being.
+///
+/// Separate from reading it so the bubble that says "working" can come up in
+/// between: taken afterwards, the bubble would be in the photograph, and then
+/// painted over by its own translation.
+pub fn capture_page() -> Option<PageShot> {
+    crate::trace!("page      asked to translate the screen");
+    if !ocr::page_readable() {
+        crate::trace!(
+            "ocr       no recognition language installed and no Vision key; installed: {:?}",
+            ocr::languages()
+        );
+        return None;
+    }
+
+    let at = cursor_position().unwrap_or((0.0, 0.0));
+    let RECT {
+        left,
+        top,
+        right,
+        bottom,
+    } = monitor_rect(at)?;
+    let region = ocr::Region {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    };
+    let frame = ocr::grab_frame(region)?;
+    crate::trace!(
+        "page      photographed {}x{} at ({left}, {top})",
+        frame.width,
+        frame.height
+    );
+    Some(PageShot {
+        frame,
+        at: (left, top),
+        scale: monitor_scale(at),
+    })
+}
+
+/// Every paragraph on the photographed screen, and where it is.
+pub fn read_page(shot: &PageShot) -> Vec<crate::page::Block> {
+    let lines = ocr::recognize_lines(&shot.frame).unwrap_or_default();
+    let pixels = crate::page::Pixels {
+        width: shot.frame.width,
+        height: shot.frame.height,
+        bgrx: &shot.frame.bgrx,
+    };
+    if crate::trace::enabled() {
+        for line in &lines {
+            crate::trace!("page      read {:?} {:?}", line.rect, line.text);
+        }
+    }
+    let fonts = crate::page::fonts();
+    let lines = lines
+        .into_iter()
+        .map(|line| pixels.tighten(line))
+        .filter(|line| pixels.replaceable(fonts, line))
+        .collect();
+    crate::page::paragraphs(lines, |rect| pixels.column_edge(rect))
+}
+
+/// Paints the translations over the photograph and shows it in place of the
+/// screen until a key or a click puts it away. Blocks until then.
+pub fn show_page(
+    mut shot: PageShot,
+    translated: &[(crate::page::Block, String)],
+    note: Option<&str>,
+) {
+    let fonts = crate::page::fonts();
+    let mut canvas = crate::page::Canvas {
+        width: shot.frame.width,
+        height: shot.frame.height,
+        bgrx: &mut shot.frame.bgrx,
+    };
+    let started = std::time::Instant::now();
+    canvas.draw_page(fonts, translated);
+    crate::trace!("page      painted in {:?}", started.elapsed());
+    if let Some(note) = note {
+        canvas.note(fonts, note, shot.scale);
+    }
+    still::show(shot.frame, shot.at);
+}
+
+/// How many physical pixels make one of the toolkit's points on the display a
+/// point is on. 1.0 when Windows will not say.
+fn monitor_scale(at: (f64, f64)) -> f32 {
+    let point = POINT {
+        x: at.0 as i32,
+        y: at.1 as i32,
+    };
+    // SAFETY: both calls take a copy of the point and write into locals;
+    // `MonitorFromPoint` always answers with a monitor, given
+    // `MONITOR_DEFAULTTONEAREST`.
+    unsafe {
+        let monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
+        let (mut x, mut y) = (0u32, 0u32);
+        match GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut x, &mut y) {
+            Ok(()) if x > 0 => x as f32 / 96.0,
+            _ => 1.0,
+        }
+    }
+}
+
+/// Registers the callback for Ctrl+Shift+F.
+pub fn on_screen_page_request(ask: impl Fn() + Send + 'static) {
+    monitor::on_page_request(ask);
 }
 
 /// The zoom that makes the app's text match the rest of the desktop.

@@ -216,6 +216,11 @@ pub fn lines_from_words(lines: Vec<Vec<Word>>) -> Vec<Line> {
 /// Lines read twice — by two strips of the screen that overlap — kept once:
 /// of two that cover mostly the same place, the one with more text read, and
 /// of two with as much, the one with the tighter box.
+// Only the reader that cuts the screen into strips to read them at once needs
+// this, which today is the Linux one; `Windows.Media.Ocr` reads a whole screen
+// in one pass and reports each line once. The allow is so a reader that does
+// not need it does not warn about one that does.
+#[allow(dead_code)]
 pub fn without_duplicates(mut lines: Vec<Line>) -> Vec<Line> {
     // Of two readings with as much in them, the tighter box: a line read near
     // the edge of a strip comes back in a box too big for it.
@@ -609,6 +614,31 @@ pub fn append(current: &mut String, line: &str) {
         current.push(' ');
         current.push_str(line);
     }
+}
+
+/// A reader's plain text as paragraphs: the lines of each put back together,
+/// a blank line between them.
+///
+/// What a reader hands back is lines, and a sentence wrapped across three of
+/// them translated line by line comes back as three fragments. Every reader
+/// that answers with text rather than boxes needs this, which is why it lives
+/// here rather than beside one of them.
+pub fn join_lines(raw: &str) -> String {
+    let mut paragraphs: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for line in raw.lines().map(str::trim) {
+        if line.is_empty() {
+            if !current.is_empty() {
+                paragraphs.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+        append(&mut current, line);
+    }
+    if !current.is_empty() {
+        paragraphs.push(current);
+    }
+    paragraphs.join("\n")
 }
 
 /// The three kinds of lettering nearly all text on a screen is set in: the
@@ -2580,5 +2610,22 @@ mod tests {
             .write_image_data(&rgb)
             .unwrap();
         println!("wrote {out}");
+    }
+
+    #[test]
+    fn a_wrapped_sentence_comes_back_as_one() {
+        let raw = "The quick brown\nfox jumps over\nthe lazy dog.\n\nA second\nparagraph.\n";
+        assert_eq!(
+            join_lines(raw),
+            "The quick brown fox jumps over the lazy dog.\nA second paragraph."
+        );
+    }
+
+    #[test]
+    fn a_word_broken_across_lines_is_mended() {
+        assert_eq!(join_lines("transla-\ntion"), "translation");
+        // A dash that is punctuation, not a break inside a word, stays.
+        assert_eq!(join_lines("well -\nknown"), "well - known");
+        assert_eq!(join_lines("Jean-\nPaul"), "Jean- Paul");
     }
 }

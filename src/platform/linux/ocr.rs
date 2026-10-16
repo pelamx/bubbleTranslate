@@ -274,7 +274,7 @@ pub fn prepare() -> Result<(), String> {
 pub fn recognize(frame: &Frame, scale: f64) -> Option<String> {
     if let Some(key) = crate::vision::key() {
         match crate::vision::read_text(&key, frame.width, frame.height, &frame.bgrx) {
-            Ok(text) => return Some(join_lines(&text)),
+            Ok(text) => return Some(crate::page::join_lines(&text)),
             Err(err) => crate::trace!("vision    {err}; reading here instead"),
         }
     }
@@ -283,7 +283,7 @@ pub fn recognize(frame: &Frame, scale: f64) -> Option<String> {
     } else {
         super::reader::recognize(frame, scale)?
     };
-    Some(join_lines(&raw))
+    Some(crate::page::join_lines(&raw))
 }
 
 /// Reads every line of text in `frame`, with where each one is, in the
@@ -521,32 +521,6 @@ fn scratch_path(band: u32) -> PathBuf {
     ))
 }
 
-/// Turns Tesseract's layout back into sentences.
-///
-/// It reports each line on the screen as a line, and a gap between blocks as
-/// an empty one. A sentence wrapped across three lines of a web page is still
-/// one sentence, and a translator handed it in three pieces translates three
-/// fragments — so lines are joined into paragraphs, and only the gaps
-/// Tesseract saw survive as breaks. A word hyphenated across a line break is
-/// put back together.
-fn join_lines(raw: &str) -> String {
-    let mut paragraphs: Vec<String> = Vec::new();
-    let mut current = String::new();
-    for line in raw.lines().map(str::trim) {
-        if line.is_empty() {
-            if !current.is_empty() {
-                paragraphs.push(std::mem::take(&mut current));
-            }
-            continue;
-        }
-        crate::page::append(&mut current, line);
-    }
-    if !current.is_empty() {
-        paragraphs.push(current);
-    }
-    paragraphs.join("\n")
-}
-
 /// Tesseract's name for the language of an ISO 639-1 code, for the
 /// languages the app offers. `None` for a code it has no pack for.
 pub fn tesseract_code(iso: &str) -> Option<&'static str> {
@@ -677,23 +651,6 @@ mod tests {
             command_for(Family::Fedora, "eng", true).unwrap(),
             "sudo dnf install tesseract tesseract-langpack-eng"
         );
-    }
-
-    #[test]
-    fn a_wrapped_sentence_comes_back_as_one() {
-        let raw = "The quick brown\nfox jumps over\nthe lazy dog.\n\nA second\nparagraph.\n";
-        assert_eq!(
-            join_lines(raw),
-            "The quick brown fox jumps over the lazy dog.\nA second paragraph."
-        );
-    }
-
-    #[test]
-    fn a_word_broken_across_lines_is_mended() {
-        assert_eq!(join_lines("transla-\ntion"), "translation");
-        // A dash that is punctuation, not a break inside a word, stays.
-        assert_eq!(join_lines("well -\nknown"), "well - known");
-        assert_eq!(join_lines("Jean-\nPaul"), "Jean- Paul");
     }
 
     #[test]

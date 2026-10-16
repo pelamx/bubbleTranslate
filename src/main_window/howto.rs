@@ -58,7 +58,7 @@ pub fn how_to(ui: &mut egui::Ui, cfg: &Config) {
         ),
     );
     // The whole screen at once, only where it is built yet.
-    if cfg!(target_os = "linux") {
+    if cfg!(any(target_os = "linux", target_os = "windows")) {
         row(
             ui,
             &["Ctrl+Shift+F"],

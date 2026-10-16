@@ -259,12 +259,11 @@ pub use linux::{
     pointer_over, preferred_zoom, read_page, read_screen_region, screen_reading, show_page,
     to_points,
 };
-
 #[cfg(target_os = "windows")]
 pub use windows::{
-    cursor_position, frame_offset, keep_on_all_workspaces, mark_as_notification,
-    on_screen_region_request, pointer_over, preferred_zoom, read_screen_region, shape_bubble,
-    to_points,
+    capture_page, cursor_position, frame_offset, keep_on_all_workspaces, mark_as_notification,
+    on_screen_page_request, on_screen_region_request, pointer_over, preferred_zoom, read_page,
+    read_screen_region, shape_bubble, show_page, to_points,
 };
 
 /// Esc, pressed while the bubble is up.
