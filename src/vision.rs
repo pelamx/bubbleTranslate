@@ -20,7 +20,7 @@ use std::time::Duration;
 use base64::Engine as _;
 use serde_json::Value;
 
-use crate::page::{Rect, Word};
+use crate::page::{Rect, UNSCORED, Word};
 
 /// The key from the settings, handed over by the engine before each request
 /// so the readers below the platform line need not be given the config.
@@ -194,7 +194,7 @@ fn lines_of(answer: &Value) -> Vec<Vec<Word>> {
                             confidence: word
                                 .get("confidence")
                                 .and_then(Value::as_f64)
-                                .map_or(100.0, |c| (c * 100.0) as f32),
+                                .map_or(UNSCORED, |c| (c * 100.0) as f32),
                         });
                     }
                     if matches!(ending, "EOL_SURE_SPACE" | "LINE_BREAK" | "HYPHEN")

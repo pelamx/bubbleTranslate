@@ -13,6 +13,33 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## 0.4.17 — 2026-10-16
+
+**A contents page is translated whole, every entry alike.** On a book's
+contents page each line is set in two typefaces — "CHAPTER 3" in small bold
+capitals, the title in a book face — and no one installed typeface matches
+both, so some entries were taken for a misreading and left in English, some
+chapters lost their number, and the entries that were translated came out a
+size larger or smaller than one another. A line the reader is sure of is now
+translated even when no one typeface fits all of it, and the entries of a list
+are set in one typeface and one size, as they were printed. (Windows's own
+reader does not say how sure it is, so there a line in two typefaces is still
+left as it is, unless the screen is read by Google Vision.)
+
+**Buttons and icons are no longer painted over.** In Google Drive's PDF viewer
+the row of buttons above the page — "Open with Google Docs", "Share" — and the
+page-number box could be taken for a heading in spaced-out letters and painted
+over with their translation, wiping the buttons out; and a browser's reload
+arrow, read as the letter C, came back as "Ç". Spaced-out headings are now
+recognised only in capitals, which is how they are set, and a letter standing
+on its own is left as it is.
+
+**Everything listed under 0.4.16 comes to Linux with this version. (Linux)**
+0.4.16 was released for Windows first. The paragraphs of a printed page kept
+whole, titles in large type and in spaced-out capitals, translation in context
+and the bubble that says when nothing on the screen could be read all arrive
+on Linux now.
+
 ## 0.4.16 — 2026-10-16
 
 **A heading set in spaced-out capitals is translated now, not left behind.**

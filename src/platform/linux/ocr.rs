@@ -419,10 +419,13 @@ fn with_large_type(
         })
         .filter(|line| line.rect.height >= tall)
         .collect();
+    // Overlapping, for this purpose, as soon as they share a third of the
+    // smaller: a loose box round a line of ordinary type shares less than
+    // half of itself with the tight one, and has to count all the same.
     let overlaps = |a: &crate::page::Rect, b: &crate::page::Rect| {
         let w = a.right().min(b.right()).saturating_sub(a.x.max(b.x));
         let h = a.bottom().min(b.bottom()).saturating_sub(a.y.max(b.y));
-        w * h * 2 > (a.width * a.height).min(b.width * b.height).max(1)
+        w * h * 3 > (a.width * a.height).min(b.width * b.height).max(1)
     };
     // Like for like only: a line of large type replaces the full-size reading
     // of it, but a box that came back far taller than the full-size one is a

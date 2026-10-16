@@ -314,7 +314,7 @@ pub fn recognize_lines(frame: &Frame, scale: f64) -> Option<Vec<crate::page::Lin
                         },
                         text: word.to_string(),
                         // The built-in reader does not say how sure it is.
-                        confidence: 100.0,
+                        confidence: crate::page::UNSCORED,
                     }
                 })
                 .collect()

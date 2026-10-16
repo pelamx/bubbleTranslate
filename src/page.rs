@@ -58,6 +58,8 @@ impl Rect {
 pub struct Line {
     pub rect: Rect,
     pub text: String,
+    /// How sure the reader was of it, out of 100, on average over its words.
+    pub confidence: f32,
 }
 
 /// One word as the reader found it, with how sure it was of it out of 100.
@@ -67,6 +69,13 @@ pub struct Word {
     pub text: String,
     pub confidence: f32,
 }
+
+/// The confidence given to a word by a reader that does not say how sure it
+/// is — the one Windows ships, the built-in one on Linux. Enough that no
+/// doubt about the reading throws the word out, but short of
+/// [`SURE_READING`]: with no score to go on, how well the matching face lands
+/// on the letters is the only check there is, and it keeps its full weight.
+pub const UNSCORED: f32 = 80.0;
 
 /// How sure the reader has to have been of a line, on average out of 100,
 /// for it to be translated. Low on purpose: on a dark theme or in an
@@ -199,7 +208,15 @@ pub fn lines_from_words(lines: Vec<Vec<Word>>) -> Vec<Line> {
                     // "On" stand taller than "the" because of their capitals.
                     let wordlike =
                         w.text.chars().count() == 2 && w.text.chars().all(char::is_alphabetic);
-                    let taller = w.rect.height * 4 > median * 5 && !punctuated && !wordlike;
+                    // Nor is a number the reader was sure of, between words:
+                    // the "1" of "CHAPTER 1" sometimes comes back in a box
+                    // twice the height of its letters, and the chapter would
+                    // lose its number.
+                    let number = !edge
+                        && w.confidence >= SURE_READING
+                        && w.text.chars().all(|c| c.is_ascii_digit());
+                    let taller =
+                        w.rect.height * 4 > median * 5 && !punctuated && !wordlike && !number;
                     !(short && (taller || w.confidence < 30.0))
                 })
                 .map(|(_, w)| w)
@@ -237,7 +254,11 @@ pub fn lines_from_words(lines: Vec<Vec<Word>>) -> Vec<Line> {
                 crate::trace!("page      left as it is, code: {before} {text:?}");
                 continue;
             }
-            out.push(Line { rect, text });
+            out.push(Line {
+                rect,
+                text,
+                confidence: mean,
+            });
         }
     }
     out
@@ -302,6 +323,12 @@ pub fn join_split_lines(mut lines: Vec<Line>) -> Vec<Line> {
                     if gap >= letter(before) * 0.3 {
                         before.text.push(' ');
                     }
+                    let (a, b) = (
+                        before.text.chars().count() as f32,
+                        line.text.chars().count() as f32,
+                    );
+                    before.confidence =
+                        (before.confidence * a + line.confidence * b) / (a + b).max(1.0);
                     before.text.push_str(line.text.trim());
                     before.rect = before.rect.union(&line.rect);
                 }
@@ -530,6 +557,26 @@ fn bare_name(text: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c))
 }
 
+/// Whether a line's ink is spread out with wide letter-spacing — a display
+/// title, a chapter heading, the lettering across a cover — which no installed
+/// face lines up with. Judged from the box alone: each letter takes far more
+/// width than a normal face would set it in at that height.
+///
+/// Only capitals are set that way, and only words: a row of buttons the
+/// reader took for one line — "Open with Google Docs ▾ Share", "Page [3] /
+/// 490" — is spread just as wide, by the gaps between the buttons, and is in
+/// lower case or carries a symbol no heading has. Three letters at least, so
+/// a lone wide glyph (an icon, a drop-cap) is not mistaken for one.
+fn letter_spaced(text: &str, rect: Rect) -> bool {
+    let letters = text.chars().filter(|c| !c.is_whitespace()).count();
+    let capitals = text.chars().filter(|c| c.is_alphabetic()).count() >= 3
+        && !text.chars().any(char::is_lowercase)
+        && text
+            .chars()
+            .all(|c| c.is_alphanumeric() || c.is_whitespace() || ".,:;'’\"“”-–—!?&".contains(c));
+    capitals && rect.width as f32 / letters as f32 > rect.height as f32 * 0.9
+}
+
 /// Whether `text` is a line of code, a command or a path rather than a line
 /// of language — which is left as it is: translated, `let total = 0;` comes
 /// back as nonsense in the shape of a program.
@@ -541,16 +588,6 @@ fn bare_name(text: &str) -> bool {
 /// made of them. So a line is code when enough of it is the punctuation
 /// programs are written in, or when it carries two of the marks only code
 /// has: an operator, a keyword starting it, an identifier, a path.
-/// Whether a line's ink is spread out with wide letter-spacing — a display
-/// title, a chapter heading, the lettering across a cover — which no installed
-/// face lines up with. Judged from the box alone: each letter takes far more
-/// width than a normal face would set it in at that height. Two letters at
-/// least, so a lone wide glyph (an icon, a drop-cap) is not mistaken for one.
-fn letter_spaced(text: &str, rect: Rect) -> bool {
-    let letters = text.chars().filter(|c| !c.is_whitespace()).count();
-    letters >= 2 && rect.width as f32 / letters as f32 > rect.height as f32 * 0.9
-}
-
 pub fn looks_like_code(text: &str) -> bool {
     // An editor or a diff puts a line number and a `+` or `-` in front of
     // the line; what it is, is decided by what follows them.
@@ -1321,6 +1358,17 @@ const MIN_MATCH: f32 = 0.27;
 /// one; see [`Pixels::matched`].
 const RESHAPE_BELOW: f32 = 0.3;
 
+/// How sure the reader has to have been of a line, out of 100, for a poor
+/// fit not to count against it as much; see [`Pixels::replaceable`].
+const SURE_READING: f32 = 85.0;
+
+/// [`MIN_MATCH`] for a line the reader was sure of.
+const MIN_MATCH_SURE: f32 = 0.15;
+
+/// How tall a line's letters have to stand, in pixels, to count as large
+/// type for [`Pixels::replaceable`].
+const LARGE_TYPE: u32 = 48;
+
 /// [`MIN_MATCH`] for a line of forty letters or more.
 const MIN_MATCH_LONG: f32 = 0.18;
 
@@ -1552,8 +1600,18 @@ impl Pixels<'_> {
         // A long sentence with one word misread or missing still fits well
         // enough to be what it says; a short line that fits that badly is
         // something else — a logo, a phonetic spelling, an icon.
-        let needed = if line.text.chars().count() >= 40 {
+        // So does a line in large type: a title or a poster is often drawn in
+        // a face nothing installed resembles — by hand, even — and fits
+        // poorly however right the reading is.
+        // And so does a line the reader was sure of: a table of contents with
+        // "CHAPTER 1" in small bold capitals and the title in a serif is two
+        // faces on one line, which no single face fits well, and is read
+        // perfectly. What a reader misreads — a logo, an icon, a phonetic
+        // spelling — it is seldom sure of.
+        let needed = if line.text.chars().count() >= 40 || line.rect.height >= LARGE_TYPE {
             MIN_MATCH_LONG
+        } else if line.confidence >= SURE_READING {
+            MIN_MATCH_SURE
         } else {
             MIN_MATCH
         };
@@ -1566,7 +1624,8 @@ impl Pixels<'_> {
         // plainly letter-spaced line on clean paper is kept whatever its fit.
         // `matched` being `Some` is the clean-paper test — a picture is `None`
         // and still refused, so this never paints over a photograph.
-        let ok = matched.is_some_and(|score| score >= needed || letter_spaced(&line.text, line.rect));
+        let ok =
+            matched.is_some_and(|score| score >= needed || letter_spaced(&line.text, line.rect));
         if !ok {
             crate::trace!(
                 "page      left as it is, {}: {:?}",
@@ -1925,6 +1984,14 @@ fn snap(groups: &[(f32, f32, f32)], px: f32) -> f32 {
 /// it may be and still does not fit. Never a paragraph.
 const LABEL_SHRINK: [f32; 2] = [0.92, 0.85];
 
+/// Below how good a fit a line takes the face most of its size on the page
+/// fits; see [`Canvas::draw_page`].
+const SHARE_FACE_BELOW: f32 = 0.45;
+
+/// How much smaller a title or a poster in large type may be drawn when it
+/// does not fit as it is.
+const DISPLAY_SHRINK: [f32; 4] = [0.92, 0.85, 0.78, 0.7];
+
 /// How much narrower than its own letters a translation may be drawn, tried in
 /// turn until it fits.
 const SQUEEZES: [f32; 5] = [1.0, 0.94, 0.88, 0.82, 0.76];
@@ -1945,16 +2012,16 @@ fn grow(rect: Rect, by: u32) -> Rect {
 /// translation.
 const EXTRA_ROWS: usize = 3;
 
-/// Whether `translation` came back in a script that neither the original nor
-/// the language asked for is written in — Chinese for a German line being
-/// put into Turkish. That is the translator guessing at a misread line, not
-/// translating it, and the line is better left as it was.
 /// Whether `c` is Chinese, Japanese or Korean script.
 fn east_asian(c: char) -> bool {
     matches!(c as u32,
         0x3040..=0x30FF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF)
 }
 
+/// Whether `translation` came back in a script that neither the original nor
+/// the language asked for is written in — Chinese for a German line being
+/// put into Turkish. That is the translator guessing at a misread line, not
+/// translating it, and the line is better left as it was.
 pub fn wrong_script(original: &str, translation: &str, target: &str) -> bool {
     let east = east_asian;
     let target = target.split('-').next().unwrap_or(target);
@@ -1977,6 +2044,16 @@ fn unchanged(original: &str, translation: &str) -> bool {
             .to_lowercase()
     };
     simple(original) == simple(translation)
+}
+
+/// Whether a paragraph is one letter and nothing else — a reload arrow read
+/// as "C", a close button read as "X". It is not language: translated, it can
+/// only come back as another letter, "C" as "Ç", painted over the icon.
+/// A letter of a script without capitals — a Chinese character — is a word,
+/// and is not one of these.
+fn lone_letter(text: &str) -> bool {
+    let mut chars = text.trim().chars();
+    matches!((chars.next(), chars.next()), (Some(c), None) if c.is_uppercase() || c.is_lowercase())
 }
 
 /// A picture to draw into, in the layout of [`Pixels`].
@@ -2107,6 +2184,10 @@ impl Canvas<'_> {
                     );
                     return None;
                 }
+                if lone_letter(&block.text) {
+                    crate::trace!("page      left as it is, a lone letter: {:?}", block.text);
+                    return None;
+                }
                 let styles = block
                     .lines
                     .iter()
@@ -2123,11 +2204,103 @@ impl Canvas<'_> {
             .collect();
         let sizes = size_groups(measured.iter().flatten().flatten().map(|s| s.px));
         crate::trace!("page      sizes on the page: {sizes:?}");
-        for ((block, translation), styles) in translated.iter().zip(measured) {
-            let Some(mut styles) = styles else { continue };
-            for style in &mut styles {
-                style.px = snap(&sizes, style.px);
+        let mut prepared: Vec<(&Block, &String, Vec<Style>)> = translated
+            .iter()
+            .zip(measured)
+            .filter_map(|((block, translation), styles)| {
+                let mut styles = styles?;
+                for style in &mut styles {
+                    style.px = snap(&sizes, style.px);
+                }
+                Some((block, translation, styles))
+            })
+            .collect();
+
+        // A list is one size: a table of contents, a menu, the items of a
+        // sidebar — one under another, starting at the same left edge.
+        // Measured a line at a time, a line set in two faces can come out a
+        // size apart from its neighbours; the run takes its middle size. A
+        // line far from it — the list's own heading — keeps its own.
+        let mut order: Vec<usize> = (0..prepared.len()).collect();
+        order.sort_by_key(|&at| (prepared[at].0.rect.x / 6, prepared[at].0.rect.y));
+        let mut start = 0;
+        while start < order.len() {
+            let first_x = prepared[order[start]].0.rect.x;
+            let mut end = start + 1;
+            while end < order.len() {
+                let (before, next) = (&prepared[order[end - 1]], &prepared[order[end]]);
+                let gap = next.0.rect.y.saturating_sub(before.0.rect.bottom());
+                if next.0.rect.x.abs_diff(first_x) > 6 || gap > before.0.rect.height.max(1) * 3 {
+                    break;
+                }
+                end += 1;
             }
+            if end - start >= 3 {
+                let mut run: Vec<f32> = order[start..end]
+                    .iter()
+                    .flat_map(|&at| prepared[at].2.iter().map(|style| style.px))
+                    .collect();
+                run.sort_by(f32::total_cmp);
+                let middle = run[run.len() / 2];
+                for &at in &order[start..end] {
+                    for style in &mut prepared[at].2 {
+                        if (style.px - middle).abs() <= middle * 0.15 {
+                            style.px = middle;
+                        }
+                    }
+                }
+            }
+            start = end;
+        }
+
+        // And one face to a size: text set at one size on a page is set in
+        // one face, and line by line the best fit wanders between faces that
+        // fit about as well, leaving a list in three. The face that fits most
+        // of that size's text, by how much of it and how well, is offered to
+        // all of it.
+        let mut votes: Vec<(f32, Face, f32)> = Vec::new();
+        for (block, _, styles) in &prepared {
+            for (style, line) in styles.iter().zip(&block.lines) {
+                let weight = style.fit * line.text.chars().count() as f32;
+                match votes
+                    .iter_mut()
+                    .find(|(s, f, _)| *s == style.px && f.same_font(style.face))
+                {
+                    Some((_, _, total)) => *total += weight,
+                    None => votes.push((style.px, style.face, weight)),
+                }
+            }
+        }
+        let face_for = |size: f32| -> Option<Face> {
+            votes
+                .iter()
+                .filter(|(s, _, _)| *s == size)
+                .max_by(|a, b| a.2.total_cmp(&b.2))
+                .map(|(_, face, _)| *face)
+        };
+        for (_, _, styles) in &mut prepared {
+            for style in styles.iter_mut() {
+                // Taken by a line that fitted its own face poorly — two faces
+                // on one line, an unusual one — and by a line set in the same
+                // kind and weight of face, which is then the same face rather
+                // than a near twin. Not by a line that fits a different kind
+                // or weight well: a bold heading beside regular text at the
+                // same size is not the same face. A narrowed version of the
+                // same face keeps its narrowing.
+                // A line that fits poorly takes the shared face whole,
+                // narrowing and all: its own narrowing was a guess.
+                if let Some(face) = face_for(style.px)
+                    && style.face != face
+                    && (style.fit < SHARE_FACE_BELOW
+                        || (!style.face.same_font(face)
+                            && fonts.kind(style.face) == fonts.kind(face)
+                            && fonts.bold(style.face) == fonts.bold(face)))
+                {
+                    style.face = face;
+                }
+            }
+        }
+        for (block, translation, styles) in prepared {
             self.draw_measured(fonts, block, translation, styles);
         }
     }
@@ -2270,6 +2443,21 @@ impl Canvas<'_> {
             // which in a menu or on a button — set apart from everything
             // around it — the eye barely notices, where in a paragraph it
             // would.
+            // A title or a poster in large type gets the same chance, and
+            // further: there the words matter more than the exact size.
+            let large = block
+                .lines
+                .iter()
+                .all(|line| line.rect.height >= LARGE_TYPE);
+            if large {
+                for smaller in DISPLAY_SHRINK {
+                    if let Some(texts) = attempt(set_in, extra.len(), original * smaller) {
+                        px = original * smaller;
+                        used_extra = extra.len();
+                        break 'found texts;
+                    }
+                }
+            }
             if block.lines.len() == 1 {
                 for smaller in LABEL_SHRINK {
                     if let Some(texts) = attempt(set_in, extra.len(), original * smaller) {
@@ -2288,10 +2476,25 @@ impl Canvas<'_> {
                 return;
             }
             used_extra = extra.len();
-            crate::trace!("page      cut short, no room: {:?}", block.text);
             let mut all = widths.clone();
             all.extend_from_slice(&extra_widths);
-            cut_short(fonts, set_in, translation, px, &all)
+            let rows = cut_short(fonts, set_in, translation, px, &all);
+            // Cut to less than half of itself, the translation says less than
+            // the original did: the original stays.
+            let kept: usize = rows
+                .iter()
+                .map(|row| {
+                    row.split_whitespace()
+                        .filter(|word| !word.trim_end_matches('…').is_empty())
+                        .count()
+                })
+                .sum();
+            if kept * 2 < translation.split_whitespace().count() {
+                crate::trace!("page      left as it is, no room: {:?}", block.text);
+                return;
+            }
+            crate::trace!("page      cut short, no room: {:?}", block.text);
+            rows
         };
         rows.extend(extra.into_iter().take(used_extra));
 
@@ -2373,6 +2576,7 @@ mod tests {
                 height,
             },
             text: text.into(),
+            confidence: 95.0,
         }
     }
 
@@ -2391,6 +2595,14 @@ mod tests {
         ));
         // A plain big title that is not letter-spaced stays ordinary.
         assert!(!letter_spaced("The Annual", rect(0, 0, 805, 110)));
+        // A row of buttons is spread as wide by the gaps between them, and
+        // is not a heading.
+        assert!(!letter_spaced(
+            "B OpenwithGoogleDocs v Share",
+            rect(0, 0, 570, 24)
+        ));
+        assert!(!letter_spaced("Page 490", rect(0, 0, 150, 20)));
+        assert!(!letter_spaced("£L @2 3 4 5", rect(0, 0, 300, 20)));
     }
 
     fn rect(x: u32, y: u32, width: u32, height: u32) -> Rect {
@@ -2755,6 +2967,15 @@ mod tests {
     }
 
     #[test]
+    fn a_lone_letter_is_an_icon_not_a_word() {
+        assert!(lone_letter("C"));
+        assert!(lone_letter(" x "));
+        assert!(!lone_letter("Ok"));
+        assert!(!lone_letter("是"));
+        assert!(!lone_letter("5"));
+    }
+
+    #[test]
     fn a_translation_that_is_the_original_is_not_repainted() {
         assert!(unchanged("Bremen  ", "bremen"));
         assert!(!unchanged("Hauptstadt", "capital"));
@@ -2785,6 +3006,7 @@ mod tests {
             Line {
                 rect,
                 text: text.into(),
+                confidence: 95.0,
             },
         )
     }
@@ -2896,6 +3118,7 @@ mod tests {
                 height: ((b - t) * 18.0).ceil() as u32,
             },
             text: "Guten Morgen".into(),
+            confidence: 95.0,
         };
         let pixels = canvas.pixels();
         assert!(pixels.replaceable(fonts, &line), "a gradient is paper");

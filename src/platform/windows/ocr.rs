@@ -469,18 +469,6 @@ fn enlarged(frame: &Frame, factor: u32) -> Frame {
     }
 }
 
-/// How sure the words out of `Windows.Media.Ocr` are taken to be.
-///
-/// It reports no confidence at all — there is no such property on an
-/// `OcrWord` — so every word it finds arrives as certain. That costs two of
-/// the three ways [`crate::page::lines_from_words`] throws out an icon read
-/// as a letter; the third, a short token standing taller than the words
-/// beside it, does not need a confidence and still applies. What actually
-/// keeps a misread picture from being "translated" is the check after it:
-/// whether the text, set in the face that fits it, lands on the letters at
-/// all. See [`crate::page::Pixels::replaceable`].
-const CERTAIN: f32 = 100.0;
-
 /// Reads `frame` with the engine on the machine, keeping every word's box.
 fn read_lines_here(frame: &Frame) -> Option<Vec<crate::page::Line>> {
     let longest = frame.width.max(frame.height);
@@ -525,10 +513,20 @@ fn read_lines_here(frame: &Frame) -> Option<Vec<crate::page::Line>> {
             if rect.width == 0 || rect.height == 0 {
                 continue;
             }
+            // `Windows.Media.Ocr` reports no confidence at all — there is no
+            // such property on an `OcrWord` — so every word arrives unscored:
+            // never doubted, and never counted as sure either. That costs two
+            // of the three ways [`crate::page::lines_from_words`] throws out
+            // an icon read as a letter; the third, a short token standing
+            // taller than the words beside it, does not need a confidence and
+            // still applies. What actually keeps a misread picture from being
+            // "translated" is the check after it: whether the text, set in
+            // the face that fits it, lands on the letters at all. See
+            // [`crate::page::Pixels::replaceable`].
             words.push(crate::page::Word {
                 rect,
                 text: text.to_string_lossy(),
-                confidence: CERTAIN,
+                confidence: crate::page::UNSCORED,
             });
         }
         if !words.is_empty() {
