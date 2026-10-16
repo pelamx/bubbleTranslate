@@ -13,6 +13,15 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## 0.4.15 — 2026-10-16
+
+**The translate box is first in the window, and the shortcuts are said
+once.** Typing or pasting something to translate is what the window is most
+often opened for, so the box now sits at the top, above "How to use it". That
+section now shows only the selection key and Esc: the screen-reading
+shortcuts were listed both there and in "Read the screen" just below, and now
+appear once, with their explanation.
+
 ## 0.4.14 — 2026-10-16
 
 **Translate the whole screen at once with ⌘⇧F. (macOS)** Every paragraph on

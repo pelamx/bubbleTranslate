@@ -187,14 +187,14 @@ pub fn draw(
                 first_run_card(ui);
             }
 
+            section(ui, t("Translate", "Çevir", "Traducir"), |ui| {
+                translate_box(ui, &mut state, &cfg)
+            });
             section(
                 ui,
                 t("How to use it", "Nasıl kullanılır", "Cómo usarlo"),
                 |ui| howto::how_to(ui, &cfg),
             );
-            section(ui, t("Translate", "Çevir", "Traducir"), |ui| {
-                translate_box(ui, &mut state, &cfg)
-            });
             section(
                 ui,
                 t(

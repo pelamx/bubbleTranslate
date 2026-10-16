@@ -1,8 +1,9 @@
-//! "How to use it", at the top of the window: every gesture the app answers
-//! to, said once where anyone opening the window will see it.
+//! "How to use it", at the top of the window: the selection gesture and Esc,
+//! said once where anyone opening the window will see it. The screen-reading
+//! shortcuts have their own section further down, and are not repeated here.
 //!
 //! The app shows nothing until it is asked, so the window is the only place
-//! the gestures can be learnt. The selection key is the one chosen in the
+//! the gesture can be learnt. The selection key is the one chosen in the
 //! settings, named the way this keyboard names it.
 
 use eframe::egui;
@@ -35,7 +36,6 @@ fn tip(ui: &mut egui::Ui, text: &str) {
 }
 
 pub fn how_to(ui: &mut egui::Ui, cfg: &Config) {
-    let mac = cfg!(target_os = "macos");
     let key = cfg.trigger_key.label();
     let select = t(
         "select text, or double-click a word — the translation appears next to the pointer",
@@ -46,28 +46,6 @@ pub fn how_to(ui: &mut egui::Ui, cfg: &Config) {
         row(ui, &[t("Select", "Seç", "Selecciona")], select);
     } else {
         row(ui, &[key], select);
-    }
-    let region = if mac { "⌘⇧E" } else { "Ctrl+Shift+E" };
-    row(
-        ui,
-        &[region],
-        t(
-            "draw a box around text you cannot select — a picture, a video, a game",
-            "seçilemeyen yazının etrafına kutu çiz — resim, video, oyun",
-            "dibuja un recuadro alrededor de texto que no se puede seleccionar",
-        ),
-    );
-    // The whole screen at once, only where it is built yet.
-    if cfg!(any(target_os = "linux", target_os = "windows", target_os = "macos")) {
-        row(
-            ui,
-            &[if mac { "⌘⇧F" } else { "Ctrl+Shift+F" }],
-            t(
-                "translate the whole screen in place — same layout, font and size",
-                "tüm ekranı yerinde çevir — aynı düzen, yazı tipi ve boyut",
-                "traduce toda la pantalla en su sitio — mismo diseño, letra y tamaño",
-            ),
-        );
     }
     row(
         ui,
