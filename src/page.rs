@@ -541,6 +541,16 @@ fn bare_name(text: &str) -> bool {
 /// made of them. So a line is code when enough of it is the punctuation
 /// programs are written in, or when it carries two of the marks only code
 /// has: an operator, a keyword starting it, an identifier, a path.
+/// Whether a line's ink is spread out with wide letter-spacing — a display
+/// title, a chapter heading, the lettering across a cover — which no installed
+/// face lines up with. Judged from the box alone: each letter takes far more
+/// width than a normal face would set it in at that height. Two letters at
+/// least, so a lone wide glyph (an icon, a drop-cap) is not mistaken for one.
+fn letter_spaced(text: &str, rect: Rect) -> bool {
+    let letters = text.chars().filter(|c| !c.is_whitespace()).count();
+    letters >= 2 && rect.width as f32 / letters as f32 > rect.height as f32 * 0.9
+}
+
 pub fn looks_like_code(text: &str) -> bool {
     // An editor or a diff puts a line number and a `+` or `-` in front of
     // the line; what it is, is decided by what follows them.
@@ -1547,7 +1557,16 @@ impl Pixels<'_> {
         } else {
             MIN_MATCH
         };
-        let ok = matched.is_some_and(|score| score >= needed);
+        // A heading set with wide letter-spacing — a chapter title, a cover,
+        // the display type of a printed page — spreads its ink across a box
+        // far wider than the words themselves, so no installed face lines up
+        // with it and the fit comes back low even where the paper behind it is
+        // clean. Set normally the translation still reads where the title was,
+        // and leaving it in the other language is the worse outcome; so a
+        // plainly letter-spaced line on clean paper is kept whatever its fit.
+        // `matched` being `Some` is the clean-paper test — a picture is `None`
+        // and still refused, so this never paints over a photograph.
+        let ok = matched.is_some_and(|score| score >= needed || letter_spaced(&line.text, line.rect));
         if !ok {
             crate::trace!(
                 "page      left as it is, {}: {:?}",
@@ -2354,6 +2373,32 @@ mod tests {
                 height,
             },
             text: text.into(),
+        }
+    }
+
+    /// A wide-tracked title is recognised as letter-spaced so the fit gate
+    /// keeps it; ordinary lines, where ink fills the box, are not.
+    #[test]
+    fn a_letter_spaced_heading_is_told_from_ordinary_text() {
+        // "CHAPTER THREE" as captured from a page of print: 1015px across,
+        // 73px tall — each letter far wider than its height.
+        assert!(letter_spaced("CHAPTER THREE", rect(0, 0, 1015, 73)));
+        // Ordinary body text: the ink fills the line, so per-letter width is
+        // about half the height.
+        assert!(!letter_spaced(
+            "the morning began quietly in the valley",
+            rect(0, 0, 760, 38)
+        ));
+        // A plain big title that is not letter-spaced stays ordinary.
+        assert!(!letter_spaced("The Annual", rect(0, 0, 805, 110)));
+    }
+
+    fn rect(x: u32, y: u32, width: u32, height: u32) -> Rect {
+        Rect {
+            x,
+            y,
+            width,
+            height,
         }
     }
 

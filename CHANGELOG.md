@@ -15,6 +15,15 @@ days before the others.
 
 ## Unreleased
 
+**A heading set in spaced-out capitals is translated now, not left behind.**
+On a printed page — a PDF in Google Drive's viewer, a book cover — a chapter
+title or headline is often set in wide-spaced letters. Its letters sit so far
+apart that no installed typeface lined up with them, so the whole-screen
+translation judged it unreadable and left it in the original language, even
+while the paragraphs under it were translated. It is now recognised as a
+spaced title and translated like the rest, wherever the paper behind it is
+plain.
+
 **Translating the whole screen reads the interface, not only your language.
 (macOS)** When you have set a source language rather than leaving it
 automatic, ⌘⇧F used to read only that language and leave the English interface
