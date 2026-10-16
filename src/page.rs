@@ -167,16 +167,20 @@ pub fn lines_from_words(lines: Vec<Vec<Word>>) -> Vec<Line> {
                 .enumerate()
                 .filter(|(_, w)| w.text.chars().any(char::is_alphanumeric))
                 .filter(|(at, w)| {
-                    // A letter or two the reader was unsure of at either end
-                    // of a line is a radio button, a bullet, an icon before a
-                    // label; in the middle it is a short word.
-                    // A single character the reader was unsure of at either end
-                    // of a line is a radio button, a bullet, an icon before a
-                    // label. Two letters are a word — "By", "On" — however
-                    // unsure.
+                    // A letter or two the reader was unsure of at either end of
+                    // a line is a radio button, a bullet, an icon before a
+                    // label; in the middle of a line a short word is a word.
+                    // And at the start, anything with a character no word has
+                    // in it is what is left of a key's chip or a button's
+                    // border — "\:A'Lt" for an Alt key. Only at the start: at
+                    // the end, a word the reader cut short at a column it
+                    // imagined comes back as "grip|", and is still a word.
                     let edge = *at == 0 || *at == last_at;
                     let short = w.text.chars().count() <= 2;
-                    if w.text.chars().count() == 1 && edge && w.confidence < 60.0 {
+                    if short && edge && w.confidence < 60.0 {
+                        return false;
+                    }
+                    if *at == 0 && last_at > 0 && w.text.chars().any(|c| "\\|~^`".contains(c)) {
                         return false;
                     }
                     // A radio button or a bullet in front of a label, read
@@ -2486,6 +2490,28 @@ mod tests {
         );
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[1].lines.len(), 2);
+    }
+
+    #[test]
+    fn what_is_left_of_a_keys_chip_is_not_part_of_its_line() {
+        let word = |x: u32, text: &str, confidence: f32| Word {
+            rect: Rect {
+                x,
+                y: 100,
+                width: text.chars().count() as u32 * 9,
+                height: 18,
+            },
+            text: text.into(),
+            confidence,
+        };
+        let lines = lines_from_words(vec![vec![
+            word(10, "\\:A'Lt", 41.0),
+            word(80, "select", 93.0),
+            word(140, "text", 94.0),
+        ]]);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "select text");
+        assert_eq!(lines[0].rect.x, 80);
     }
 
     #[test]
