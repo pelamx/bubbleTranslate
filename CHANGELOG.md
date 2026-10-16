@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.4.16 — 2026-10-16
 
 **A heading set in spaced-out capitals is translated now, not left behind.**
 On a printed page — a PDF in Google Drive's viewer, a book cover — a chapter
@@ -37,8 +37,6 @@ the rest of the screen is sent along as context — DeepL reads it to choose
 between meanings but does not translate it — so a word that could go two ways
 is settled by what surrounds it. The other providers already translate each
 paragraph whole.
-
-## 0.4.16 — 2026-10-16
 
 **The screen is now read in the language you are translating from. (Windows)**
 Windows reads the screen one language at a time, and it was always asked for
