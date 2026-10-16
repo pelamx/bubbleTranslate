@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.4.14 — 2026-10-16
 
 **Translate the whole screen at once with Ctrl+Shift+F. (Windows)** Every
 paragraph on the screen is replaced by its translation, in place — in the same
