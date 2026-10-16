@@ -13,6 +13,22 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**Translating the whole screen reads the interface, not only your language.
+(macOS)** When you have set a source language rather than leaving it
+automatic, ⌘⇧F used to read only that language and leave the English interface
+around the content — menus, buttons, a sidebar — untranslated. It now reads
+English alongside your language, so the whole screen comes back rather than
+only the part in the one language.
+
+**A translated screen is now translated in context.** Each paragraph is
+translated as part of the whole page rather than on its own: with a DeepL key
+the rest of the screen is sent along as context — DeepL reads it to choose
+between meanings but does not translate it — so a word that could go two ways
+is settled by what surrounds it. The other providers already translate each
+paragraph whole.
+
 ## 0.4.16 — 2026-10-16
 
 **Translating the whole screen keeps a printed page's paragraphs whole.** On a

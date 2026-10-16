@@ -2327,6 +2327,24 @@ impl Canvas<'_> {
 mod tests {
     use super::*;
 
+    /// A word or sentence that carries data — numbers, a version, a count — is
+    /// translated like any other; only lines that are *made of* code, or have
+    /// no letters to translate, are left as they were.
+    #[test]
+    fn data_in_a_sentence_is_translated_but_bare_code_is_left() {
+        for sentence in [
+            "Added 1 line, removed 1 line",
+            "Total: 3 items left today",
+            "Version 2 is ready",
+            "Battery at 80%",
+        ] {
+            assert!(!looks_like_code(sentence), "should translate: {sentence:?}");
+        }
+        for code in ["let x = foo();", "// a comment", ".github", "a == b && c"] {
+            assert!(looks_like_code(code), "should be left as code: {code:?}");
+        }
+    }
+
     fn line(x: u32, y: u32, width: u32, height: u32, text: &str) -> Line {
         Line {
             rect: Rect {

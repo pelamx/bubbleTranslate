@@ -186,10 +186,11 @@ pub fn recognize_words(png: &[u8], source_lang: &str, width: u32, height: u32) -
         let request = VNRecognizeTextRequest::new();
         request.setRecognitionLevel(VNRequestTextRecognitionLevel::Accurate);
         request.setUsesLanguageCorrection(true);
-        match wanted_language(source_lang, languages()) {
-            Some(id) => {
-                let id = NSString::from_str(&id);
-                request.setRecognitionLanguages(&NSArray::from_retained_slice(&[id]));
+        match recognition_languages(source_lang, languages()) {
+            Some(ids) => {
+                let ns: Vec<Retained<NSString>> =
+                    ids.iter().map(|id| NSString::from_str(id)).collect();
+                request.setRecognitionLanguages(&NSArray::from_retained_slice(&ns));
             }
             None => request.setAutomaticallyDetectsLanguage(true),
         }
@@ -374,6 +375,26 @@ fn wanted_language(source_lang: &str, supported: &[String]) -> Option<String> {
         .cloned()
 }
 
+/// The languages to ask Vision to read a whole screen in, or `None` to let it
+/// detect the language itself.
+///
+/// A screen is usually one language wrapped in an English interface — the
+/// menus, the buttons, a sidebar. Asking only for the source language reads
+/// the content and leaves that chrome unread; so when the source is a specific
+/// non-English language, English is asked for alongside it (when this machine
+/// can read it), so the whole screen comes back rather than only the part in
+/// one language. `auto` still means detection, which already reads everything.
+fn recognition_languages(source_lang: &str, supported: &[String]) -> Option<Vec<String>> {
+    let primary = wanted_language(source_lang, supported)?;
+    let mut ids = vec![primary.clone()];
+    if !primary.to_ascii_lowercase().starts_with("en")
+        && let Some(english) = supported.iter().find(|id| id.to_ascii_lowercase().starts_with("en"))
+    {
+        ids.push(english.clone());
+    }
+    Some(ids)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,6 +478,28 @@ mod tests {
             line(0.500, 0.10, "CHARLIE"),
         ]);
         assert_eq!(text, "ALPHA BRAVO\nCHARLIE DELTA");
+    }
+
+    /// A whole screen is usually one language inside an English interface, so
+    /// English is read alongside a foreign source — but not duplicated for an
+    /// English source, and `auto`/unknown still defer to Vision's detection.
+    #[test]
+    fn recognition_languages_reads_the_interface_too() {
+        let supported = [
+            "en-US".to_string(),
+            "de-DE".to_string(),
+            "zh-Hans".to_string(),
+        ];
+        assert_eq!(
+            recognition_languages("de", &supported),
+            Some(vec!["de-DE".to_string(), "en-US".to_string()])
+        );
+        assert_eq!(
+            recognition_languages("en", &supported),
+            Some(vec!["en-US".to_string()])
+        );
+        assert_eq!(recognition_languages("auto", &supported), None);
+        assert_eq!(recognition_languages("fr", &supported), None);
     }
 
     /// Vision measures a range in UTF-16 code units, which are neither Rust's
