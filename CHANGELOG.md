@@ -13,6 +13,42 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## 0.4.13 — 2026-10-16
+
+**The window now says how to use it, at the top.** Hold Alt — Option on a
+Mac — and select text or double-click a word; Ctrl+Shift+E for text you cannot
+select; Ctrl+Shift+F for the whole screen (on Linux); Esc to put either away —
+each with its key, and the key is whichever one you chose in the settings.
+Below them, a few tips: what the bubble's buttons do, how the language you
+read from is found, and what the free version includes. The app shows nothing
+until you ask it to, so until now the gestures were easy to miss.
+
+**Translate the whole screen at once with Ctrl+Shift+F. (Linux)** Every
+paragraph on the screen is replaced by its translation, in place — in the same
+font, size and colour it was printed in, on the lines it was on, the way a
+translated web page looks. It works on anything the screen shows: a PDF, a
+terminal, a game, an app that was never translated. Code, file names and
+commands are left as they are, and so is text on a picture that could not be
+replaced cleanly. Press any key or click to put it away. Until now a page
+meant selecting it piece by piece, or drawing a box with Ctrl+Shift+E for each
+part. It is also in the window, under "Translate text you cannot select".
+
+**Reading the screen can use Google Vision, with a key of your own. (Linux)** Enter a
+Google Cloud Vision API key under Settings and the screen — a box or the whole
+of it — is read by Google instead of on your computer: faint and small text,
+accented letters and every script come out right, in about a second. The
+picture of the screen is sent to Google to do it, and the window says so while
+the key is set. Without a key nothing changes and nothing leaves your
+computer; if Google cannot be reached, the screen is read on your computer as
+before.
+
+**Reading the screen has its own daily allowance: three a day on the free
+version.** A box drawn with Ctrl+Shift+E and the whole screen with
+Ctrl+Shift+F count together, and no longer use up the ten translations of
+selected text, which stay ten. Both come back at midnight, and Pro has no limit
+on either. The bubble says how many screen readings are left, and when they
+run out it says so instead of opening the overlay for nothing.
+
 ## 0.4.12 — 2026-10-15
 
 **When the free translations run out, the bubble shows what the yearly plan

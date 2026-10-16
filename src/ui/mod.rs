@@ -69,6 +69,9 @@ enum State {
         result: Translation,
         /// Free translations left today, when few enough to be worth saying.
         left: Option<u32>,
+        /// Whether this was read off the screen, so `left` counts the day's
+        /// screen readings rather than its translations.
+        screen: bool,
         /// Whether this bubble carries the "new version" line.
         update: bool,
     },
@@ -77,8 +80,10 @@ enum State {
     },
     /// Today's free allowance is spent. Appears exactly where a translation would
     /// have, and always carries the way past it.
+    ///
+    /// `None` for the day's screen readings rather than its translations.
     Capped {
-        limit: u32,
+        limit: Option<u32>,
     },
 }
 
@@ -172,15 +177,17 @@ impl BubbleApp {
     /// Free translations left today when there are few enough (three or
     /// fewer) that running out is near, so it is no surprise when it comes.
     /// `None` on Pro, and while there are plenty.
-    fn few_left(&self) -> Option<u32> {
+    ///
+    /// For something read off the screen, the day's screen readings instead,
+    /// which are few enough that every one left is worth saying.
+    fn few_left(&self, screen: bool) -> Option<u32> {
         // One lock after the other, in the order the engine takes them.
         let entitlement = self.licensing.license.lock().unwrap().entitlement.clone();
-        let left = self
-            .licensing
-            .quota
-            .lock()
-            .unwrap()
-            .remaining(&entitlement)?;
+        let mut quota = self.licensing.quota.lock().unwrap();
+        if screen {
+            return quota.ocr_left(&entitlement);
+        }
+        let left = quota.remaining(&entitlement)?;
         (left <= 3).then_some(left)
     }
 
@@ -274,9 +281,16 @@ impl BubbleApp {
                     }
                     let update = !self.update_announced && crate::update::available().is_some();
                     self.update_announced |= update;
+                    let screen = matches!(
+                        self.state,
+                        State::Working {
+                            via: CaptureSource::Ocr
+                        }
+                    );
                     self.state = State::Done {
                         result,
-                        left: self.few_left(),
+                        left: self.few_left(screen),
+                        screen,
                         update,
                     };
                     self.shown_at = Instant::now();
@@ -303,7 +317,17 @@ impl BubbleApp {
                     main.testing = false;
                     main.statuses = statuses;
                 }
-                UiEvent::Capped { at, limit } => {
+                UiEvent::Dismiss => {
+                    if !matches!(self.state, State::Hidden) {
+                        self.hide(ctx);
+                    }
+                }
+                UiEvent::Capped { .. } | UiEvent::OcrCapped { .. } => {
+                    let (at, limit) = match event {
+                        UiEvent::Capped { at, limit } => (at, Some(limit)),
+                        UiEvent::OcrCapped { at } => (at, None),
+                        _ => unreachable!(),
+                    };
                     self.anchor = at;
                     self.state = State::Capped { limit };
                     self.settings_open = false;

@@ -116,14 +116,72 @@ impl Frame {
     /// display, with a margin around it. `scale` is how many of the frame's
     /// pixels make one logical pixel of the desktop — 2 on a HiDPI display.
     pub(super) fn prepared(&self, scale: f64) -> (Vec<u8>, u32, u32) {
-        let factor = if scale < 1.5 { 2 } else { 1 };
-        pad(
-            &self.grey(factor),
-            self.width * factor,
-            self.height * factor,
-            MARGIN,
-        )
+        let factor = enlargement(scale);
+        let (width, height) = (self.width * factor, self.height * factor);
+        let mut grey = self.grey(factor);
+        light_paper(&mut grey, width, height);
+        pad(&grey, width, height, MARGIN)
     }
+}
+
+/// How big a square of the picture is judged light or dark on its own, in
+/// the prepared picture's pixels.
+const TILE: u32 = 48;
+
+/// Turns light text on a dark background into dark text on a light one, and
+/// every background white, a square at a time.
+///
+/// Both readers learnt to read print — dark on light — and read a dark theme
+/// badly: an editor's sidebar, a terminal, a dark web page came back with
+/// half its words below the confidence they are kept at. Judged square by
+/// square, from what most of each is, so a dark sidebar beside a light page
+/// is turned and the page is not.
+fn light_paper(grey: &mut [u8], width: u32, height: u32) {
+    let mut ty = 0;
+    while ty < height {
+        let mut tx = 0;
+        while tx < width {
+            let (x1, y1) = ((tx + TILE).min(width), (ty + TILE).min(height));
+            let mut histogram = [0u32; 256];
+            for y in ty..y1 {
+                for x in tx..x1 {
+                    histogram[grey[(y * width + x) as usize] as usize] += 1;
+                }
+            }
+            // The commonest level is the paper; letters are the minority.
+            let paper = histogram
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, n)| **n)
+                .map_or(255, |(level, _)| level);
+            let dark = paper < 110;
+            // And every square's paper made white, whatever shade it was: a
+            // reader picks one level to split ink from paper by, and on a
+            // screen of white panels and grey ones that level turns a whole
+            // grey panel — a highlighted message, a card — solid black.
+            let paper = if dark { 255 - paper } else { paper } as u32;
+            for y in ty..y1 {
+                for x in tx..x1 {
+                    let at = (y * width + x) as usize;
+                    let level = if dark { 255 - grey[at] } else { grey[at] } as u32;
+                    grey[at] = (level * 255 / paper.max(1)).min(255) as u8;
+                }
+            }
+            tx += TILE;
+        }
+        ty += TILE;
+    }
+}
+
+/// How many times bigger a frame is made before it is read; see
+/// [`Frame::grey`].
+fn enlargement(scale: f64) -> u32 {
+    if scale < 1.5 { 2 } else { 1 }
+}
+
+/// A point of the prepared picture, back in the frame's own pixels.
+pub(super) fn unprepare(at: i64, scale: f64) -> u32 {
+    ((at - i64::from(MARGIN)).max(0) / i64::from(enlargement(scale))) as u32
 }
 
 /// How long a single recognition may take before it is given up on.
@@ -214,22 +272,161 @@ pub fn prepare() -> Result<(), String> {
 /// `None` when no reader is ready or it failed. An empty string is a real
 /// answer — the pixels were read, and held no text.
 pub fn recognize(frame: &Frame, scale: f64) -> Option<String> {
+    if let Some(key) = crate::vision::key() {
+        match crate::vision::read_text(&key, frame.width, frame.height, &frame.bgrx) {
+            Ok(text) => return Some(join_lines(&text)),
+            Err(err) => crate::trace!("vision    {err}; reading here instead"),
+        }
+    }
     let raw = if tesseract_ready() {
-        tesseract(frame, scale)?
+        tesseract(frame, scale, Output::Text)?
     } else {
         super::reader::recognize(frame, scale)?
     };
     Some(join_lines(&raw))
 }
 
-fn tesseract(frame: &Frame, scale: f64) -> Option<String> {
+/// Reads every line of text in `frame`, with where each one is, in the
+/// frame's own pixels. For the whole screen, where the translation has to be
+/// painted back where the text was.
+pub fn recognize_lines(frame: &Frame, scale: f64) -> Option<Vec<crate::page::Line>> {
+    if let Some(key) = crate::vision::key() {
+        match crate::vision::read_words(&key, frame.width, frame.height, &frame.bgrx) {
+            Ok(words) => return Some(crate::page::lines_from_words(words)),
+            Err(err) => crate::trace!("vision    {err}; reading here instead"),
+        }
+    }
+    if tesseract_ready() {
+        Some(tesseract_in_bands(frame, scale))
+    } else {
+        super::reader::recognize_lines(frame, scale)
+    }
+}
+
+/// How many strips a whole screen is cut into, each read by its own
+/// Tesseract at the same time. One Tesseract uses one core, and a whole
+/// screen read by one took eight to twelve seconds.
+const BANDS: u32 = 4;
+
+/// How far each strip reaches into the next, in the frame's pixels: enough
+/// that every line of ordinary text is whole, with room around it, in at
+/// least one of them.
+const BAND_OVERLAP: u32 = 96;
+
+/// Reads the whole of `frame` as [`BANDS`] strips at once, and puts their
+/// lines back together. A line the strips overlap on can be read by both, and
+/// a reader sometimes misses a line near the edge of one strip that the other
+/// sees whole: every line is kept, and of two that are the same line, the
+/// one with more read in it.
+fn tesseract_in_bands(frame: &Frame, scale: f64) -> Vec<crate::page::Line> {
+    let bands = if frame.height > BAND_OVERLAP * 8 {
+        BANDS.min(
+            std::thread::available_parallelism()
+                .map_or(1, |n| n.get() as u32)
+                .max(1),
+        )
+    } else {
+        1
+    };
+    let height = frame.height;
+    let started = std::time::Instant::now();
+    let lines = std::thread::scope(|scope| {
+        let reads: Vec<_> = (0..bands)
+            .map(|band| {
+                scope.spawn(move || {
+                    let top = (height * band / bands).saturating_sub(BAND_OVERLAP);
+                    let bottom = (height * (band + 1) / bands + BAND_OVERLAP).min(height);
+                    let strip = frame.crop(0, top, frame.width, bottom - top);
+                    let tsv = tesseract(&strip, scale, Output::Tsv { band })?;
+                    let mut lines = parse_tsv(&tsv, scale);
+                    // A line cut by the strip's own edge is not a line.
+                    lines.retain_mut(|line| {
+                        let cut = (line.rect.y == 0 && top > 0)
+                            || (line.rect.bottom() + 1 >= bottom - top && bottom < height);
+                        line.rect.y += top;
+                        !cut
+                    });
+                    Some(lines)
+                })
+            })
+            .collect();
+        reads
+            .into_iter()
+            .filter_map(|read| read.join().ok().flatten())
+            .flatten()
+            .collect::<Vec<_>>()
+    });
+    let lines = crate::page::without_duplicates(lines);
+    crate::trace!(
+        "ocr       {} lines from {bands} strips in {:?}",
+        lines.len(),
+        started.elapsed()
+    );
+    lines
+}
+
+/// What Tesseract is asked to print.
+#[derive(Clone, Copy)]
+enum Output {
+    Text,
+    /// A table with a row per word and where it is, for one strip of the
+    /// screen; see [`tesseract_in_bands`].
+    Tsv {
+        band: u32,
+    },
+}
+
+/// Turns Tesseract's table into lines: its words grouped by the block,
+/// paragraph and line it says they belong to, each line as wide as its words.
+fn parse_tsv(tsv: &str, scale: f64) -> Vec<crate::page::Line> {
+    let mut lines: Vec<((u32, u32, u32), Vec<crate::page::Word>)> = Vec::new();
+    for row in tsv.lines().skip(1) {
+        let cols: Vec<&str> = row.split('\t').collect();
+        // level, page, block, paragraph, line, word, left, top, width,
+        // height, confidence, text.
+        if cols.len() < 12 || cols[0] != "5" {
+            continue;
+        }
+        let text = cols[11].trim();
+        if text.is_empty() {
+            continue;
+        }
+        let num = |i: usize| cols[i].parse::<i64>().unwrap_or(0);
+        let key = (num(2) as u32, num(3) as u32, num(4) as u32);
+        let x = unprepare(num(6), scale);
+        let y = unprepare(num(7), scale);
+        let right = unprepare(num(6) + num(8), scale);
+        let bottom = unprepare(num(7) + num(9), scale);
+        let word = crate::page::Word {
+            rect: crate::page::Rect {
+                x,
+                y,
+                width: right.saturating_sub(x).max(1),
+                height: bottom.saturating_sub(y).max(1),
+            },
+            text: text.to_string(),
+            confidence: cols[10].trim().parse::<f32>().unwrap_or(0.0),
+        };
+        match lines.last_mut() {
+            Some((last, words)) if *last == key => words.push(word),
+            _ => lines.push((key, vec![word])),
+        }
+    }
+    crate::page::lines_from_words(lines.into_iter().map(|(_, words)| words).collect())
+}
+
+fn tesseract(frame: &Frame, scale: f64, output: Output) -> Option<String> {
+    let band = match output {
+        Output::Text => 0,
+        Output::Tsv { band } => band + 1,
+    };
     let languages = languages()?;
     let (grey, width, height) = frame.prepared(scale);
 
     // A file rather than stdin, because the command runner that enforces the
     // deadline hands its child no input. PGM because it is a ten-byte header
     // in front of the pixels, which Tesseract reads without any help.
-    let path = scratch_path();
+    let path = scratch_path(band);
     let mut pgm = format!("P5\n{width} {height}\n255\n").into_bytes();
     pgm.extend_from_slice(&grey);
     if let Err(err) = std::fs::write(&path, &pgm) {
@@ -242,7 +439,11 @@ fn tesseract(frame: &Frame, scale: f64) -> Option<String> {
         .arg(&path)
         .arg("-")
         .arg("-l")
-        .arg(languages.join("+"))
+        .arg(languages.join("+"));
+    if matches!(output, Output::Tsv { .. }) {
+        command.arg("tsv");
+    }
+    command
         // Tesseract's own threads make one read no faster in wall time and
         // several times more expensive in CPU; a single thread is its
         // documented advice for exactly this.
@@ -252,7 +453,10 @@ fn tesseract(frame: &Frame, scale: f64) -> Option<String> {
     // With tracing on, the last picture read is kept, so a region that came
     // back empty can be looked at rather than guessed about.
     if crate::trace::enabled() {
-        let kept = path.with_file_name("bubbleTranslate-last-ocr.pgm");
+        let kept = path.with_file_name(match band {
+            0 => "bubbleTranslate-last-ocr.pgm".to_string(),
+            band => format!("bubbleTranslate-last-ocr-{band}.pgm"),
+        });
         if std::fs::rename(&path, &kept).is_ok() {
             crate::trace!("ocr       kept the picture at {}", kept.display());
         }
@@ -307,11 +511,14 @@ fn pad(grey: &[u8], width: u32, height: u32, margin: u32) -> (Vec<u8>, u32, u32)
 
 /// Where the image waits for Tesseract: the user's runtime directory, which
 /// only they can read and which is emptied at logout.
-fn scratch_path() -> PathBuf {
+fn scratch_path(band: u32) -> PathBuf {
     let dir = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
-    dir.join(format!("bubbleTranslate-ocr-{}.pgm", std::process::id()))
+    dir.join(format!(
+        "bubbleTranslate-ocr-{}-{band}.pgm",
+        std::process::id()
+    ))
 }
 
 /// Turns Tesseract's layout back into sentences.
@@ -332,22 +539,7 @@ fn join_lines(raw: &str) -> String {
             }
             continue;
         }
-        if current.is_empty() {
-            current.push_str(line);
-        } else if current.ends_with('-')
-            && current
-                .chars()
-                .rev()
-                .nth(1)
-                .is_some_and(char::is_alphabetic)
-            && line.chars().next().is_some_and(char::is_lowercase)
-        {
-            current.pop();
-            current.push_str(line);
-        } else {
-            current.push(' ');
-            current.push_str(line);
-        }
+        crate::page::append(&mut current, line);
     }
     if !current.is_empty() {
         paragraphs.push(current);
@@ -509,6 +701,47 @@ mod tests {
         let listing = "List of available languages in \"/usr/share/tessdata/\" (4):\n\
                        eng\nosd\ntur\nequ\n";
         assert_eq!(parse_languages(listing), ["eng", "tur"]);
+    }
+
+    #[test]
+    fn tesseracts_table_becomes_lines_in_the_frames_pixels() {
+        // At scale 1 the picture was doubled and given a 16-pixel margin.
+        let tsv = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n\
+                   4\t1\t1\t1\t1\t0\t16\t16\t200\t30\t-1\t\n\
+                   5\t1\t1\t1\t1\t1\t16\t16\t80\t30\t95\tHello\n\
+                   5\t1\t1\t1\t1\t2\t106\t20\t100\t26\t95\tworld\n\
+                   5\t1\t1\t1\t1\t3\t240\t16\t20\t30\t31\t©\n\
+                   5\t1\t1\t1\t2\t1\t16\t56\t60\t30\t95\tagain\n\
+                   5\t1\t1\t1\t3\t1\t16\t96\t60\t30\t22\tg%}\n";
+        let lines = parse_tsv(tsv, 1.0);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].text, "Hello world");
+        assert_eq!(
+            lines[0].rect,
+            crate::page::Rect {
+                x: 0,
+                y: 0,
+                width: 95,
+                height: 15
+            }
+        );
+        assert_eq!(lines[1].text, "again");
+        assert_eq!(lines[1].rect.y, 20);
+    }
+
+    #[test]
+    fn dark_squares_are_turned_light_and_light_ones_left() {
+        // Left half dark paper with a light letter, right half light paper.
+        let (width, height) = (96u32, 48u32);
+        let mut grey: Vec<u8> = (0..width * height)
+            .map(|i| if i % width < 48 { 30 } else { 240 })
+            .collect();
+        grey[10] = 220;
+        light_paper(&mut grey, width, height);
+        // Both papers end up white, and the letter dark on it.
+        assert_eq!(grey[0], 255);
+        assert!(grey[10] < 50);
+        assert_eq!(grey[60], 255);
     }
 
     #[test]

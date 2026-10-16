@@ -274,6 +274,61 @@ pub fn recognize(frame: &Frame, scale: f64) -> Option<String> {
     Some(text)
 }
 
+/// Reads every line of text in `frame`, with where each one is, in the
+/// frame's own pixels.
+pub fn recognize_lines(frame: &Frame, scale: f64) -> Option<Vec<crate::page::Line>> {
+    use ocrs::TextItem as _;
+
+    let engine = match engine() {
+        Ok(engine) => engine,
+        Err(err) => {
+            crate::trace!("ocr       the built-in reader did not load: {err}");
+            return None;
+        }
+    };
+    let (grey, width, height) = frame.prepared(scale);
+    let started = std::time::Instant::now();
+    let source = ocrs::ImageSource::from_bytes(&grey, (width, height)).ok()?;
+    let input = engine.prepare_input(source).ok()?;
+    let words = engine.detect_words(&input).ok()?;
+    let lines = engine.find_text_lines(&input, &words);
+    let lines: Vec<_> = engine
+        .recognize_text(&input, &lines)
+        .ok()?
+        .into_iter()
+        .flatten()
+        .map(|line| {
+            line.words()
+                .map(|word| {
+                    let rect = word.bounding_rect();
+                    let x = super::ocr::unprepare(i64::from(rect.left()), scale);
+                    let y = super::ocr::unprepare(i64::from(rect.top()), scale);
+                    let right = super::ocr::unprepare(i64::from(rect.right()), scale);
+                    let bottom = super::ocr::unprepare(i64::from(rect.bottom()), scale);
+                    crate::page::Word {
+                        rect: crate::page::Rect {
+                            x,
+                            y,
+                            width: right.saturating_sub(x).max(1),
+                            height: bottom.saturating_sub(y).max(1),
+                        },
+                        text: word.to_string(),
+                        // The built-in reader does not say how sure it is.
+                        confidence: 100.0,
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    let lines = crate::page::lines_from_words(lines);
+    crate::trace!(
+        "ocr       built-in reader found {} lines in {width}x{height} in {:?}",
+        lines.len(),
+        started.elapsed()
+    );
+    Some(lines)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

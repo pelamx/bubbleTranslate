@@ -61,6 +61,9 @@ mod keycode {
     pub const RIGHTMETA: u16 = 126;
     /// Not a modifier: the key that, with Ctrl and Shift, reads the screen.
     pub const E: u16 = 18;
+    /// Not a modifier: the key that, with Ctrl and Shift, translates the
+    /// whole screen.
+    pub const F: u16 = 33;
     /// Not a modifier: puts the bubble away.
     pub const ESC: u16 = 1;
     /// Not a modifier: read only by [`super::start_pointer`], from devices
@@ -290,6 +293,7 @@ pub fn start() -> Result<(), String> {
             RUNNING.store(true, Ordering::Relaxed);
             // Whether E is down, so holding it — which repeats — asks once.
             let mut e_down = false;
+            let mut f_down = false;
             read_loop(
                 devices,
                 "keyboard",
@@ -316,6 +320,17 @@ pub fn start() -> Result<(), String> {
                         if pressed && is_read_screen_chord(HELD.load(Ordering::Relaxed)) {
                             crate::trace!("key-down  ctrl+shift+e -> READ SCREEN");
                             super::read_screen_key_pressed();
+                        }
+                        return;
+                    }
+                    // Ctrl+Shift+F, the whole screen: the same chord with
+                    // another letter.
+                    if code == keycode::F {
+                        let pressed = down && !f_down;
+                        f_down = down;
+                        if pressed && is_read_screen_chord(HELD.load(Ordering::Relaxed)) {
+                            crate::trace!("key-down  ctrl+shift+f -> TRANSLATE SCREEN");
+                            super::read_page_key_pressed();
                         }
                         return;
                     }

@@ -504,8 +504,9 @@ dependencies = [
 
 [[package]]
 name = "bubbleTranslate"
-version = "0.4.12"
+version = "0.4.13"
 dependencies = [
+ "ab_glyph",
  "anyhow",
  "base64",
  "core-foundation 0.10.1",

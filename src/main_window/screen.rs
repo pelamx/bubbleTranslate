@@ -78,15 +78,76 @@ pub fn screen_reading(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
         });
     }
     ui.add_space(2.0);
+    // Said as it is: with a Google Vision key set, the picture does leave.
     ui.label(
-        egui::RichText::new(t(
-            "The picture is read on this computer and never sent anywhere.",
-            "Görüntü bu bilgisayarda okunur ve hiçbir yere gönderilmez.",
-            "La imagen se lee en este ordenador y nunca se envía a ningún sitio.",
-        ))
+        egui::RichText::new(if cfg.google_vision_api_key.trim().is_empty() {
+            t(
+                "The picture is read on this computer and never sent anywhere.",
+                "Görüntü bu bilgisayarda okunur ve hiçbir yere gönderilmez.",
+                "La imagen se lee en este ordenador y nunca se envía a ningún sitio.",
+            )
+        } else {
+            t(
+                "With your Google Vision key set, the picture is sent to Google to be read. \
+                 Remove the key in Settings to read it on this computer again.",
+                "Google Vision anahtarın girili olduğu için görüntü okunmak üzere Google'a \
+                 gönderilir. Bu bilgisayarda okunması için anahtarı Ayarlar'dan kaldır.",
+                "Con tu clave de Google Vision, la imagen se envía a Google para leerla. \
+                 Quita la clave en Ajustes para leerla de nuevo en este ordenador.",
+            )
+        })
         .size(11.0)
         .color(TEXT_MUTED),
     );
+
+    // The whole screen at once. Only where it is built yet.
+    #[cfg(target_os = "linux")]
+    {
+        ui.add_space(10.0);
+        ui.horizontal_wrapped(|ui| {
+            key_chip(ui, "Ctrl+Shift+F");
+            ui.label(
+                egui::RichText::new(t(
+                    "Translate the whole screen",
+                    "Tüm ekranı çevir",
+                    "Traduce toda la pantalla",
+                ))
+                .size(13.0)
+                .color(TEXT_PRIMARY)
+                .strong(),
+            );
+        });
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(t(
+                "Every paragraph is replaced by its translation, in place, in the same font \
+                 and size, like a translated web page. Code is left as it is. Any key or click \
+                 puts it away. The free version reads the screen three times a day — a box or \
+                 the whole screen; Pro has no limit.",
+                "Her paragraf, çevrilmiş bir web sayfası gibi, aynı yazı tipi ve boyutta \
+                 yerinde çevirisiyle değişir. Kod olduğu gibi kalır. Bir tuş ya da tık kapatır. \
+                 Ücretsiz sürüm ekranı günde üç kez okur — bir kutu ya da tüm ekran; Pro'da \
+                 sınır yok.",
+                "Cada párrafo se sustituye por su traducción, en su sitio, con la misma letra y \
+                 tamaño, como una página web traducida. El código se deja como está. Cualquier \
+                 tecla o clic la cierra. La versión gratis lee la pantalla tres veces al día — \
+                 un recuadro o la pantalla entera; Pro no tiene límite.",
+            ))
+            .size(12.0)
+            .color(TEXT_SECONDARY),
+        );
+        ui.add_space(6.0);
+        if ui
+            .button(t(
+                "Translate the screen",
+                "Ekranı çevir",
+                "Traducir la pantalla",
+            ))
+            .clicked()
+        {
+            let _ = state.requests.send(Request::ScreenPage);
+        }
+    }
 
     let status = crate::platform::screen_reading(&cfg.source_lang);
     // Only a download under way holds the button back: with the models not
@@ -328,7 +389,7 @@ fn key_note(ui: &mut egui::Ui, status: &crate::platform::ScreenReading) {
 }
 
 /// A key combination, drawn as a key cap.
-fn key_chip(ui: &mut egui::Ui, text: &str) {
+pub(super) fn key_chip(ui: &mut egui::Ui, text: &str) {
     egui::Frame::new()
         .fill(egui::Color32::from_rgb(56, 58, 66))
         .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))

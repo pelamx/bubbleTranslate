@@ -80,7 +80,7 @@ pub fn pixels_are_bgrx(setup: &Setup, depth: u8) -> bool {
 /// `None` when the user cancelled, let go without dragging, or the overlay
 /// could not be shown. The rectangle comes back in the still's pixels.
 pub fn select(still: &Frame, placement: Placement) -> Option<Selection> {
-    match run(still, placement) {
+    match run(still, placement, Mode::Select) {
         Ok(selection) => selection,
         Err(err) => {
             crate::trace!("overlay   {err}");
@@ -89,7 +89,30 @@ pub fn select(still: &Frame, placement: Placement) -> Option<Selection> {
     }
 }
 
+/// Shows `picture` in place of the screen until a key or a click puts it
+/// away: the translated screen, which is looked at rather than drawn on.
+pub fn show(picture: &Frame, placement: Placement) {
+    if let Err(err) = run(picture, placement, Mode::View) {
+        crate::trace!("overlay   {err}");
+    }
+}
+
+/// What the overlay is up for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// A dimmed screen to drag a rectangle on.
+    Select,
+    /// A picture to look at, at full brightness, gone at the first key or
+    /// click.
+    View,
+}
+
+/// How long a picture stays up when nothing puts it away: long enough to read
+/// a page, short enough that a screen nobody can see under is not left there.
+const VIEW_PATIENCE: Duration = Duration::from_secs(600);
+
 struct Overlay<'a> {
+    mode: Mode,
     conn: RustConnection,
     root: u32,
     window: u32,
@@ -109,7 +132,7 @@ struct Overlay<'a> {
     dim: u32,
 }
 
-fn run(still: &Frame, placement: Placement) -> Result<Option<Selection>, String> {
+fn run(still: &Frame, placement: Placement, mode: Mode) -> Result<Option<Selection>, String> {
     let (conn, screen_num) =
         x11rb::connect(None).map_err(|err| format!("could not reach the X server: {err}"))?;
     let screen = conn.setup().roots[screen_num].clone();
@@ -144,7 +167,10 @@ fn run(still: &Frame, placement: Placement) -> Result<Option<Selection>, String>
     }
 
     let window = conn.generate_id().map_err(|e| e.to_string())?;
-    let cursor = crosshair(&conn).unwrap_or(0);
+    let cursor = match mode {
+        Mode::Select => crosshair(&conn).unwrap_or(0),
+        Mode::View => 0,
+    };
     conn.create_window(
         depth,
         window,
@@ -184,6 +210,7 @@ fn run(still: &Frame, placement: Placement) -> Result<Option<Selection>, String>
     .map_err(|e| e.to_string())?;
 
     let mut overlay = Overlay {
+        mode,
         conn,
         root: screen.root,
         window,
@@ -207,7 +234,10 @@ fn run(still: &Frame, placement: Placement) -> Result<Option<Selection>, String>
         overlay.grab()?;
     }
 
-    let result = overlay.drag();
+    let result = match mode {
+        Mode::Select => overlay.drag(),
+        Mode::View => overlay.view().map(|()| None),
+    };
     overlay.close();
     result
 }
@@ -242,9 +272,13 @@ impl Overlay<'_> {
         let (x, y, w, h) = self.shown;
         let view = self.still.crop(x, y, w, h);
         let fitted = view.resized(u32::from(size.0), u32::from(size.1));
+        // A picture to look at is shown as it is: its "dimmed" copy is the
+        // same picture, so everything that repaints from it shows it whole.
         let mut dimmed = fitted.bgrx.clone();
-        for level in &mut dimmed {
-            *level = ((u32::from(*level) * DIM) >> 8) as u8;
+        if self.mode == Mode::Select {
+            for level in &mut dimmed {
+                *level = ((u32::from(*level) * DIM) >> 8) as u8;
+            }
         }
         self.bright = self.upload(&fitted.bgrx, size)?;
         self.dim = self.upload(&dimmed, size)?;
@@ -400,6 +434,42 @@ impl Overlay<'_> {
                     }
                     return Ok(Some(self.in_still(rect)));
                 }
+                _ => {}
+            }
+        }
+    }
+
+    /// Keeps the picture up until a key or a click.
+    fn view(&mut self) -> Result<(), String> {
+        let started = Instant::now();
+        let mut focused = false;
+        loop {
+            if started.elapsed() > VIEW_PATIENCE {
+                crate::trace!("overlay   left up too long; putting it away");
+                return Ok(());
+            }
+            let Some(event) = self.conn.poll_for_event().map_err(|e| e.to_string())? else {
+                std::thread::sleep(Duration::from_millis(8));
+                continue;
+            };
+            match event {
+                Event::MapNotify(_) if !focused => {
+                    focused = true;
+                    let _ = self.conn.set_input_focus(
+                        InputFocus::PARENT,
+                        self.window,
+                        x11rb::CURRENT_TIME,
+                    );
+                    let _ = self.conn.flush();
+                }
+                Event::ConfigureNotify(configure) => {
+                    self.prepare((configure.width, configure.height))?;
+                    self.paint(None, None);
+                }
+                Event::Expose(expose) if expose.count == 0 => self.paint(None, None),
+                // A press rather than a release: the release of the very key
+                // that asked for the page arrives after the window is up.
+                Event::KeyPress(_) | Event::ButtonPress(_) => return Ok(()),
                 _ => {}
             }
         }

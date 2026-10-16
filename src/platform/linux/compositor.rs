@@ -166,6 +166,29 @@ pub enum ReadScreenBind {
 /// through the Lua API is listed by its description, not by what it runs.
 const READ_SCREEN_DESCRIPTION: &str = "bubbleTranslate: read the screen";
 
+/// One of the two combinations bound in the compositor: Ctrl+Shift with a
+/// letter, running this binary with a flag.
+#[derive(Debug, Clone, Copy)]
+pub struct Key {
+    letter: &'static str,
+    flag: &'static str,
+    description: &'static str,
+}
+
+/// Ctrl+Shift+E: read a rectangle of the screen.
+pub const READ_SCREEN: Key = Key {
+    letter: "E",
+    flag: "--read-screen",
+    description: READ_SCREEN_DESCRIPTION,
+};
+
+/// Ctrl+Shift+F: translate the whole screen.
+pub const READ_PAGE: Key = Key {
+    letter: "F",
+    flag: "--read-page",
+    description: "bubbleTranslate: translate the screen",
+};
+
 /// Makes sure Ctrl+Shift+E is bound, in the compositor, to
 /// `bubbleTranslate --read-screen`.
 ///
@@ -176,37 +199,43 @@ const READ_SCREEN_DESCRIPTION: &str = "bubbleTranslate: read the screen";
 ///
 /// A combination the user has bound to something of their own is left alone.
 pub fn ensure_read_screen_bind() -> ReadScreenBind {
+    ensure_bind(READ_SCREEN)
+}
+
+/// The same for either combination; see [`ensure_read_screen_bind`].
+pub fn ensure_bind(key: Key) -> ReadScreenBind {
     if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
         return ReadScreenBind::None;
     }
     let Some(binds) = hyprland_binds() else {
         return ReadScreenBind::None;
     };
-    match classify(&binds) {
+    match classify(&binds, key) {
         Chord::Ours => return ReadScreenBind::Live,
         Chord::Theirs => return ReadScreenBind::None,
         Chord::Free => {}
     }
 
-    let Some(command) = read_screen_command() else {
+    let Some(command) = command_for(key) else {
         return ReadScreenBind::None;
     };
     // 0.56 and later configure in Lua; before that, in bind strings. Long
     // brackets, so nothing in the path needs escaping for Lua.
     let lua = format!(
-        "hl.bind('CTRL + SHIFT + E', hl.dsp.exec_cmd([==[{command}]==]), \
-         {{ description = '{READ_SCREEN_DESCRIPTION}' }})"
+        "hl.bind('CTRL + SHIFT + {}', hl.dsp.exec_cmd([==[{command}]==]), \
+         {{ description = '{}' }})",
+        key.letter, key.description,
     );
     if !hyprctl_ok(&["eval", &lua]) {
         let _ = hyprctl_ok(&[
             "keyword",
             "bind",
-            &format!("CTRL SHIFT, E, exec, {command}"),
+            &format!("CTRL SHIFT, {}, exec, {command}", key.letter),
         ]);
     }
-    match hyprland_binds().map(|binds| classify(&binds)) {
+    match hyprland_binds().map(|binds| classify(&binds, key)) {
         Some(Chord::Ours) => {
-            crate::trace!("hotkey    ctrl+shift+e bound in hyprland");
+            crate::trace!("hotkey    ctrl+shift+{} bound in hyprland", key.letter);
             ReadScreenBind::Added
         }
         _ => ReadScreenBind::None,
@@ -220,8 +249,8 @@ enum Chord {
     Free,
 }
 
-/// Who, if anyone, has Ctrl+Shift+E in this list of bindings.
-fn classify(binds: &[serde_json::Value]) -> Chord {
+/// Who, if anyone, has the combination in this list of bindings.
+fn classify(binds: &[serde_json::Value], key: Key) -> Chord {
     /// Hyprland's modifier mask: Shift is 1, Control is 4.
     const CTRL_SHIFT: i64 = 1 | 4;
     let text = |bind: &serde_json::Value, key: &str| {
@@ -232,12 +261,12 @@ fn classify(binds: &[serde_json::Value]) -> Chord {
     };
     let mut theirs = false;
     for bind in binds {
-        let ours = text(bind, "description") == READ_SCREEN_DESCRIPTION
-            || (text(bind, "dispatcher") == "exec" && text(bind, "arg").ends_with("--read-screen"));
+        let ours = text(bind, "description") == key.description
+            || (text(bind, "dispatcher") == "exec" && text(bind, "arg").ends_with(key.flag));
         if ours {
             return Chord::Ours;
         }
-        if text(bind, "key").eq_ignore_ascii_case("e")
+        if text(bind, "key").eq_ignore_ascii_case(key.letter)
             && bind.get("modmask").and_then(|v| v.as_i64()) == Some(CTRL_SHIFT)
             && text(bind, "submap").is_empty()
         {
@@ -248,13 +277,13 @@ fn classify(binds: &[serde_json::Value]) -> Chord {
 }
 
 /// This binary with the flag, quoted for the shell Hyprland runs it through.
-fn read_screen_command() -> Option<String> {
+fn command_for(key: Key) -> Option<String> {
     let exe = std::env::current_exe().ok()?;
     let exe = exe.to_str()?;
     if exe.contains("]==]") {
         return None;
     }
-    Some(format!("'{}' --read-screen", exe.replace('\'', "'\\''")))
+    Some(format!("'{}' {}", exe.replace('\'', "'\\''"), key.flag))
 }
 
 fn hyprland_binds() -> Option<Vec<serde_json::Value>> {
@@ -288,17 +317,30 @@ mod tests {
                 "description": description, "dispatcher": "__lua", "arg": "7",
             })
         };
-        assert_eq!(classify(&[bind("E", 64, "Editor")]), Chord::Free);
-        assert_eq!(classify(&[bind("E", 5, "Something else")]), Chord::Theirs);
         assert_eq!(
-            classify(&[bind("E", 5, READ_SCREEN_DESCRIPTION)]),
+            classify(&[bind("E", 64, "Editor")], READ_SCREEN),
+            Chord::Free
+        );
+        assert_eq!(
+            classify(&[bind("E", 5, "Something else")], READ_SCREEN),
+            Chord::Theirs
+        );
+        assert_eq!(
+            classify(&[bind("E", 5, READ_SCREEN_DESCRIPTION)], READ_SCREEN),
             Chord::Ours
         );
         let legacy = serde_json::json!({
             "key": "E", "modmask": 5, "submap": "", "description": "",
             "dispatcher": "exec", "arg": "'/opt/bubbleTranslate' --read-screen",
         });
-        assert_eq!(classify(&[legacy]), Chord::Ours);
+        assert_eq!(
+            classify(std::slice::from_ref(&legacy), READ_SCREEN),
+            Chord::Ours
+        );
+        // The page key is told apart from the region key by its letter and
+        // its flag.
+        assert_eq!(classify(&[legacy], READ_PAGE), Chord::Free);
+        assert_eq!(classify(&[bind("F", 5, "Find")], READ_PAGE), Chord::Theirs);
     }
 
     #[test]

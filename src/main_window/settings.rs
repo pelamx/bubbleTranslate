@@ -280,6 +280,52 @@ pub(super) fn providers(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Conf
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new(t(
+                "Google Vision API key",
+                "Google Vision API anahtarı",
+                "Clave API de Google Vision",
+            ))
+            .size(12.5)
+            .color(TEXT_SECONDARY),
+        );
+        if ui
+            .add(
+                egui::TextEdit::singleline(&mut cfg.google_vision_api_key)
+                    .password(true)
+                    .hint_text(t(
+                        "optional — billed to your own account",
+                        "isteğe bağlı — kendi hesabınızdan ücretlenir",
+                        "opcional — se cobra a tu propia cuenta",
+                    ))
+                    .desired_width(220.0),
+            )
+            .lost_focus()
+        {
+            dirty = true;
+        }
+    });
+    ui.label(
+        egui::RichText::new(t(
+            "With a key, the screen is read by Google rather than on this computer: \
+             faint and small text, accented letters and every script come out right, in \
+             about a second. The picture of the screen is sent to Google to do it. \
+             Without a key nothing leaves this computer.",
+            "Anahtarla ekran bu bilgisayar yerine Google tarafından okunur: soluk ve \
+             küçük yazılar, aksanlı harfler ve her alfabe doğru çıkar, yaklaşık bir \
+             saniyede. Bunun için ekranın görüntüsü Google'a gönderilir. Anahtar \
+             olmadan hiçbir şey bu bilgisayardan çıkmaz.",
+            "Con una clave, la pantalla la lee Google en lugar de este ordenador: el \
+             texto tenue y pequeño, los acentos y cualquier alfabeto salen bien, en \
+             un segundo. Para ello se envía a Google la imagen de la pantalla. Sin \
+             clave, nada sale de este ordenador.",
+        ))
+        .size(11.0)
+        .color(TEXT_MUTED),
+    );
+
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(t(
                 "MyMemory email",
                 "MyMemory e-postası",
                 "Correo de MyMemory",

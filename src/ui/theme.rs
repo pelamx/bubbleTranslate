@@ -593,7 +593,7 @@ fn find_bold_font() -> Option<(String, Vec<u8>)> {
 /// The list is tried first because on most systems it is both instant and
 /// right. Asking fontconfig is the backstop: it knows where this particular
 /// distribution put its fonts, which no hardcoded list can keep up with.
-pub(super) fn find_fallback_fonts() -> Vec<(String, Vec<u8>)> {
+pub(crate) fn find_fallback_fonts() -> Vec<(String, Vec<u8>)> {
     // A CJK font is tens of megabytes and stays resident, so this stops at
     // three: enough for the split Windows has, and past the point where a
     // Linux list of alternative paths for one font could load it twice over.

@@ -25,6 +25,7 @@ mod i18n;
 mod ipc;
 mod license;
 mod main_window;
+mod page;
 mod platform;
 mod quota;
 mod speech;
@@ -32,6 +33,7 @@ mod trace;
 mod translate;
 mod ui;
 mod update;
+mod vision;
 
 /// The platform boundary, re-exported so the rest of the crate can say
 /// `capture::` and `shell::` without caring which implementation it got.
@@ -101,6 +103,18 @@ fn main() -> eframe::Result<()> {
         }
         eprintln!(
             "bubbleTranslate: nothing is running to read the screen — \
+             start bubbleTranslate first."
+        );
+        std::process::exit(1);
+    }
+    #[cfg(target_os = "linux")]
+    if args.iter().any(|a| a == "--read-page") {
+        // Ctrl+Shift+F as a command, for the same sessions.
+        if ipc::request_read_page() {
+            std::process::exit(0);
+        }
+        eprintln!(
+            "bubbleTranslate: nothing is running to translate the screen — \
              start bubbleTranslate first."
         );
         std::process::exit(1);
@@ -386,6 +400,20 @@ fn main() -> eframe::Result<()> {
                 });
             }
 
+            // Ctrl+Shift+F, Cmd+Shift+F on a Mac: translate the whole
+            // screen. Only where the platform can do it yet.
+            #[cfg(target_os = "linux")]
+            {
+                let requests = engine.sender();
+                crate::platform::on_screen_page_request(move || {
+                    if engine::page_busy() {
+                        crate::trace!("page      already translating the screen; ignored");
+                        return;
+                    }
+                    let _ = requests.send(Request::ScreenPage);
+                });
+            }
+
             let requests = engine.sender();
             if let Err(err) = monitor::spawn(move |trigger| {
                 // Nothing here may block. This runs inside the event tap
@@ -455,6 +483,11 @@ fn license_status() -> i32 {
                 "used      {} of {limit} today, {} left until midnight",
                 quota.used_today(),
                 quota.remaining(&licence.entitlement).unwrap_or(0),
+            );
+            println!(
+                "screen    {} of {} screen translations left today",
+                quota.ocr_left(&licence.entitlement).unwrap_or(0),
+                license::FREE_DAILY_OCR,
             );
             println!(
                 "pro       {} or {}",

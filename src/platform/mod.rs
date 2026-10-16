@@ -123,6 +123,8 @@ pub fn cursor_position() -> Option<(f64, f64)> {
 
 #[cfg(target_os = "linux")]
 pub use linux::cursor::position as cursor_position;
+#[cfg(all(test, target_os = "linux"))]
+pub use linux::recognize_lines_for_test;
 
 /// Whether the pointer is inside `rect`, which is given in the same
 /// coordinate space the bubble is positioned in.
@@ -252,8 +254,9 @@ pub fn keep_on_all_workspaces() -> bool {
 
 #[cfg(target_os = "linux")]
 pub use linux::{
-    ask_for_screen_region, download_screen_reader, keep_on_all_workspaces, mark_as_notification,
-    on_screen_region_request, pointer_over, preferred_zoom, read_screen_region, screen_reading,
+    ask_for_screen_page, ask_for_screen_region, capture_page, download_screen_reader,
+    keep_on_all_workspaces, mark_as_notification, on_screen_page_request, on_screen_region_request,
+    pointer_over, preferred_zoom, read_page, read_screen_region, screen_reading, show_page,
     to_points,
 };
 

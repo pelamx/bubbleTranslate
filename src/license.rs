@@ -30,6 +30,11 @@ use sha2::{Digest, Sha256};
 /// number for everyone is a server-side edit, not a release.
 pub const FREE_DAILY_TRANSLATIONS: u32 = 10;
 
+/// Screen readings a day on the free tier: a box drawn with Ctrl+Shift+E or
+/// the whole screen with Ctrl+Shift+F, together. Counted apart from the
+/// translations of selected text, which have their own ten.
+pub const FREE_DAILY_OCR: u32 = 3;
+
 /// What Pro costs, as the app says it out loud. Kept here rather than in the
 /// window so the bubble and the account panel cannot drift apart from each
 /// other, or from the checkout page the button opens.

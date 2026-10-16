@@ -1,6 +1,6 @@
 [package]
 name = "bubbleTranslate"
-version = "0.4.12"
+version = "0.4.13"
 edition = "2024"
 license-file = "LICENSE"
 
@@ -22,8 +22,14 @@ store = []
 
 # Platform-neutral: the translation engine, config, and the egui interface.
 [dependencies]
+# Drawing the translated screen's text into the picture; see `page`. Already
+# in the Linux build through the toolkit, and small and pure Rust elsewhere.
+ab_glyph = "0.2"
 anyhow = "1.0.104"
 base64 = "0.22"
+# The picture sent to Google Vision, when a key for it is set; see `vision`.
+# Also how the Linux screenshot portal's answer is read.
+png = "0.18"
 dirs = "6.0.0"
 ed25519-dalek = "2"
 libc = "0.2"
@@ -98,7 +104,6 @@ ksni = { version = "0.3.6", default-features = false, features = [
 # The screenshot portal, which is how GNOME and KDE hand an application a
 # picture of the screen; see `platform::linux::portal`.
 zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
-png = "0.18"
 # The reader that works with nothing installed; see `platform::linux::reader`.
 # Pure Rust, so the glibc floor the release is built against is unchanged. The
 # two models it runs are downloaded on first use rather than carried here.

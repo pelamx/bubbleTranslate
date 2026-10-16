@@ -20,6 +20,7 @@ use crate::translate::{TranslateError, Translation};
 
 mod account;
 mod feedback;
+mod howto;
 mod screen;
 mod settings;
 
@@ -186,6 +187,11 @@ pub fn draw(
                 first_run_card(ui);
             }
 
+            section(
+                ui,
+                t("How to use it", "Nasıl kullanılır", "Cómo usarlo"),
+                |ui| howto::how_to(ui, &cfg),
+            );
             section(ui, t("Translate", "Çevir", "Traducir"), |ui| {
                 translate_box(ui, &mut state, &cfg)
             });

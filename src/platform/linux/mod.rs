@@ -391,6 +391,43 @@ pub fn ask_for_screen_region() {
     }
 }
 
+/// Who to tell when the key that translates the whole screen is pressed.
+static ON_PAGE: std::sync::Mutex<Option<Box<dyn Fn() + Send>>> = std::sync::Mutex::new(None);
+
+/// Registers the callback for Ctrl+Shift+F, and starts listening for it —
+/// the same two ways in as Ctrl+Shift+E; see [`on_screen_region_request`].
+pub fn on_screen_page_request(ask: impl Fn() + Send + 'static) {
+    if let Ok(mut slot) = ON_PAGE.lock() {
+        *slot = Some(Box::new(ask));
+    }
+    let _ = std::thread::Builder::new()
+        .name("read-page-key".into())
+        .spawn(|| {
+            let _ = compositor::ensure_bind(compositor::READ_PAGE);
+            evdev::ensure_started();
+        });
+}
+
+/// What the keyboard reader does on Ctrl+Shift+F: passed on only when the
+/// compositor did not deliver it already, as with Ctrl+Shift+E.
+pub(crate) fn read_page_key_pressed() {
+    if compositor::ensure_bind(compositor::READ_PAGE) != compositor::ReadScreenBind::Live {
+        ask_for_screen_page();
+    }
+}
+
+/// Asks for the whole screen to be translated, from the key or from a second
+/// process.
+pub fn ask_for_screen_page() {
+    match ON_PAGE.lock() {
+        Ok(slot) => match slot.as_ref() {
+            Some(ask) => ask(),
+            None => crate::trace!("page      nobody registered for the key"),
+        },
+        Err(_) => crate::trace!("page      the callback lock was poisoned"),
+    }
+}
+
 /// Fetches the built-in reader's models in the background, for the window's
 /// download button.
 pub fn download_screen_reader() {
@@ -455,6 +492,89 @@ pub fn read_screen_region() -> Option<crate::platform::ScreenRead> {
         },
         at: (!chosen).then(|| bubble_anchor(region, screen_bottom)),
     })
+}
+
+/// The screen, photographed for translating all of it.
+pub struct PageShot(screen::Shot);
+
+/// Photographs the screen under the pointer, for translating all of it.
+///
+/// Separate from reading it so the bubble that says "working" can come up in
+/// between: before the photograph it would be in it, painted over by its own
+/// translation.
+pub fn capture_page() -> Option<PageShot> {
+    crate::trace!("page      asked to translate the screen");
+    if let Err(reason) = ocr::prepare() {
+        crate::trace!("ocr       no reader: {reason}");
+        return None;
+    }
+    match screen::grab() {
+        Ok(shot) => Some(PageShot(shot)),
+        Err(err) => {
+            crate::trace!("screen    {err}");
+            None
+        }
+    }
+}
+
+/// Every paragraph on the photographed screen, and where it is.
+pub fn read_page(shot: &PageShot) -> Vec<crate::page::Block> {
+    let shot = &shot.0;
+    let lines = ocr::recognize_lines(&shot.frame, shot.scale()).unwrap_or_default();
+    let pixels = crate::page::Pixels {
+        width: shot.frame.width,
+        height: shot.frame.height,
+        bgrx: &shot.frame.bgrx,
+    };
+    if crate::trace::enabled() {
+        for line in &lines {
+            crate::trace!("page      read {:?} {:?}", line.rect, line.text);
+        }
+    }
+    let fonts = crate::page::fonts();
+    let lines = lines
+        .into_iter()
+        .map(|line| pixels.tighten(line))
+        .filter(|line| pixels.replaceable(fonts, line))
+        .collect();
+    crate::page::paragraphs(lines, |rect| pixels.column_edge(rect))
+}
+
+/// Paints the translations over the photograph and shows it in place of the
+/// screen until a key or a click puts it away. Blocks until then.
+pub fn show_page(shot: PageShot, translated: &[(crate::page::Block, String)], note: Option<&str>) {
+    let PageShot(mut shot) = shot;
+    let scale = shot.scale() as f32;
+    let fonts = crate::page::fonts();
+    let mut canvas = crate::page::Canvas {
+        width: shot.frame.width,
+        height: shot.frame.height,
+        bgrx: &mut shot.frame.bgrx,
+    };
+    let started = std::time::Instant::now();
+    canvas.draw_page(fonts, translated);
+    crate::trace!("page      painted in {:?}", started.elapsed());
+    if let Some(note) = note {
+        canvas.note(fonts, note, scale);
+    }
+    overlay::show(&shot.frame, shot.placement);
+}
+
+/// The reader's lines for a picture given as bytes, for the page test.
+#[cfg(test)]
+pub fn recognize_lines_for_test(width: u32, height: u32, bgrx: Vec<u8>) -> Vec<crate::page::Line> {
+    ocr::prepare().expect("a reader");
+    let frame = ocr::Frame {
+        width,
+        height,
+        bgrx,
+    };
+    // The display scale the picture was taken at; 2 for a HiDPI screen.
+    let scale = std::env::var("BUBBLETRANSLATE_PAGE_SCALE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1.0);
+    ocr::recognize_lines(&frame, scale).expect("the reader ran")
 }
 
 /// How far below the region the bubble sits, in the pointer's units.

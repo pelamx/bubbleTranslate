@@ -118,6 +118,38 @@ fn relay_enabled() -> bool {
     !cfg!(debug_assertions) || std::env::var_os("BUBBLETRANSLATE_LICENSE_API").is_some()
 }
 
+/// How much text goes out in one request when a whole screen is translated.
+/// The Google endpoint takes its text in the address, which grows to nine
+/// bytes a letter for Chinese; this keeps the longest under the limits
+/// servers put on an address.
+const PAGE_BATCH_CHARS: usize = 1200;
+
+/// How many requests a whole screen has in flight at once: enough that a
+/// screen of text comes back in a few seconds, few enough that it is not a
+/// burst Google answers with a captcha.
+const PAGE_WORKERS: usize = 4;
+
+/// Groups the paragraphs into requests of at most [`PAGE_BATCH_CHARS`],
+/// keeping their order. A paragraph longer than that goes alone.
+fn page_batches(texts: &[String]) -> Vec<Vec<usize>> {
+    let mut batches: Vec<Vec<usize>> = Vec::new();
+    let mut size = 0;
+    for (index, text) in texts.iter().enumerate() {
+        let chars = text.chars().count() + 1;
+        match batches.last_mut() {
+            Some(batch) if size + chars <= PAGE_BATCH_CHARS => {
+                batch.push(index);
+                size += chars;
+            }
+            _ => {
+                batches.push(vec![index]);
+                size = chars;
+            }
+        }
+    }
+    batches
+}
+
 /// MyMemory rejects queries longer than this.
 const MYMEMORY_MAX_BYTES: usize = 500;
 
@@ -170,6 +202,111 @@ impl Translator {
             ));
         }
         Err(failures)
+    }
+
+    /// Translates many short texts at once — the paragraphs of a whole
+    /// screen — and returns each one's translation in the same order, `None`
+    /// where it could not be had.
+    ///
+    /// Paragraphs go out several to a request, one to a line, because a
+    /// screen holds dozens of them and the unofficial Google endpoint answers
+    /// dozens of requests at once with a captcha. A request that comes back
+    /// with a different number of lines than went out has had lines merged or
+    /// split by the translator, and its paragraphs are asked for one by one
+    /// instead of being painted in the wrong places.
+    ///
+    /// The service's own DeepL key is left out: it is rationed per install
+    /// for the selections Google and MyMemory could not translate, and a
+    /// screen would spend a day of it at once. A key of the user's own is
+    /// used like any other provider.
+    pub fn translate_many(
+        &self,
+        texts: &[String],
+        cfg: &Config,
+    ) -> Result<Vec<Option<String>>, Vec<(Provider, TranslateError)>> {
+        let mut cfg = cfg.clone();
+        if cfg.deepl_api_key.trim().is_empty() {
+            cfg.providers.retain(|p| *p != Provider::DeepL);
+        }
+        let cfg = &cfg;
+        let batches = page_batches(texts);
+        let results = std::sync::Mutex::new(vec![None; texts.len()]);
+        let errors = std::sync::Mutex::new(Vec::new());
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..PAGE_WORKERS.min(batches.len()) {
+                scope.spawn(|| {
+                    loop {
+                        let at = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(batch) = batches.get(at) else {
+                            return;
+                        };
+                        for (index, outcome) in self.translate_batch(texts, batch, cfg) {
+                            match outcome {
+                                Ok(text) => results.lock().unwrap()[index] = Some(text),
+                                Err(mut failed) => errors.lock().unwrap().append(&mut failed),
+                            }
+                        }
+                    }
+                });
+            }
+        });
+        let results = results.into_inner().unwrap();
+        if results.iter().all(Option::is_none) && !texts.is_empty() {
+            return Err(errors.into_inner().unwrap());
+        }
+        Ok(results)
+    }
+
+    /// One request's worth of [`Self::translate_many`].
+    ///
+    /// When the paragraphs come back merged or split, the batch is asked
+    /// again in two halves rather than one paragraph at a time: usually only
+    /// one pair was merged, and halving finds it in a few requests instead of
+    /// a hundred.
+    fn translate_batch(
+        &self,
+        texts: &[String],
+        batch: &[usize],
+        cfg: &Config,
+    ) -> Vec<(usize, Result<String, Vec<(Provider, TranslateError)>>)> {
+        if batch.len() == 1 {
+            let i = batch[0];
+            return vec![(i, self.translate(&texts[i], cfg).map(|t| t.text))];
+        }
+        let joined = batch
+            .iter()
+            .map(|&i| texts[i].as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        match self.translate(&joined, cfg) {
+            Ok(result) => {
+                let lines: Vec<&str> = result
+                    .text
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .collect();
+                if lines.len() == batch.len() {
+                    return batch
+                        .iter()
+                        .zip(lines)
+                        .map(|(&i, line)| (i, Ok(line.to_string())))
+                        .collect();
+                }
+                crate::trace!(
+                    "page      {} paragraphs came back as {} lines; asking in halves",
+                    batch.len(),
+                    lines.len()
+                );
+                let (first, second) = batch.split_at(batch.len() / 2);
+                let mut out = self.translate_batch(texts, first, cfg);
+                out.extend(self.translate_batch(texts, second, cfg));
+                out
+            }
+            // The whole chain refused: so would each paragraph on its own.
+            Err(errors) => batch.iter().map(|&i| (i, Err(errors.clone()))).collect(),
+        }
     }
 
     /// Answers the case where the selection was already in the target
@@ -921,6 +1058,19 @@ fn decode_html_entities(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_screen_goes_out_in_ordered_batches_under_the_limit() {
+        let texts: Vec<String> = [500, 500, 300, 2000, 10]
+            .iter()
+            .map(|n| "a".repeat(*n))
+            .collect();
+        assert_eq!(
+            page_batches(&texts),
+            [vec![0, 1], vec![2], vec![3], vec![4]]
+        );
+        assert!(page_batches(&[]).is_empty());
+    }
 
     #[test]
     fn parses_google_array_shape() {

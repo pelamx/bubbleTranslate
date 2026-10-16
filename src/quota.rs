@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::license::{Entitlement, FREE_DAILY_TRANSLATIONS, now};
+use crate::license::{Entitlement, FREE_DAILY_OCR, FREE_DAILY_TRANSLATIONS, now};
 
 /// How many recently translated strings stay free to repeat. Enough to cover
 /// re-selecting a phrase while reading around it; small enough that the whole
@@ -79,6 +79,10 @@ struct Counter {
     /// When this install first ran a metered build.
     #[serde(default)]
     first_seen: u64,
+    /// Screen readings spent today — a box or the whole screen. Rolls over
+    /// with `used`, and is counted apart from it.
+    #[serde(default)]
+    ocr_used: u32,
     /// A hash of the fields above and this machine's id. A counter edited by
     /// hand, copied from another machine or written by an older build does
     /// not match it, and is read as a day already spent -- see [`Quota::load`].
@@ -94,6 +98,7 @@ impl Default for Counter {
             used: 0,
             high_water_day: today,
             first_seen: now(),
+            ocr_used: 0,
             seal: String::new(),
         }
     }
@@ -181,7 +186,27 @@ impl Quota {
         self.counter.day = today;
         self.counter.high_water_day = self.counter.high_water_day.max(today);
         self.counter.used = self.counter.used.max(FREE_DAILY_TRANSLATIONS);
+        // The screen readings are in the same file, so a file that cannot be
+        // trusted cannot vouch for them either.
+        self.counter.ocr_used = self.counter.ocr_used.max(FREE_DAILY_OCR);
         self.recent.clear();
+    }
+
+    /// Screen readings left today, or `None` where they are not counted at
+    /// all — Pro.
+    pub fn ocr_left(&mut self, entitlement: &Entitlement) -> Option<u32> {
+        self.roll();
+        entitlement
+            .limit
+            .map(|_| FREE_DAILY_OCR.saturating_sub(self.counter.ocr_used))
+    }
+
+    /// Records a screen reading — a box or the whole screen — that came back
+    /// translated.
+    pub fn record_ocr(&mut self) {
+        self.roll();
+        self.counter.ocr_used = self.counter.ocr_used.saturating_add(1);
+        self.save();
     }
 
     /// Translations a day, or `None` for unlimited.
@@ -264,6 +289,7 @@ impl Quota {
         }
         if today > self.counter.high_water_day {
             self.counter.used = 0;
+            self.counter.ocr_used = 0;
             self.counter.high_water_day = today;
             self.recent.clear();
         }
@@ -405,6 +431,11 @@ fn seal(counter: &Counter, machine: &str) -> String {
         )
         .as_bytes(),
     );
+    // Only once there is something to seal, so that every counter written
+    // before screen readings were counted keeps the seal it already has.
+    if counter.ocr_used > 0 {
+        hasher.update(format!("|o{}", counter.ocr_used).as_bytes());
+    }
     hasher
         .finalize()
         .iter()
@@ -431,6 +462,7 @@ mod tests {
                 used,
                 high_water_day: high_water,
                 first_seen: 0,
+                ocr_used: 0,
                 seal: String::new(),
             },
             recent: Vec::new(),
@@ -453,6 +485,43 @@ mod tests {
             limit: None,
             exp: u64::MAX,
         }
+    }
+
+    /// Three screen readings a day, apart from the ten translations, and
+    /// back the next day.
+    #[test]
+    fn screen_readings_are_three_a_day_of_their_own() {
+        let today = local_day();
+        let mut q = today_quota(0);
+        for left in (1..=FREE_DAILY_OCR).rev() {
+            assert_eq!(q.ocr_left(&free()), Some(left));
+            q.record_ocr();
+        }
+        assert_eq!(q.ocr_left(&free()), Some(0));
+        // The ten translations are untouched by them.
+        assert_eq!(q.verdict("some text", &free()), Verdict::Allow);
+        assert_eq!(q.ocr_left(&pro()), None);
+        // Tomorrow they are back.
+        q.counter.day = today - 1;
+        q.counter.high_water_day = today - 1;
+        assert_eq!(q.ocr_left(&free()), Some(FREE_DAILY_OCR));
+    }
+
+    /// A counter sealed before the trial existed is still trusted after it.
+    #[test]
+    fn an_old_seal_survives_the_trial_field() {
+        let q = today_quota(4);
+        let old_seal = seal(&q.counter, &q.machine);
+        let json = serde_json::to_string(&Counter {
+            seal: old_seal,
+            ..q.counter.clone()
+        })
+        .unwrap()
+        .replace(",\"ocr_used\":0", "");
+        assert!(!json.contains("ocr_used"));
+        let mut reopened = Quota::open(Some(&json), true, "test-machine".into());
+        assert_eq!(reopened.counter.used, 4);
+        assert_eq!(reopened.ocr_left(&free()), Some(FREE_DAILY_OCR));
     }
 
     /// The allowance runs out, and says so with the numbers the bubble shows.

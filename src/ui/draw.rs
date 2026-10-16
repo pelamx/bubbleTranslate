@@ -114,20 +114,33 @@ impl BubbleApp {
             }
             State::Capped { limit } => {
                 let limit = *limit;
+                let headline = match (limit, crate::i18n::lang()) {
+                    (Some(limit), crate::i18n::UiLang::En) => {
+                        format!("You have used today's {limit} free translations")
+                    }
+                    (Some(limit), crate::i18n::UiLang::Tr) => {
+                        format!("Bugünkü {limit} ücretsiz çeviriyi kullandın")
+                    }
+                    (Some(limit), crate::i18n::UiLang::Es) => {
+                        format!("Ya usaste las {limit} traducciones gratis de hoy")
+                    }
+                    (None, crate::i18n::UiLang::En) => format!(
+                        "You have used today's {} free screen translations",
+                        license::FREE_DAILY_OCR
+                    ),
+                    (None, crate::i18n::UiLang::Tr) => format!(
+                        "Bugünkü {} ücretsiz ekran çevirisini kullandın",
+                        license::FREE_DAILY_OCR
+                    ),
+                    (None, crate::i18n::UiLang::Es) => format!(
+                        "Ya usaste las {} traducciones de pantalla gratis de hoy",
+                        license::FREE_DAILY_OCR
+                    ),
+                };
                 ui.label(
-                    egui::RichText::new(match crate::i18n::lang() {
-                        crate::i18n::UiLang::En => {
-                            format!("You have used today's {limit} free translations")
-                        }
-                        crate::i18n::UiLang::Tr => {
-                            format!("Bugünkü {limit} ücretsiz çeviriyi kullandın")
-                        }
-                        crate::i18n::UiLang::Es => {
-                            format!("Ya usaste las {limit} traducciones gratis de hoy")
-                        }
-                    })
-                    .size(14.0)
-                    .color(pal().text_primary),
+                    egui::RichText::new(headline)
+                        .size(14.0)
+                        .color(pal().text_primary),
                 );
                 ui.add_space(3.0);
                 ui.label(
@@ -213,7 +226,14 @@ impl BubbleApp {
         ui.add_space(4.0);
         dismiss |= self.draw_footer(ui);
 
-        if let State::Done { left, update, .. } = &self.state {
+        if let State::Done {
+            left,
+            screen,
+            update,
+            ..
+        } = &self.state
+        {
+            let screen = *screen;
             if let Some(left) = *left {
                 ui.add_space(2.0);
                 // The way past the limit sits beside the count, so it is met
@@ -222,6 +242,23 @@ impl BubbleApp {
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new(match crate::i18n::lang() {
+                            // After a box: what is left of the screen
+                            // readings, which is what it spent.
+                            crate::i18n::UiLang::En if screen && left == 1 => {
+                                "1 free screen translation left today".to_string()
+                            }
+                            crate::i18n::UiLang::En if screen => {
+                                format!("{left} free screen translations left today")
+                            }
+                            crate::i18n::UiLang::Tr if screen => {
+                                format!("Bugün {left} ücretsiz ekran çevirisi kaldı")
+                            }
+                            crate::i18n::UiLang::Es if screen && left == 1 => {
+                                "Queda 1 traducción de pantalla gratis hoy".to_string()
+                            }
+                            crate::i18n::UiLang::Es if screen => {
+                                format!("Quedan {left} traducciones de pantalla gratis hoy")
+                            }
                             crate::i18n::UiLang::En if left == 1 => {
                                 "1 free translation left today".to_string()
                             }

@@ -37,6 +37,10 @@ const TRANSLATE: &str = "translate-selection";
 /// has to run a command instead.
 #[cfg(target_os = "linux")]
 const READ_SCREEN: &str = "read-screen";
+/// Translate the whole screen: the request Ctrl+Shift+F makes, for the same
+/// sessions.
+#[cfg(target_os = "linux")]
+const READ_PAGE: &str = "read-page";
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 const OPEN: &str = "open-window";
 /// Turn automatic bubbles on or off: what a click on the Omarchy bar widget
@@ -86,7 +90,9 @@ fn split_request(message: &str) -> (&str, &str) {
 const MAX_MESSAGE: u64 = 64;
 
 #[cfg(target_os = "linux")]
-pub use unix::{is_running, request_open, request_read_screen, request_toggle_auto};
+pub use unix::{
+    is_running, request_open, request_read_page, request_read_screen, request_toggle_auto,
+};
 #[cfg(unix)]
 pub use unix::{listen, request_translate};
 
@@ -183,6 +189,11 @@ mod unix {
                         crate::platform::ask_for_screen_region();
                     }
                     #[cfg(target_os = "linux")]
+                    if message.trim() == super::READ_PAGE {
+                        crate::trace!("ipc: asked to translate the screen");
+                        crate::platform::ask_for_screen_page();
+                    }
+                    #[cfg(target_os = "linux")]
                     if message.trim() == super::TOGGLE_AUTO {
                         crate::trace!("ipc: asked to toggle automatic bubbles");
                         if let Some(handler) = super::ON_TOGGLE_AUTO.get() {
@@ -214,6 +225,16 @@ mod unix {
             return false;
         };
         stream.write_all(super::READ_SCREEN.as_bytes()).is_ok()
+    }
+
+    /// Asks the running instance to translate the whole screen. The whole of
+    /// `--read-page`.
+    #[cfg(target_os = "linux")]
+    pub fn request_read_page() -> bool {
+        let Ok(mut stream) = UnixStream::connect(socket_path()) else {
+            return false;
+        };
+        stream.write_all(super::READ_PAGE.as_bytes()).is_ok()
     }
 
     /// Asks the running instance to turn automatic bubbles on or off. The

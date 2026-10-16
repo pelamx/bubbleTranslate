@@ -33,6 +33,18 @@ const MAX_SETTLE: Duration = Duration::from_secs(5);
 /// the check at most an hour behind the moment the window opens.
 const LICENCE_TICK: Duration = Duration::from_secs(3600);
 
+/// Whether a whole screen is being translated or shown right now.
+///
+/// Asked by the key before it sends a request: a screen takes seconds to
+/// read and translate, and the key pressed again in the meantime — which is
+/// what anyone does when nothing seems to happen — must not queue a second
+/// one to run straight after the first is put away.
+static PAGE_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn page_busy() -> bool {
+    PAGE_BUSY.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 pub enum Request {
     /// The monitor saw a selection gesture finish.
     Selection(Trigger),
@@ -53,6 +65,10 @@ pub enum Request {
     /// has been no gesture yet. The rectangle is drawn *while* this is being
     /// handled, and where the bubble goes is decided from it afterwards.
     ScreenRegion,
+    /// The user asked for everything on the screen to be translated:
+    /// Ctrl+Shift+F, Cmd+Shift+F on a Mac. Spends one of the day's screen
+    /// readings on the free tier, as a box does; see [`crate::page`].
+    ScreenPage,
     /// The user changed the target language; redo the last selection.
     Retranslate,
     /// Text typed into the main window's translate box. Deliberately separate
@@ -99,6 +115,13 @@ pub enum UiEvent {
         at: Option<(f64, f64)>,
         limit: u32,
     },
+    /// Today's free screen readings — boxes and whole screens together —
+    /// are spent. Where the pointer is, for the bubble that says so.
+    OcrCapped {
+        at: Option<(f64, f64)>,
+    },
+    /// Put the bubble away: the translated screen is about to cover it.
+    Dismiss,
     /// The same, for the main window's translate box. The user pressed a
     /// button and is owed an answer every time they press it.
     ManualCapped {
@@ -179,6 +202,9 @@ fn run(
     // being settled; it is processed on the next turn of the loop.
     let mut pending: Option<Request> = None;
 
+    // When a translated screen was last put away; see [`PAGE_REPEAT`].
+    let mut page_closed: Option<Instant> = None;
+
     loop {
         let mut request = match pending.take() {
             Some(request) => request,
@@ -202,6 +228,9 @@ fn run(
             let guard = config.lock().unwrap();
             (guard.clone(), Duration::from_millis(guard.debounce_ms))
         };
+        // Whoever reads the screen for this request reads it with Google
+        // Vision if a key is set now, and on this computer if not.
+        crate::vision::set_key(&cfg.google_vision_api_key);
 
         // Requests that need no capture are handled here; the rest fall
         // through to the selection pipeline below.
@@ -271,6 +300,30 @@ fn run(
                 wake_ui();
                 continue;
             }
+            Request::ScreenPage => {
+                // Released along with the key that asked: the queue may hold
+                // the press that put the last page away.
+                if page_closed.is_some_and(|at: Instant| at.elapsed() < PAGE_REPEAT) {
+                    continue;
+                }
+                let entitlement = licensing.license.lock().unwrap().entitlement.clone();
+                let left = licensing.quota.lock().unwrap().ocr_left(&entitlement);
+                let at = crate::platform::cursor_position();
+                crate::trace!("page      screen readings left {left:?}");
+                if left == Some(0) {
+                    report_capped(&config);
+                    let _ = ui.send(UiEvent::OcrCapped { at });
+                    wake_ui();
+                    continue;
+                }
+                PAGE_BUSY.store(true, std::sync::atomic::Ordering::Relaxed);
+                if translate_page(&translator, &cfg, &ui, &wake_ui, at, left) {
+                    licensing.quota.lock().unwrap().record_ocr();
+                    page_closed = Some(Instant::now());
+                }
+                PAGE_BUSY.store(false, std::sync::atomic::Ordering::Relaxed);
+                continue;
+            }
             Request::TestProviders => {
                 let statuses = Provider::ALL
                     .iter()
@@ -311,6 +364,7 @@ fn run(
         // request, and neither does the repeat window — pressing the key twice
         // on the same words means "again", not "the same gesture twice".
         let asked_for = matches!(request, Request::Hotkey(_) | Request::ScreenRegion);
+        let screen_read = matches!(request, Request::ScreenRegion);
 
         // The last element is whether the allowance applies. Re-reading the
         // same selection in another language is the same translation, so
@@ -320,6 +374,7 @@ fn run(
         let (text, at, via, metered) = match request {
             // Already handled above; the compiler cannot see that.
             Request::Manual(_)
+            | Request::ScreenPage
             | Request::TestProviders
             | Request::ActivateLicense(_)
             | Request::RefreshLicense
@@ -376,6 +431,17 @@ fn run(
                 (text, trigger.at, capture.via, true)
             }
             Request::ScreenRegion => {
+                // Asked before the overlay goes up: someone with no readings
+                // left today should not be made to draw a box first.
+                let entitlement = licensing.license.lock().unwrap().entitlement.clone();
+                if licensing.quota.lock().unwrap().ocr_left(&entitlement) == Some(0) {
+                    report_capped(&config);
+                    let _ = ui.send(UiEvent::OcrCapped {
+                        at: crate::platform::cursor_position(),
+                    });
+                    wake_ui();
+                    continue;
+                }
                 // The overlay is modal and blocks here until the user has
                 // drawn a rectangle or given up. That is the right thread for
                 // it — this one already waits on captures and providers, and
@@ -401,7 +467,9 @@ fn run(
                     );
                     continue;
                 }
-                (text, read.at, read.capture.via, true)
+                // Not metered as a translation: a box spends one of the
+                // day's screen readings instead, counted when it comes back.
+                (text, read.at, read.capture.via, false)
             }
         };
 
@@ -441,6 +509,9 @@ fn run(
                 if charges(chargeable, &result) {
                     licensing.quota.lock().unwrap().record(&text);
                 }
+                if screen_read && !result.echoed {
+                    licensing.quota.lock().unwrap().record_ocr();
+                }
                 health.answered(result.provider);
                 crate::trace!(
                     "translate [{}] {} -> {:?}",
@@ -464,6 +535,129 @@ fn run(
         let _ = ui.send(event);
         wake_ui();
     }
+}
+
+/// How soon after a translated screen is put away another request for one is
+/// taken as the same key pressed to close it.
+const PAGE_REPEAT: Duration = Duration::from_secs(1);
+
+/// Translates the whole screen and shows it, until it is put away. Whether a
+/// translation was shown — which is what spends a screen reading.
+///
+/// `left` is how many of today's free screen readings are left, `None` on
+/// Pro; with one, the picture says so along the bottom.
+#[cfg(target_os = "linux")]
+fn translate_page(
+    translator: &Translator,
+    cfg: &Config,
+    ui: &Sender<UiEvent>,
+    wake_ui: &impl Fn(),
+    at: Option<(f64, f64)>,
+    left: Option<u32>,
+) -> bool {
+    // Photographed before the bubble comes up, so it is not in the picture.
+    let Some(shot) = crate::platform::capture_page() else {
+        return false;
+    };
+    let _ = ui.send(UiEvent::Working {
+        at,
+        via: CaptureSource::Ocr,
+    });
+    wake_ui();
+
+    let started = Instant::now();
+    let blocks = crate::platform::read_page(&shot);
+    crate::trace!(
+        "page      {} paragraphs read in {:?}",
+        blocks.len(),
+        started.elapsed()
+    );
+    if blocks.is_empty() {
+        let _ = ui.send(UiEvent::Dismiss);
+        wake_ui();
+        return false;
+    }
+    let texts: Vec<String> = blocks.iter().map(|block| block.text.clone()).collect();
+    let translated = match translator.translate_many(&texts, cfg) {
+        Ok(translated) => translated,
+        Err(errors) => {
+            for (provider, err) in &errors {
+                crate::trace!("translate {} FAILED: {err}", provider.label());
+            }
+            let _ = ui.send(UiEvent::Failed { errors });
+            wake_ui();
+            return false;
+        }
+    };
+    crate::trace!(
+        "page      {} of {} paragraphs translated in {:?}",
+        translated.iter().flatten().count(),
+        texts.len(),
+        started.elapsed()
+    );
+    let pairs: Vec<_> = blocks
+        .into_iter()
+        .zip(translated)
+        .filter_map(|(block, text)| text.map(|text| (block, text)))
+        .filter(|(block, text)| {
+            let wrong = crate::page::wrong_script(&block.text, text, &cfg.target_lang);
+            if wrong {
+                crate::trace!("page      left as it is, came back in another script: {text:?}");
+            }
+            !wrong
+        })
+        .collect();
+
+    let _ = ui.send(UiEvent::Dismiss);
+    wake_ui();
+    // Long enough for the bubble's window to be gone before the picture
+    // covers the screen, so it does not stay on top of it.
+    std::thread::sleep(Duration::from_millis(150));
+    let note = page_note(left.map(|left| left.saturating_sub(1)));
+    crate::platform::show_page(shot, &pairs, Some(&note));
+    true
+}
+
+#[cfg(not(target_os = "linux"))]
+fn translate_page(
+    _translator: &Translator,
+    _cfg: &Config,
+    _ui: &Sender<UiEvent>,
+    _wake_ui: &impl Fn(),
+    _at: Option<(f64, f64)>,
+    _left: Option<u32>,
+) -> bool {
+    false
+}
+
+/// The line along the bottom of a translated screen: how to put it away, and
+/// on the free tier how many of today's screen readings are left after this
+/// one.
+fn page_note(left: Option<u32>) -> String {
+    use crate::i18n::{UiLang, lang};
+    let close = crate::i18n::t(
+        "Press any key or click to close",
+        "Kapatmak için bir tuşa bas ya da tıkla",
+        "Pulsa una tecla o haz clic para cerrar",
+    );
+    let Some(left) = left else {
+        return close.to_string();
+    };
+    let trial = match lang() {
+        UiLang::En => format!(
+            "{left} of today's {} free screen translations left — unlimited with Pro",
+            license::FREE_DAILY_OCR
+        ),
+        UiLang::Tr => format!(
+            "Bugünkü {} ücretsiz ekran çevirisinden {left} kaldı — Pro ile sınırsız",
+            license::FREE_DAILY_OCR
+        ),
+        UiLang::Es => format!(
+            "Quedan {left} de las {} traducciones de pantalla gratis de hoy — ilimitadas con Pro",
+            license::FREE_DAILY_OCR
+        ),
+    };
+    format!("{trial}  ·  {close}")
 }
 
 fn truncate_for_log(text: &str) -> String {

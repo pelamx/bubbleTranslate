@@ -264,6 +264,10 @@ pub struct Config {
     /// Anthropic API key. Without one Claude is skipped even if listed in
     /// `providers`.
     pub anthropic_api_key: String,
+    /// Google Cloud Vision API key. With one, the screen — a box or the whole
+    /// of it — is read by Google instead of on this computer; see
+    /// [`crate::vision`]. Empty by default, which keeps every picture here.
+    pub google_vision_api_key: String,
     /// Optional contact address for MyMemory. Anonymous use is capped at ~5k
     /// chars/day; supplying an address raises it to ~50k.
     pub mymemory_email: String,
@@ -378,6 +382,7 @@ impl Default for Config {
             ],
             deepl_api_key: String::new(),
             anthropic_api_key: String::new(),
+            google_vision_api_key: String::new(),
             mymemory_email: String::new(),
             license_key: String::new(),
             auto_translate: true,
