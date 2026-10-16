@@ -34,6 +34,15 @@ arrow, read as the letter C, came back as "Ç". Spaced-out headings are now
 recognised only in capitals, which is how they are set, and a letter standing
 on its own is left as it is.
 
+**A menu under a title stays a menu.** In Google Drive's PDF viewer the
+file's name sits right above the "File" menu, and the first menu item was read
+as the last word of the title — "Dark Territory….pdf File" — and translated
+together with it. A row of short items side by side — a menu, tabs, a row of
+buttons — is now kept apart, each item on its own. Lines of a tightly set page
+also come back whole more often: a line the reader split down an imaginary
+column, or whose box reached into the line above, is no longer left in English
+or set a size too large.
+
 **Everything listed under 0.4.16 comes to Linux with this version. (Linux)**
 0.4.16 was released for Windows first. The paragraphs of a printed page kept
 whole, titles in large type and in spaced-out capitals, translation in context

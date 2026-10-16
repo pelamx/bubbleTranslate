@@ -171,6 +171,29 @@ pub fn lines_from_words(lines: Vec<Vec<Word>>) -> Vec<Line> {
                 continue;
             }
             let last_at = piece.len().saturating_sub(1);
+            // Whether a word of the reader's other lines sits on the same row
+            // as `word`, a space away on the side `before` says: the other
+            // half of a line of print the reader cut in two at a column it
+            // imagined. The word at the cut is then not at the end of
+            // anything, and not a bullet or an icon.
+            let beside = |word: &Word, before: bool| {
+                let middle = word.rect.y + word.rect.height / 2;
+                all.iter().any(|w| {
+                    let gap = if before {
+                        word.rect.x.checked_sub(w.rect.right())
+                    } else {
+                        w.rect.x.checked_sub(word.rect.right())
+                    };
+                    // A space, and a letter more: the reader sometimes
+                    // loses the first letter at the cut — "he" comes back
+                    // as "e".
+                    (w.rect.y..w.rect.bottom()).contains(&middle)
+                        && gap.is_some_and(|gap| gap * 2 <= word.rect.height.max(w.rect.height) * 3)
+                        && w.text.chars().any(char::is_alphanumeric)
+                })
+            };
+            let carries_on = piece.first().is_some_and(|w| beside(w, true));
+            let carried_on = piece.last().is_some_and(|w| beside(w, false));
             let piece: Vec<Word> = piece
                 .into_iter()
                 .enumerate()
@@ -184,7 +207,7 @@ pub fn lines_from_words(lines: Vec<Vec<Word>>) -> Vec<Line> {
                     // border — "\:A'Lt" for an Alt key. Only at the start: at
                     // the end, a word the reader cut short at a column it
                     // imagined comes back as "grip|", and is still a word.
-                    let edge = *at == 0 || *at == last_at;
+                    let edge = (*at == 0 && !carries_on) || (*at == last_at && !carried_on);
                     let short = w.text.chars().count() <= 2;
                     if short && edge && w.confidence < 60.0 {
                         return false;
@@ -193,9 +216,12 @@ pub fn lines_from_words(lines: Vec<Vec<Word>>) -> Vec<Line> {
                         return false;
                     }
                     // A radio button or a bullet in front of a label, read
-                    // as the letter it most looks like.
+                    // as the letter it most looks like — unless the line
+                    // carries on from words just left of it: "he" read as "e"
+                    // after a cut down the middle of a page.
                     if *at == 0
                         && last_at > 0
+                        && !carries_on
                         && ["o", "O", "0", "©", "®", "•", "e", "@"].contains(&w.text.as_str())
                     {
                         return false;
@@ -293,30 +319,45 @@ pub fn join_split_lines(mut lines: Vec<Line>) -> Vec<Line> {
             _ => rows.push(vec![line]),
         }
     }
-    let mut out = Vec::new();
-    for mut row in rows {
+    for row in &mut rows {
         row.sort_by_key(|line| line.rect.x);
+    }
+    // Across a wide, justified space only two stretches of text are one line;
+    // a key's label or a button's — "Alt", "OK" — beside its description is
+    // two things, and joins only across an ordinary space. `reach` is how
+    // many letters wide a space may be.
+    let joins = |a: &Line, b: &Line, reach: f32| {
+        let gap = b.rect.x as f32 - a.rect.right() as f32;
+        let width = letter(a).max(letter(b));
+        let shorter = a.text.chars().count().min(b.text.chars().count());
+        a.rect.height.max(b.rect.height) * 10 <= a.rect.height.min(b.rect.height) * 13
+            && gap >= -2.0
+            && gap <= width * if shorter >= 4 { reach } else { 1.0 }
+    };
+    // Where the reader's imagined column runs: the cuts it made that join
+    // across an ordinary space. A cut there with a wider gap is the same cut
+    // with a word lost in it — "he" read as "e", its "h" dropped — and joins
+    // too: the column is no more real on that line than on the others.
+    let cuts: Vec<(u32, f32)> = rows
+        .iter()
+        .flat_map(|row| row.windows(2))
+        .filter(|pair| joins(&pair[0], &pair[1], 2.2))
+        .map(|pair| (pair[1].rect.x, letter(&pair[1])))
+        .collect();
+    let on_a_cut = |line: &Line| {
+        cuts.iter()
+            .filter(|(x, width)| x.abs_diff(line.rect.x) as f32 <= width * 4.0)
+            .count()
+            >= 2
+    };
+    let mut out = Vec::new();
+    for row in rows {
         let mut joined: Vec<Line> = Vec::new();
         for line in row {
             match joined.last_mut() {
                 Some(before)
-                    if {
-                        let (a, b) = (&before.rect, &line.rect);
-                        let gap = b.x as f32 - a.right() as f32;
-                        a.height.max(b.height) * 10 <= a.height.min(b.height) * 13
-                            && gap >= -2.0
-                            && {
-                                // Across a wide, justified space only two
-                                // stretches of text are one line; a key's
-                                // label or a button's — "Alt", "OK" — beside
-                                // its description is two things, and joins
-                                // only across an ordinary space.
-                                let width = letter(before).max(letter(&line));
-                                let shorter =
-                                    before.text.chars().count().min(line.text.chars().count());
-                                gap <= width * if shorter >= 4 { 2.2 } else { 1.0 }
-                            }
-                    } =>
+                    if joins(before, &line, 2.2)
+                        || (on_a_cut(&line) && joins(before, &line, 4.5)) =>
                 {
                     let gap = line.rect.x as f32 - before.rect.right() as f32;
                     // Cut inside a word: no space between the halves.
@@ -512,14 +553,41 @@ pub fn paragraphs(mut lines: Vec<Line>, room: impl Fn(&Rect) -> u32) -> Vec<Bloc
         })
         .collect();
 
-    let mut open: Vec<(Block, u32)> = Vec::new();
-    for (line, line_room) in lines.into_iter().zip(rooms) {
-        let found = open.iter_mut().find(|(block, room)| {
+    // An item in a row of them — a menu's "File" beside its "View", tabs,
+    // a row of buttons — is a paragraph of its own, whatever is above or
+    // below it: under a document's title, the first item of the menu would
+    // otherwise read as the title's last line.
+    let short = |line: &Line| line.text.split_whitespace().count() <= 2;
+    let items: Vec<bool> = lines
+        .iter()
+        .map(|line| {
+            let r = &line.rect;
+            let letter = r.width / line.text.chars().count().max(1) as u32;
+            short(line)
+                && lines.iter().any(|other| {
+                    let o = &other.rect;
+                    let same_row = (o.y + o.height / 2).abs_diff(r.y + r.height / 2) * 4
+                        <= r.height.max(o.height);
+                    let gap = if o.x >= r.right() {
+                        o.x - r.right()
+                    } else if r.x >= o.right() {
+                        r.x - o.right()
+                    } else {
+                        return false;
+                    };
+                    same_row && short(other) && gap <= letter.max(1) * 4
+                })
+        })
+        .collect();
+
+    let mut open: Vec<(Block, u32, bool)> = Vec::new();
+    for ((line, line_room), item) in lines.into_iter().zip(rooms).zip(items) {
+        let found = open.iter_mut().find(|(block, room, closed)| {
             let last = block.lines.last().expect("a block has a line");
-            continues(last, &line, *room, display)
+            !item && !*closed && continues(last, &line, *room, display)
         });
         match found {
-            Some((block, room)) => {
+            Some((block, room, _)) => {
                 append(&mut block.text, line.text.trim());
                 block.rect = block.rect.union(&line.rect);
                 block.lines.push(line);
@@ -532,11 +600,12 @@ pub fn paragraphs(mut lines: Vec<Line>, room: impl Fn(&Rect) -> u32) -> Vec<Bloc
                     lines: vec![line],
                 },
                 line_room,
+                item,
             )),
         }
     }
     open.into_iter()
-        .map(|(block, _)| block)
+        .map(|(block, _, _)| block)
         .filter(|block| !(block.lines.len() == 1 && bare_name(&block.text)))
         .collect()
 }
@@ -1399,20 +1468,40 @@ impl Pixels<'_> {
     /// The paper `rect` is printed on: the colour of a ring of pixels just
     /// outside it — or `None` when the ring is not one colour, because the
     /// text sits on a picture or a gradient that cannot be painted back.
+    ///
+    /// Nearly all of the ring has to be that colour — or nearly all of its
+    /// two ends, and most of its top and bottom. On a page of print set
+    /// tight, the row above a line runs through the descenders of the line
+    /// over it and the row below through the capitals of the next, and the
+    /// line is on paper all the same; a picture or a gradient shows at the
+    /// ends of the ring as much as anywhere.
     fn paper(&self, rect: Rect) -> Option<[u8; 3]> {
+        let (paper, edges, ends) = self.surround(rect)?;
+        let share = |(alike, all): (usize, usize)| alike as f32 / all.max(1) as f32;
+        let whole = (edges.0 + ends.0, edges.1 + ends.1);
+        (share(whole) >= 0.9 || (share(ends) >= 0.9 && share(edges) >= 0.75)).then_some(paper)
+    }
+
+    /// The commonest colour of the ring of pixels just outside `rect`, and
+    /// how many of the ring's pixels are that colour — along its top and
+    /// bottom, then at its two ends — out of how many there are.
+    #[allow(clippy::type_complexity)]
+    fn surround(&self, rect: Rect) -> Option<([u8; 3], (usize, usize), (usize, usize))> {
         let x0 = rect.x.saturating_sub(3);
         let y0 = rect.y.saturating_sub(3);
         let x1 = (rect.right() + 2).min(self.width.saturating_sub(1));
         let y1 = (rect.bottom() + 2).min(self.height.saturating_sub(1));
-        let mut ring = Vec::new();
+        let mut edges = Vec::new();
         for x in x0..=x1 {
-            ring.push(self.pixel(x, y0));
-            ring.push(self.pixel(x, y1));
+            edges.push(self.pixel(x, y0));
+            edges.push(self.pixel(x, y1));
         }
+        let mut ends = Vec::new();
         for y in y0..=y1 {
-            ring.push(self.pixel(x0, y));
-            ring.push(self.pixel(x1, y));
+            ends.push(self.pixel(x0, y));
+            ends.push(self.pixel(x1, y));
         }
+        let ring: Vec<[u8; 3]> = edges.iter().chain(&ends).copied().collect();
         // The commonest colour, not the average: a neighbour's letter
         // touching the ring must not tint the paper.
         let mut counts: Vec<([u8; 3], usize)> = Vec::new();
@@ -1437,13 +1526,14 @@ impl Pixels<'_> {
             .into_iter()
             .max_by_key(|(_, n)| *n)
             .map_or(group, |(c, _)| c);
-        let alike = ring
-            .iter()
-            .filter(|p| distance(**p, paper) <= PAPER_TOLERANCE)
-            .count();
-        // Nearly all of it: a few pixels of a neighbouring letter are allowed,
-        // a picture or a gradient is not.
-        (alike * 10 >= ring.len() * 9).then_some(paper)
+        let alike = |pixels: &[[u8; 3]]| {
+            let n = pixels
+                .iter()
+                .filter(|p| distance(**p, paper) <= PAPER_TOLERANCE)
+                .count();
+            (n, pixels.len())
+        };
+        Some((paper, alike(&edges), alike(&ends)))
     }
 
     /// The ring of pixels just outside `rect`, all the way round in order —
@@ -1539,25 +1629,73 @@ impl Pixels<'_> {
     /// measured against that no face fits. The picture says exactly where
     /// they are — every row and column of the box with something on it that
     /// is not paper.
+    ///
+    /// The box can also reach into the next line, or the one above, by a few
+    /// pixels — far enough, on a page set tight, to take in the tops of its
+    /// capitals. A band of ink along the top or the bottom of the box, with a
+    /// row of paper between it and the rest, that runs on out of the box is
+    /// that other line, and is left out. This line's own accents and dots end
+    /// inside the box, and stay.
     pub fn tighten(&self, mut line: Line) -> Line {
         let rect = line.rect;
         if rect.right() > self.width || rect.bottom() > self.height {
             return line;
         }
-        let Some(paper) = self.paper(rect) else {
+        // Looser than [`Self::paper`]: the box that reaches into the lines
+        // around it has their letters in its ring, and is the very box that
+        // needs tightening. Measured against a picture everything is ink, and
+        // the box stays as it is.
+        let Some((paper, edges, ends)) = self.surround(rect) else {
             return line;
         };
+        if (edges.0 + ends.0) * 10 < (edges.1 + ends.1) * 6 {
+            return line;
+        }
         let ink = self.ink(rect, paper);
         let contrast = distance(ink, paper);
         if contrast < 60 {
             return line;
         }
         let marked = |x: u32, y: u32| distance(self.pixel(x, y), paper) * 5 > contrast * 2;
-        let rows: Vec<u32> = (rect.y..rect.bottom())
+        let mut rows: Vec<u32> = (rect.y..rect.bottom())
             .filter(|&y| (rect.x..rect.right()).any(|x| marked(x, y)))
             .collect();
+        // Whether the ink on row `y` carries straight on to row `beyond`,
+        // outside the box: most of it, letter by letter.
+        let runs_out = |y: u32, beyond: u32| {
+            let on: Vec<u32> = (rect.x..rect.right()).filter(|&x| marked(x, y)).collect();
+            let on_beyond = on.iter().filter(|&&x| marked(x, beyond)).count();
+            !on.is_empty() && on_beyond * 3 >= on.len()
+        };
+        // How many rows the band along one edge holds, from that edge up to
+        // the first row of paper — when it is the smaller part, never the
+        // line itself. `rows` runs away from the edge.
+        let band = |rows: &[u32]| {
+            rows.windows(2)
+                .position(|w| w[0].abs_diff(w[1]) > 1)
+                .map(|cut| cut + 1)
+                .filter(|&n| n * 2 < rows.len())
+        };
+        if rect.y > 0
+            && rows.first() == Some(&rect.y)
+            && runs_out(rect.y, rect.y - 1)
+            && let Some(n) = band(&rows)
+        {
+            rows.drain(..n);
+        }
+        let upwards: Vec<u32> = rows.iter().rev().copied().collect();
+        if rect.bottom() < self.height
+            && rows.last() == Some(&(rect.bottom() - 1))
+            && runs_out(rect.bottom() - 1, rect.bottom())
+            && let Some(n) = band(&upwards)
+        {
+            rows.truncate(rows.len() - n);
+        }
+        let (Some(&first), Some(&last)) = (rows.first(), rows.last()) else {
+            return line;
+        };
         let columns: Vec<u32> = (rect.x..rect.right())
-            .filter(|&x| (rect.y..rect.bottom()).any(|y| marked(x, y)))
+            .filter(|&x| (first..=last).any(|y| marked(x, y)))
             .collect();
         if let (Some(&top), Some(&bottom), Some(&left), Some(&right)) =
             (rows.first(), rows.last(), columns.first(), columns.last())
@@ -2216,6 +2354,47 @@ impl Canvas<'_> {
             })
             .collect();
 
+        // A line that fits its own face poorly has guessed its size along
+        // with it: the size is what makes its text as wide as the original's
+        // in that face, and in the wrong face it comes out wrong too — a line
+        // of a book read at 35 pixels among lines of 32.5. The size most
+        // lines of its height are set at, among those that fit as well or
+        // better, is what size it is.
+        let heights: Vec<(u32, f32, f32)> = prepared
+            .iter()
+            .flat_map(|(block, _, styles)| {
+                block
+                    .lines
+                    .iter()
+                    .zip(styles)
+                    .map(|(line, style)| (line.rect.height, style.px, style.fit))
+            })
+            .collect();
+        for (block, _, styles) in &mut prepared {
+            for (line, style) in block.lines.iter().zip(styles.iter_mut()) {
+                if style.fit >= RESHAPE_BELOW {
+                    continue;
+                }
+                let height = line.rect.height;
+                let mates: Vec<f32> = heights
+                    .iter()
+                    .filter(|(h, _, fit)| h.abs_diff(height) * 14 <= height && *fit >= style.fit)
+                    .map(|(_, px, _)| *px)
+                    .collect();
+                let commonest = mates
+                    .iter()
+                    .map(|px| (*px, mates.iter().filter(|other| *other == px).count()))
+                    .max_by_key(|(_, n)| *n);
+                if let Some((px, n)) = commonest
+                    && n >= 3
+                    && n * 5 >= mates.len() * 2
+                    && (px - style.px).abs() > px * 0.04
+                {
+                    style.px = px;
+                }
+            }
+        }
+
         // A list is one size: a table of contents, a menu, the items of a
         // sidebar — one under another, starting at the same left edge.
         // Measured a line at a time, a line set in two faces can come out a
@@ -2493,10 +2672,23 @@ impl Canvas<'_> {
                 crate::trace!("page      left as it is, no room: {:?}", block.text);
                 return;
             }
-            crate::trace!("page      cut short, no room: {:?}", block.text);
+            crate::trace!(
+                "page      cut short, no room: {:?} (room {:?})",
+                block.text,
+                all
+            );
             rows
         };
         rows.extend(extra.into_iter().take(used_extra));
+        crate::trace!(
+            "page      set in face {} {:?}{} at {px:.1}px, {:.2} wide, fit {:.2}: {:?}",
+            set_in.index,
+            fonts.kind(set_in),
+            if fonts.bold(set_in) { " bold" } else { "" },
+            set_in.squeeze,
+            styles.iter().map(|s| s.fit).fold(0.0, f32::max),
+            block.text
+        );
 
         for ((rect, style), _) in rows.iter().zip(&block.lines) {
             if style.smooth {
