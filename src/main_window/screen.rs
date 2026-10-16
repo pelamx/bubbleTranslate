@@ -101,11 +101,18 @@ pub fn screen_reading(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
     );
 
     // The whole screen at once. Only where it is built yet.
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     {
         ui.add_space(10.0);
         ui.horizontal_wrapped(|ui| {
-            key_chip(ui, "Ctrl+Shift+F");
+            key_chip(
+                ui,
+                if cfg!(target_os = "macos") {
+                    "⌘⇧F"
+                } else {
+                    "Ctrl+Shift+F"
+                },
+            );
             ui.label(
                 egui::RichText::new(t(
                     "Translate the whole screen",

@@ -4,8 +4,11 @@
 pub mod capture;
 pub mod monitor;
 pub mod ocr;
+pub mod page;
 pub mod shell;
 pub mod speech;
+
+pub use page::{capture_page, on_screen_page_request, read_page, show_page};
 
 use std::path::PathBuf;
 use std::process::Command;

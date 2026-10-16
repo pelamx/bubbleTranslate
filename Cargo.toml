@@ -50,6 +50,10 @@ core-graphics = "0.25.0"
 objc2 = "0.6.4"
 objc2-app-kit = "0.3.2"
 objc2-foundation = "0.3.2"
+# The whole-screen overlay is an AppKit window, which must be made and shown
+# on the main thread; the worker that composed it hands the work over through
+# the main dispatch queue. Already in the tree under winit.
+dispatch2 = "0.3.1"
 # Reading text off the screen. On-device: the picture handed to the recogniser
 # is whatever was on the user's screen, so it never leaves the machine.
 objc2-vision = { version = "0.3.2", default-features = false, features = [

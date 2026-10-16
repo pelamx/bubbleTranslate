@@ -58,10 +58,10 @@ pub fn how_to(ui: &mut egui::Ui, cfg: &Config) {
         ),
     );
     // The whole screen at once, only where it is built yet.
-    if cfg!(any(target_os = "linux", target_os = "windows")) {
+    if cfg!(any(target_os = "linux", target_os = "windows", target_os = "macos")) {
         row(
             ui,
-            &["Ctrl+Shift+F"],
+            &[if mac { "⌘⇧F" } else { "Ctrl+Shift+F" }],
             t(
                 "translate the whole screen in place — same layout, font and size",
                 "tüm ekranı yerinde çevir — aynı düzen, yazı tipi ve boyut",

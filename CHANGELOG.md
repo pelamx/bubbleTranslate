@@ -15,6 +15,16 @@ days before the others.
 
 ## 0.4.14 — 2026-10-16
 
+**Translate the whole screen at once with ⌘⇧F. (macOS)** Every paragraph on
+the screen is replaced by its translation, in place — in the same font, size
+and colour it was printed in, on the lines it was on, the way it already works
+on Linux and Windows. It works on anything the screen shows: a PDF, a
+terminal, a game, an app that was never translated; code and text on a picture
+are left as they are. Press any key or click to put it away. The screen is
+read on your own Mac by the recogniser the system ships, so nothing of it
+leaves the machine. It is also in the window, under "Translate text you cannot
+select".
+
 **Translate the whole screen at once with Ctrl+Shift+F. (Windows)** Every
 paragraph on the screen is replaced by its translation, in place — in the same
 font, size and colour it was printed in, on the lines it was on, the way a

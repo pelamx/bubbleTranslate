@@ -401,10 +401,8 @@ fn main() -> eframe::Result<()> {
             }
 
             // Ctrl+Shift+F, Cmd+Shift+F on a Mac: translate the whole
-            // screen. Only where the platform can do it yet: macOS reads the
-            // screen through a permission the ordinary build does not ask
-            // for, so there is nothing there to photograph.
-            #[cfg(any(target_os = "linux", target_os = "windows"))]
+            // screen. Built on all three now.
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
             {
                 let requests = engine.sender();
                 crate::platform::on_screen_page_request(move || {

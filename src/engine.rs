@@ -546,7 +546,7 @@ const PAGE_REPEAT: Duration = Duration::from_secs(1);
 ///
 /// `left` is how many of today's free screen readings are left, `None` on
 /// Pro; with one, the picture says so along the bottom.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 fn translate_page(
     translator: &Translator,
     cfg: &Config,
@@ -618,7 +618,7 @@ fn translate_page(
     true
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 fn translate_page(
     _translator: &Translator,
     _cfg: &Config,

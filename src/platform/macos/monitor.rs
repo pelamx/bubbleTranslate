@@ -133,6 +133,7 @@ fn satisfies(key: TriggerKey, flags: CGEventFlags) -> bool {
 /// the bubble has to keep clear of. In global display points, `(x, y, width,
 /// height)`.
 static ON_REGION: OnceLock<Mutex<Box<dyn Fn() + Send>>> = OnceLock::new();
+static ON_PAGE: OnceLock<Mutex<Box<dyn Fn() + Send>>> = OnceLock::new();
 static DRAG_FROM: Mutex<Option<(f64, f64)>> = Mutex::new(None);
 static LAST_DRAG: Mutex<Option<(f64, f64, f64, f64)>> = Mutex::new(None);
 
@@ -143,6 +144,11 @@ static LAST_DRAG: Mutex<Option<(f64, f64, f64, f64)>> = Mutex::new(None);
 /// something to recover from.
 pub fn on_region_request(ask: impl Fn() + Send + 'static) {
     let _ = ON_REGION.set(Mutex::new(Box::new(ask)));
+}
+
+/// Registers the callback for Cmd+Shift+F, the whole-screen translation.
+pub fn on_page_request(ask: impl Fn() + Send + 'static) {
+    let _ = ON_PAGE.set(Mutex::new(Box::new(ask)));
 }
 
 /// The rectangle of the last completed drag, forgotten once read.
@@ -166,6 +172,17 @@ fn is_region_key(keycode: i64, flags: CGEventFlags) -> bool {
     /// `kVK_ANSI_E`, from `HIToolbox/Events.h`.
     const KEYCODE_E: i64 = 0x0E;
     keycode == KEYCODE_E
+        && flags.contains(CGEventFlags::CGEventFlagShift)
+        && flags.contains(CGEventFlags::CGEventFlagCommand)
+}
+
+/// Whether this key-up is the translate-the-whole-screen combination,
+/// Cmd+Shift+F — beside the region's Cmd+Shift+E, and listen-only the same
+/// way, so the keystroke still reaches whatever has focus.
+fn is_page_key(keycode: i64, flags: CGEventFlags) -> bool {
+    /// `kVK_ANSI_F`, from `HIToolbox/Events.h`.
+    const KEYCODE_F: i64 = 0x03;
+    keycode == KEYCODE_F
         && flags.contains(CGEventFlags::CGEventFlagShift)
         && flags.contains(CGEventFlags::CGEventFlagCommand)
 }
@@ -231,6 +248,18 @@ fn run(on_trigger: impl Fn(Trigger) + Send + 'static) {
                 }
             }
             _ => {}
+        }
+
+        // A translated screen is put away by the first key or click, whatever
+        // it is — the same promise the picture makes along its bottom. Checked
+        // ahead of everything else, and before the pause gate, so the very
+        // press meant to dismiss it is the one that does. When no screen is up
+        // this is a lock and a `None`, costing nothing.
+        if matches!(
+            event_type,
+            CGEventType::KeyUp | CGEventType::LeftMouseDown
+        ) {
+            super::page::note_input();
         }
 
         // Esc puts the bubble away. Ahead of the pause too: the pointer
@@ -307,6 +336,13 @@ fn run(on_trigger: impl Fn(Trigger) + Send + 'static) {
                 if is_region_key(keycode, flags) {
                     crate::trace!("key-up    keycode={keycode} -> read the screen");
                     if let Some(ask) = ON_REGION.get() {
+                        ask.lock().unwrap()();
+                    }
+                    return CallbackResult::Keep;
+                }
+                if is_page_key(keycode, flags) {
+                    crate::trace!("key-up    keycode={keycode} -> translate the screen");
+                    if let Some(ask) = ON_PAGE.get() {
                         ask.lock().unwrap()();
                     }
                     return CallbackResult::Keep;

@@ -13,7 +13,7 @@ use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::AnyObject;
 use objc2_core_foundation::CGAffineTransform;
 use objc2_core_image::CIImage;
-use objc2_foundation::{NSArray, NSData, NSDictionary, NSNumber, NSString};
+use objc2_foundation::{NSArray, NSData, NSDictionary, NSNumber, NSRange, NSString};
 use objc2_vision::{
     VNImageRequestHandler, VNRecognizeTextRequest, VNRequest, VNRequestTextRecognitionLevel,
 };
@@ -165,6 +165,139 @@ fn prepared(data: &NSData) -> Option<Retained<CIImage>> {
         );
         Some(bigger.imageByApplyingFilter_withInputParameters(&name, &params))
     }
+}
+
+/// Reads the screen with the box around every word kept, for translating a
+/// whole page in place.
+///
+/// The rectangle reader ([`recognize`]) throws the positions away and returns
+/// one block of text; here each word's box is carried through, because the
+/// translation has to be written back where the word was. `png` is the whole
+/// screen, `width` and `height` its size in pixels — the frame of reference
+/// Vision's normalised boxes are turned back into. The result is one list of
+/// words per line, which [`crate::page::lines_from_words`] turns into the
+/// lines that are replaced.
+///
+/// No doubling or contrast pass here, unlike [`prepared`]: a screen is already
+/// crisp and life-size, and doubling a 4K capture would cost far more than it
+/// could buy.
+pub fn recognize_words(png: &[u8], source_lang: &str, width: u32, height: u32) -> Vec<Vec<Word2>> {
+    autoreleasepool(|_| {
+        let request = VNRecognizeTextRequest::new();
+        request.setRecognitionLevel(VNRequestTextRecognitionLevel::Accurate);
+        request.setUsesLanguageCorrection(true);
+        match wanted_language(source_lang, languages()) {
+            Some(id) => {
+                let id = NSString::from_str(&id);
+                request.setRecognitionLanguages(&NSArray::from_retained_slice(&[id]));
+            }
+            None => request.setAutomaticallyDetectsLanguage(true),
+        }
+
+        let data = NSData::with_bytes(png);
+        let options: Retained<NSDictionary<_, _>> = NSDictionary::new();
+        let handler = VNImageRequestHandler::initWithData_options(
+            VNImageRequestHandler::alloc(),
+            &data,
+            &options,
+        );
+
+        let base: Retained<VNRequest> = Retained::into_super(Retained::into_super(request.clone()));
+        if let Err(e) = handler.performRequests_error(&NSArray::from_retained_slice(&[base])) {
+            crate::trace!("ocr       the recogniser failed: {e}");
+            return Vec::new();
+        }
+
+        let Some(results) = request.results() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for observation in results.iter() {
+            let Some(best) = observation.topCandidates(1).firstObject() else {
+                continue;
+            };
+            let string = best.string().to_string();
+            // Vision scores a whole candidate, not a word; every word on the
+            // line carries the line's score, out of 100 for [`crate::page`].
+            let confidence = best.confidence() * 100.0;
+            let mut line = Vec::new();
+            for (location, length, text) in words_utf16(&string) {
+                let range = NSRange { location, length };
+                let Ok(rectangle) = (unsafe { best.boundingBoxForRange_error(range) }) else {
+                    continue;
+                };
+                let box_ = unsafe { rectangle.boundingBox() };
+                line.push(crate::page::Word {
+                    rect: to_pixel_rect(box_, width, height),
+                    text,
+                    confidence,
+                });
+            }
+            if !line.is_empty() {
+                out.push(line);
+            }
+        }
+        out
+    })
+}
+
+/// So the signature above reads without naming the long path on every line.
+type Word2 = crate::page::Word;
+
+/// Turns one of Vision's normalised, bottom-left boxes into a rectangle in the
+/// picture's own pixels, top-left origin — the space [`crate::page`] works in
+/// — clamped to the picture so it can be indexed without a check.
+fn to_pixel_rect(
+    box_: objc2_core_foundation::CGRect,
+    width: u32,
+    height: u32,
+) -> crate::page::Rect {
+    let w = f64::from(width);
+    let h = f64::from(height);
+    let x = (box_.origin.x * w).round().clamp(0.0, w - 1.0) as u32;
+    // Vision's y is the bottom edge from the bottom; the top edge from the top
+    // is what the picture is addressed by.
+    let top = ((1.0 - (box_.origin.y + box_.size.height)) * h)
+        .round()
+        .clamp(0.0, h - 1.0) as u32;
+    let rect_w = (box_.size.width * w).round().max(1.0) as u32;
+    let rect_h = (box_.size.height * h).round().max(1.0) as u32;
+    crate::page::Rect {
+        x,
+        y: top,
+        width: rect_w.min(width - x),
+        height: rect_h.min(height - top),
+    }
+}
+
+/// Splits a recognised line into its words, each with where it begins and how
+/// long it is in UTF-16 code units — the units Vision measures a range in,
+/// which are not Rust's bytes or characters.
+fn words_utf16(s: &str) -> Vec<(usize, usize, String)> {
+    let mut out = Vec::new();
+    let mut pos = 0usize;
+    let mut start = 0usize;
+    let mut current = String::new();
+    for ch in s.chars() {
+        let units = ch.len_utf16();
+        if ch.is_whitespace() {
+            if !current.is_empty() {
+                out.push((start, pos - start, std::mem::take(&mut current)));
+            }
+            pos += units;
+            start = pos;
+        } else {
+            if current.is_empty() {
+                start = pos;
+            }
+            current.push(ch);
+            pos += units;
+        }
+    }
+    if !current.is_empty() {
+        out.push((start, pos - start, current));
+    }
+    out
 }
 
 /// A line as Vision found it: where its box sits, how tall it is, what it says.
@@ -324,6 +457,64 @@ mod tests {
             line(0.500, 0.10, "CHARLIE"),
         ]);
         assert_eq!(text, "ALPHA BRAVO\nCHARLIE DELTA");
+    }
+
+    /// Vision measures a range in UTF-16 code units, which are neither Rust's
+    /// bytes nor its characters. A word past an astral character — one that
+    /// takes two code units — has to be offset by two, or its box lands on the
+    /// wrong letters. This is the test that says so.
+    #[test]
+    fn word_offsets_count_in_utf16() {
+        let words = words_utf16("a 😀 b");
+        assert_eq!(
+            words,
+            vec![
+                (0, 1, "a".to_string()),
+                (2, 2, "😀".to_string()),
+                (5, 1, "b".to_string()),
+            ]
+        );
+        // Several spaces between words leave no empty word behind.
+        let words = words_utf16("  hi   there ");
+        assert_eq!(
+            words,
+            vec![(2, 2, "hi".to_string()), (7, 5, "there".to_string())]
+        );
+    }
+
+    /// Vision's boxes are normalised with the origin at the bottom-left; the
+    /// picture is addressed from the top-left in its own pixels. Getting the
+    /// flip wrong paints every translation upside down from where it belongs.
+    #[test]
+    fn a_normalised_box_becomes_a_top_left_pixel_rect() {
+        use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+        let normalised = |x, y, w, h| CGRect {
+            origin: CGPoint { x, y },
+            size: CGSize {
+                width: w,
+                height: h,
+            },
+        };
+        // The top-left quarter of a 100×100 picture.
+        assert_eq!(
+            to_pixel_rect(normalised(0.0, 0.5, 0.5, 0.5), 100, 100),
+            crate::page::Rect {
+                x: 0,
+                y: 0,
+                width: 50,
+                height: 50,
+            }
+        );
+        // A strip along the very bottom.
+        assert_eq!(
+            to_pixel_rect(normalised(0.0, 0.0, 1.0, 0.1), 100, 100),
+            crate::page::Rect {
+                x: 0,
+                y: 90,
+                width: 100,
+                height: 10,
+            }
+        );
     }
 
     /// A row's own height decides what joins it, so a heading is not dragged

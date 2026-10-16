@@ -21,6 +21,8 @@ mod macos;
 pub use macos::{capture, monitor, shell, speech as speech_command};
 #[cfg(target_os = "macos")]
 pub use macos::{on_screen_region_request, read_screen_region};
+#[cfg(target_os = "macos")]
+pub use macos::{capture_page, on_screen_page_request, read_page, show_page};
 
 #[cfg(target_os = "linux")]
 mod linux;
