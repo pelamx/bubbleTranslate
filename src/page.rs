@@ -280,7 +280,17 @@ pub fn join_split_lines(mut lines: Vec<Line>) -> Vec<Line> {
                         let gap = b.x as f32 - a.right() as f32;
                         a.height.max(b.height) * 10 <= a.height.min(b.height) * 13
                             && gap >= -2.0
-                            && gap <= letter(before).max(letter(&line)) * 2.2
+                            && {
+                                // Across a wide, justified space only two
+                                // stretches of text are one line; a key's
+                                // label or a button's — "Alt", "OK" — beside
+                                // its description is two things, and joins
+                                // only across an ordinary space.
+                                let width = letter(before).max(letter(&line));
+                                let shorter =
+                                    before.text.chars().count().min(line.text.chars().count());
+                                gap <= width * if shorter >= 4 { 2.2 } else { 1.0 }
+                            }
                     } =>
                 {
                     let gap = line.rect.x as f32 - before.rect.right() as f32;
@@ -2423,6 +2433,12 @@ mod tests {
         assert!(
             lines[2].text.starts_with("nobody could") && lines[2].text.ends_with("of what was")
         );
+        // A key's label beside its description stays apart.
+        let chip = join_split_lines(vec![
+            line(20, 150, 40, 22, "Alt"),
+            line(90, 152, 400, 20, "select text, or double-click a word"),
+        ]);
+        assert_eq!(chip.len(), 2);
         let lines = join_split_lines(vec![
             line(
                 990,
