@@ -301,7 +301,7 @@ pub fn capture_page() -> Option<PageShot> {
 
 /// Every paragraph on the photographed screen, and where it is.
 pub fn read_page(shot: &PageShot) -> Vec<crate::page::Block> {
-    let lines = ocr::recognize_lines(&shot.frame).unwrap_or_default();
+    let lines = ocr::recognize_lines(&shot.frame, f64::from(shot.scale)).unwrap_or_default();
     let pixels = crate::page::Pixels {
         width: shot.frame.width,
         height: shot.frame.height,
@@ -368,6 +368,40 @@ fn monitor_scale(at: (f64, f64)) -> f32 {
 /// Registers the callback for Ctrl+Shift+F.
 pub fn on_screen_page_request(ask: impl Fn() + Send + 'static) {
     monitor::on_page_request(ask);
+}
+
+/// What the screen reader on this machine can and cannot read.
+///
+/// Windows said nothing about this until now, and it is the one place Windows
+/// is meaningfully poorer than macOS: recognition languages arrive as separate
+/// optional features, a fresh install often has only the one it was installed
+/// in, and the engine asked for a language it has no pack for does not refuse
+/// — it guesses, confidently and wrongly. Somebody reading a Turkish page on
+/// an English install therefore saw most of it come back untranslated with
+/// nothing said about why. The window can now say it.
+pub fn screen_reading(source_lang: &str) -> Option<crate::platform::ScreenReading> {
+    let languages = ocr::languages();
+    Some(crate::platform::ScreenReading {
+        // The pack for the language being read, when there is not one. The
+        // name rather than the code, because this is read by a person.
+        missing_pack: match ocr::source_language_installed() {
+            Some(false) => {
+                let base = source_lang.split('-').next().unwrap_or(source_lang);
+                crate::config::LANGUAGES
+                    .iter()
+                    .find(|(code, _)| *code == base)
+                    .map(|(_, name)| *name)
+            }
+            _ => None,
+        },
+        languages,
+        // Nothing is ever fetched here: the reader is part of Windows.
+        builtin: crate::platform::BuiltinReader::Ready,
+        install: None,
+        // Both keys are read by a hook in this process, and a registered
+        // hotkey behind it; there is no session that swallows them.
+        key_heard: true,
+    })
 }
 
 /// The zoom that makes the app's text match the rest of the desktop.

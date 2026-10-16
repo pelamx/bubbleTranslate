@@ -85,6 +85,8 @@ enum State {
     Capped {
         limit: Option<u32>,
     },
+    /// The screen was read and nothing came back off it.
+    Unreadable,
 }
 
 pub struct BubbleApp {
@@ -335,6 +337,16 @@ impl BubbleApp {
                     self.show(ctx);
                     // Nothing follows this the way `Done` follows `Working`,
                     // so the auto-hide countdown has to start here.
+                    self.shown_at = Instant::now();
+                }
+                UiEvent::Unreadable { at } => {
+                    self.anchor = at;
+                    self.state = State::Unreadable;
+                    self.settings_open = false;
+                    self.copied_at = None;
+                    self.show(ctx);
+                    // Nothing follows this, so the auto-hide countdown starts
+                    // here, as it does for a capped bubble.
                     self.shown_at = Instant::now();
                 }
                 UiEvent::ManualCapped { used, limit } => {

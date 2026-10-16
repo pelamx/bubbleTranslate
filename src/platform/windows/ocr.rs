@@ -29,6 +29,9 @@
 //! installed: see [`languages`].
 //!
 
+use std::sync::Mutex;
+
+use windows::Globalization::Language;
 use windows::Graphics::Imaging::{BitmapPixelFormat, SoftwareBitmap};
 use windows::Media::Ocr::OcrEngine;
 use windows::Storage::Streams::DataWriter;
@@ -36,6 +39,7 @@ use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CAPTUREBLT, CreateCompatibleDC, CreateDIBSection,
     DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, HGDIOBJ, ReleaseDC, SRCCOPY, SelectObject,
 };
+use windows::core::HSTRING;
 
 /// A rectangle of the virtual desktop to read, in **physical pixels** with a
 /// top-left origin.
@@ -89,6 +93,81 @@ pub struct Frame {
 /// worth knowing the ceiling exists when the bubble seems slow.
 const MAX_PIXELS: i64 = 16_000_000;
 
+/// The language the screen is being read in, left here by the engine before
+/// each request so that nothing below the platform line needs the config.
+///
+/// Empty, or "auto", means the user has not said: there is then nothing to
+/// ask for and the reader falls back to the languages Windows was set up
+/// with.
+static READING: Mutex<String> = Mutex::new(String::new());
+
+/// Tells the reader which language it is about to read.
+pub fn set_reading_language(code: &str) {
+    if let Ok(mut slot) = READING.lock() {
+        let code = code.trim();
+        let code = if code.eq_ignore_ascii_case("auto") {
+            ""
+        } else {
+            code
+        };
+        code.clone_into(&mut slot);
+    }
+}
+
+/// The recognition engine to read the screen with.
+///
+/// **Asked for the language being translated *from*, not the one Windows is
+/// in.** `TryCreateFromUserProfileLanguages` reads with whatever the user's
+/// own display language is, which is the wrong question: somebody reading an
+/// English page on a Turkish install was handed the Turkish reader, and
+/// somebody reading a Turkish page on an English one was handed the English
+/// reader. Either way the engine answers — confidently, and with the wrong
+/// letters, because a recogniser asked for the wrong language does not fail,
+/// it guesses. Asking for the source language first is what makes it read
+/// what is actually on the screen.
+///
+/// The user's own languages are still the answer when the source is left on
+/// "detect it", and when the pack for the source is not installed — in which
+/// case the window says so; see [`super::screen_reading`].
+fn engine() -> Option<OcrEngine> {
+    let wanted = READING
+        .lock()
+        .ok()
+        .map(|code| code.clone())
+        .unwrap_or_default();
+    if !wanted.is_empty()
+        && let Ok(language) = Language::CreateLanguage(&HSTRING::from(wanted.as_str()))
+    {
+        match OcrEngine::IsLanguageSupported(&language) {
+            Ok(true) => match OcrEngine::TryCreateFromLanguage(&language) {
+                Ok(engine) => return Some(engine),
+                Err(error) => {
+                    crate::trace!(
+                        "ocr       no engine for {wanted} ({error}); using this computer's"
+                    )
+                }
+            },
+            _ => crate::trace!(
+                "ocr       no {wanted} recognition pack installed; reading with {:?} instead",
+                languages()
+            ),
+        }
+    }
+    match OcrEngine::TryCreateFromUserProfileLanguages() {
+        Ok(engine) => Some(engine),
+        Err(error) => {
+            // The installed list comes with the failure, because that is the
+            // question the failure raises: it is not that OCR is missing, it
+            // is that the language the user reads in was never installed.
+            crate::trace!(
+                "ocr       no engine for the user's languages ({error}); installed: {:?}",
+                languages()
+            );
+            None
+        }
+    }
+}
+
 /// Reads whatever text is in `region`.
 ///
 /// `None` when the region is too small to hold a glyph, when the screen could
@@ -128,20 +207,7 @@ pub fn recognize(region: Region) -> Option<String> {
     }
 
     let bitmap = to_bitmap(&pixels, region.width, region.height).ok()?;
-
-    let engine = match OcrEngine::TryCreateFromUserProfileLanguages() {
-        Ok(engine) => engine,
-        Err(error) => {
-            // The installed list comes with the failure, because that is the
-            // question the failure raises: it is not that OCR is missing, it
-            // is that the language the user reads in was never installed.
-            crate::trace!(
-                "ocr       no engine for the user's languages ({error}); installed: {:?}",
-                languages()
-            );
-            return None;
-        }
-    };
+    let engine = engine()?;
 
     // `join` blocks this thread until the recognition finishes. That is what
     // is wanted: this already runs off the UI thread, on the same worker that
@@ -282,7 +348,21 @@ pub fn languages() -> Vec<String> {
 
 /// Whether reading the screen will work at all on this machine.
 pub fn available() -> bool {
-    OcrEngine::TryCreateFromUserProfileLanguages().is_ok()
+    engine().is_some()
+}
+
+/// Whether the language being translated from has a recognition pack of its
+/// own, which is the difference between reading a page and guessing at it.
+///
+/// `None` when the source is left on "detect it": there is no one language to
+/// have a pack for, and the user's own are as good an answer as any.
+pub fn source_language_installed() -> Option<bool> {
+    let wanted = READING.lock().ok().map(|code| code.clone())?;
+    if wanted.is_empty() {
+        return None;
+    }
+    let language = Language::CreateLanguage(&HSTRING::from(wanted.as_str())).ok()?;
+    Some(OcrEngine::IsLanguageSupported(&language).unwrap_or(false))
 }
 
 /// Copies `region` off the screen as a picture to read, write over and show.
@@ -308,14 +388,85 @@ pub fn grab_frame(region: Region) -> Option<Frame> {
 /// ships otherwise.
 ///
 /// `None` when there is no reader at all. An empty list is a real answer.
-pub fn recognize_lines(frame: &Frame) -> Option<Vec<crate::page::Line>> {
+pub fn recognize_lines(frame: &Frame, scale: f64) -> Option<Vec<crate::page::Line>> {
     if let Some(key) = crate::vision::key() {
         match crate::vision::read_words(&key, frame.width, frame.height, &frame.bgrx) {
             Ok(words) => return Some(crate::page::lines_from_words(words)),
             Err(err) => crate::trace!("vision    {err}; reading here instead"),
         }
     }
-    read_lines_here(frame)
+    // Read big and measured small: the boxes come back in the enlarged
+    // picture's pixels, and everything after this — the ink the letters are
+    // measured against, the place the translation is drawn — is in the
+    // screen's own.
+    let factor = enlargement(scale);
+    if factor == 1 {
+        return read_lines_here(frame);
+    }
+    let bigger = enlarged(frame, factor);
+    crate::trace!(
+        "ocr       reading {}x{} as {}x{}",
+        frame.width,
+        frame.height,
+        bigger.width,
+        bigger.height
+    );
+    let lines = read_lines_here(&bigger)?;
+    Some(
+        lines
+            .into_iter()
+            .map(|mut line| {
+                line.rect = crate::page::Rect {
+                    x: line.rect.x / factor,
+                    y: line.rect.y / factor,
+                    width: (line.rect.width / factor).max(1),
+                    height: (line.rect.height / factor).max(1),
+                };
+                line
+            })
+            .collect(),
+    )
+}
+
+/// How many times bigger the picture is made before it is read, for a display
+/// that is not already drawing text at twice the size.
+///
+/// `Windows.Media.Ocr` learnt to read scans rather than screens, and on a
+/// display at 100% a book's type is eight or nine pixels tall — small enough
+/// that it reads "Cyber" as "cyber" and drops a line of a footnote entirely.
+/// The same page at twice the size reads cleanly. A display already at 200%
+/// hands over pixels that big to begin with, so there is nothing to gain and
+/// four times the picture to read.
+fn enlargement(scale: f64) -> u32 {
+    if scale < 1.5 { 2 } else { 1 }
+}
+
+/// The picture at `factor` times the size, by repeating each pixel.
+///
+/// Nearest-neighbour rather than anything smoother on purpose: the reader is
+/// looking for the edges of letters, and an interpolation that softens them
+/// is the one thing that would undo the point of enlarging at all.
+fn enlarged(frame: &Frame, factor: u32) -> Frame {
+    let (width, height) = (frame.width * factor, frame.height * factor);
+    let mut bgrx = Vec::with_capacity((width * height * 4) as usize);
+    let mut row = Vec::with_capacity((width * 4) as usize);
+    for y in 0..frame.height {
+        row.clear();
+        for x in 0..frame.width {
+            let at = ((y * frame.width + x) * 4) as usize;
+            for _ in 0..factor {
+                row.extend_from_slice(&frame.bgrx[at..at + 4]);
+            }
+        }
+        for _ in 0..factor {
+            bgrx.extend_from_slice(&row);
+        }
+    }
+    Frame {
+        width,
+        height,
+        bgrx,
+    }
 }
 
 /// How sure the words out of `Windows.Media.Ocr` are taken to be.
@@ -346,16 +497,7 @@ fn read_lines_here(frame: &Frame) -> Option<Vec<crate::page::Line>> {
     }
 
     let bitmap = to_bitmap(&frame.bgrx, frame.width as i32, frame.height as i32).ok()?;
-    let engine = match OcrEngine::TryCreateFromUserProfileLanguages() {
-        Ok(engine) => engine,
-        Err(error) => {
-            crate::trace!(
-                "ocr       no engine for the user's languages ({error}); installed: {:?}",
-                languages()
-            );
-            return None;
-        }
-    };
+    let engine = engine()?;
     let result = engine
         .RecognizeAsync(&bitmap)
         .and_then(|pending| pending.join())

@@ -20,9 +20,9 @@ mod macos;
 #[cfg(target_os = "macos")]
 pub use macos::{capture, monitor, shell, speech as speech_command};
 #[cfg(target_os = "macos")]
-pub use macos::{on_screen_region_request, read_screen_region};
-#[cfg(target_os = "macos")]
 pub use macos::{capture_page, on_screen_page_request, read_page, show_page};
+#[cfg(target_os = "macos")]
+pub use macos::{on_screen_region_request, read_screen_region};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -219,10 +219,20 @@ pub enum BuiltinReader {
     Failed(String),
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 pub fn screen_reading(_source_lang: &str) -> Option<ScreenReading> {
     None
 }
+
+/// Tells the screen reader which language it is about to read, before each
+/// request.
+///
+/// Only Windows has anything to do with it: its reader is built for one
+/// language at a time and, asked for the wrong one, guesses rather than
+/// refuses. macOS recognises a set of languages at once and Linux is told
+/// which pack to use where it matters.
+#[cfg(not(target_os = "windows"))]
+pub fn set_reading_language(_code: &str) {}
 
 /// Nothing to fetch where the system has its own reader.
 #[cfg(not(target_os = "linux"))]
@@ -265,8 +275,11 @@ pub use linux::{
 pub use windows::{
     capture_page, cursor_position, frame_offset, keep_on_all_workspaces, mark_as_notification,
     on_screen_page_request, on_screen_region_request, pointer_over, preferred_zoom, read_page,
-    read_screen_region, shape_bubble, show_page, to_points,
+    read_screen_region, screen_reading, shape_bubble, show_page, to_points,
 };
+
+#[cfg(target_os = "windows")]
+pub use windows::ocr::set_reading_language;
 
 /// Esc, pressed while the bubble is up.
 ///

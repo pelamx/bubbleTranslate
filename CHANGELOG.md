@@ -40,6 +40,32 @@ paragraph whole.
 
 ## 0.4.16 — 2026-10-16
 
+**The screen is now read in the language you are translating from. (Windows)**
+Windows reads the screen one language at a time, and it was always asked for
+the language Windows itself is in — never for the language on the screen. Ask
+it for the wrong one and it does not refuse: it guesses, and a page comes back
+as letters that were never on it, which is why some lines translated and most
+did not. It is now asked for the language you translate from, and falls back
+to the computer's own only when you have left the source on "detect it".
+
+**The window says which languages your computer can read, and what to do when
+yours is not one of them. (Windows)** Reading the screen needs a recognition
+pack per language, a fresh Windows often has only the one it was installed in,
+and until now nothing anywhere said so — the screen simply came back wrong.
+"Read the screen" now lists what Windows reads, says plainly when the language
+you read from is missing, and gives the path in Settings that adds it.
+
+**Small text on the screen is read better. (Windows)** A book page or a PDF at
+its own size puts letters about eight pixels tall on an ordinary display,
+which is under what the reader can make out. The picture is now enlarged
+before it is read — on a display already magnifying everything, where the
+letters arrive big enough, nothing changes.
+
+**When nothing on the screen can be read, it says so.** Pressing the key and
+getting no answer at all is indistinguishable from the app being broken. Now a
+bubble says the screen could not be read and where to look, which on Windows
+is nearly always a missing recognition pack.
+
 **Translating the whole screen keeps a printed page's paragraphs whole.** On a
 page of print — a PDF in Google's viewer, a book — a line was sometimes read
 as two halves, cut down the middle of the page, and the halves were translated

@@ -176,8 +176,103 @@ pub fn screen_reading(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
 
     if let Some(status) = status {
         ui.add_space(10.0);
-        linux_status(ui, &status);
+        if cfg!(target_os = "windows") {
+            windows_status(ui, &status);
+        } else {
+            linux_status(ui, &status);
+        }
     }
+}
+
+/// Which languages the reader Windows ships can actually read, and what to do
+/// when the one being translated from is not among them.
+///
+/// The question this answers is the one nobody could answer before: a page
+/// read with the wrong language comes back as confident nonsense, so a screen
+/// that mostly refuses to translate looks like a broken app rather than a
+/// missing optional feature. There is no command to offer, as there is on
+/// Linux — the packs come from Settings — so the path is spelled out instead.
+fn windows_status(ui: &mut egui::Ui, status: &crate::platform::ScreenReading) {
+    if status.languages.is_empty() {
+        ui.label(
+            egui::RichText::new(t(
+                "● Windows has no text recognition installed on this machine.",
+                "● Bu bilgisayarda Windows metin tanıma kurulu değil.",
+                "● Windows no tiene reconocimiento de texto instalado aquí.",
+            ))
+            .size(12.5)
+            .color(ERR_RED),
+        );
+    } else {
+        ui.label(
+            egui::RichText::new(format!(
+                "{} {}",
+                t(
+                    "● Ready — Windows reads",
+                    "● Hazır — Windows'un okuduğu diller:",
+                    "● Listo — Windows lee",
+                ),
+                status.languages.join(", ")
+            ))
+            .size(12.5)
+            .color(if status.missing_pack.is_some() {
+                WARN_AMBER
+            } else {
+                OK_GREEN
+            }),
+        );
+    }
+
+    let Some(pack) = status.missing_pack else {
+        return;
+    };
+    ui.add_space(6.0);
+    ui.label(
+        egui::RichText::new(format!(
+            "{} ({pack})",
+            t(
+                "The language you read from is not among them",
+                "Okuduğun dil aralarında yok",
+                "El idioma que lees no está entre ellos",
+            )
+        ))
+        .size(12.5)
+        .color(WARN_AMBER)
+        .strong(),
+    );
+    ui.label(
+        egui::RichText::new(t(
+            "Asked for a language it has no pack for, the reader does not refuse — it \
+             guesses, and most of the page comes back as letters that were never there. \
+             Add the pack in Settings › Time & language › Language & region: add the \
+             language, open its three dots › Language options, and install Basic \
+             typing. Then restart bubbleTranslate.",
+            "Paketi olmayan bir dil istendiğinde okuyucu reddetmez — tahmin eder ve \
+             sayfanın çoğu hiç olmayan harfler olarak geri gelir. Paketi Ayarlar › Saat \
+             ve dil › Dil ve bölge'den ekle: dili ekle, üç noktasından Dil seçenekleri'ni \
+             aç ve Temel yazma'yı kur. Sonra bubbleTranslate'i yeniden başlat.",
+            "Si se le pide un idioma cuyo paquete no tiene, el lector no se niega: \
+             adivina, y casi toda la página vuelve con letras que nunca estuvieron ahí. \
+             Añade el paquete en Configuración › Hora e idioma › Idioma y región: añade \
+             el idioma, abre sus tres puntos › Opciones de idioma e instala Escritura \
+             básica. Después reinicia bubbleTranslate.",
+        ))
+        .size(12.0)
+        .color(TEXT_SECONDARY),
+    );
+    ui.add_space(4.0);
+    ui.label(
+        egui::RichText::new(t(
+            "A Google Vision key, under Settings, reads every language without any of \
+             this — at the cost of sending the picture to Google.",
+            "Ayarlar'daki bir Google Vision anahtarı, bunların hiçbiri olmadan her dili \
+             okur — görüntünün Google'a gönderilmesi pahasına.",
+            "Una clave de Google Vision, en Ajustes, lee todos los idiomas sin nada de \
+             esto, a cambio de enviar la imagen a Google.",
+        ))
+        .size(11.0)
+        .color(TEXT_MUTED),
+    );
 }
 
 /// Which reader is ready and what it reads, how the built-in one is fetched,

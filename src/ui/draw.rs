@@ -112,6 +112,36 @@ impl BubbleApp {
                         }
                     });
             }
+            // Said plainly, and without blaming the user: the screen was read
+            // and gave nothing back. On Windows that nearly always means the
+            // recognition pack for the language on the screen was never
+            // installed, which the main window explains in full; the bubble
+            // has room for where to look, not for the whole story.
+            State::Unreadable => {
+                ui.label(
+                    egui::RichText::new(crate::i18n::t(
+                        "Nothing on the screen could be read",
+                        "Ekranda okunabilecek bir şey yok",
+                        "No se pudo leer nada de la pantalla",
+                    ))
+                    .size(14.0)
+                    .color(pal().text_primary),
+                );
+                ui.add_space(3.0);
+                ui.label(
+                    egui::RichText::new(crate::i18n::t(
+                        "The reader has no pack for this language, or the text is too \
+                         small. Open bubbleTranslate's window, under \"Read the screen\".",
+                        "Okuyucuda bu dil için paket yok ya da yazı çok küçük. \
+                         bubbleTranslate penceresini aç, \"Ekranı oku\" bölümüne bak.",
+                        "El lector no tiene paquete para este idioma, o el texto es \
+                         demasiado pequeño. Abre la ventana de bubbleTranslate, en \
+                         \"Leer la pantalla\".",
+                    ))
+                    .size(12.0)
+                    .color(pal().text_secondary),
+                );
+            }
             State::Capped { limit } => {
                 let limit = *limit;
                 let headline = match (limit, crate::i18n::lang()) {

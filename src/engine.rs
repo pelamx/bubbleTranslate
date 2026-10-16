@@ -122,6 +122,13 @@ pub enum UiEvent {
     },
     /// Put the bubble away: the translated screen is about to cover it.
     Dismiss,
+    /// The screen was photographed and nothing could be read off it. Said
+    /// rather than passed over in silence: a key that appears to do nothing
+    /// reads as a broken app, when the usual cause is a recognition language
+    /// that was never installed.
+    Unreadable {
+        at: Option<(f64, f64)>,
+    },
     /// The same, for the main window's translate box. The user pressed a
     /// button and is owed an answer every time they press it.
     ManualCapped {
@@ -231,6 +238,10 @@ fn run(
         // Whoever reads the screen for this request reads it with Google
         // Vision if a key is set now, and on this computer if not.
         crate::vision::set_key(&cfg.google_vision_api_key);
+        // And reads it expecting the language it is about to translate from.
+        // A recogniser asked for the wrong language does not say so; it
+        // answers with the wrong letters.
+        crate::platform::set_reading_language(&cfg.source_lang);
 
         // Requests that need no capture are handled here; the rest fall
         // through to the selection pipeline below.
@@ -557,6 +568,10 @@ fn translate_page(
 ) -> bool {
     // Photographed before the bubble comes up, so it is not in the picture.
     let Some(shot) = crate::platform::capture_page() else {
+        // Nothing to photograph, or nothing to read it with. Either way the
+        // key did something, and the user is owed that much.
+        let _ = ui.send(UiEvent::Unreadable { at });
+        wake_ui();
         return false;
     };
     let _ = ui.send(UiEvent::Working {
@@ -573,7 +588,11 @@ fn translate_page(
         started.elapsed()
     );
     if blocks.is_empty() {
-        let _ = ui.send(UiEvent::Dismiss);
+        // The picture was taken and held no words this could replace. The
+        // commonest reason by far is a reader with no pack for the language
+        // on the screen: it says nothing, it simply reads nothing.
+        crate::trace!("page      nothing on the screen could be read");
+        let _ = ui.send(UiEvent::Unreadable { at });
         wake_ui();
         return false;
     }
