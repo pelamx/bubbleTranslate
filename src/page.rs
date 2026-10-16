@@ -449,6 +449,12 @@ pub fn paragraphs(mut lines: Vec<Line>, room: impl Fn(&Rect) -> u32) -> Vec<Bloc
     });
     lines.sort_by_key(|line| (line.rect.y, line.rect.x));
 
+    // How big type has to be to count as a heading or a title here: well
+    // above the size most of the screen is set in.
+    let mut sizes: Vec<f32> = lines.iter().map(letter_size).collect();
+    sizes.sort_by(f32::total_cmp);
+    let display = sizes.get(sizes.len() / 2).copied().unwrap_or(0.0) * 1.6;
+
     // How far right each line's column reaches. Two answers, and the
     // narrower usually wins: the empty paper beside the line, and the
     // furthest any line lined up with it reaches. A sidebar's column ends
@@ -483,7 +489,7 @@ pub fn paragraphs(mut lines: Vec<Line>, room: impl Fn(&Rect) -> u32) -> Vec<Bloc
     for (line, line_room) in lines.into_iter().zip(rooms) {
         let found = open.iter_mut().find(|(block, room)| {
             let last = block.lines.last().expect("a block has a line");
-            continues(last, &line, *room)
+            continues(last, &line, *room, display)
         });
         match found {
             Some((block, room)) => {
@@ -667,9 +673,28 @@ fn is_identifier(word: &str) -> bool {
             }))
 }
 
+/// `translation` in capitals when `original` was all capitals — a title, a
+/// heading, a button — which a translator answers in ordinary case. With the
+/// dotted and dotless i kept apart where the language has both.
+pub fn match_case(original: &str, translation: &str, target: &str) -> String {
+    let letters: Vec<char> = original.chars().filter(|c| c.is_alphabetic()).collect();
+    if letters.len() < 3 || letters.iter().any(|c| c.is_lowercase()) {
+        return translation.to_string();
+    }
+    let dotted = matches!(target.split('-').next().unwrap_or(target), "tr" | "az");
+    translation
+        .chars()
+        .map(|c| match c {
+            'i' if dotted => "İ".to_string(),
+            'ı' => "I".to_string(),
+            c => c.to_uppercase().collect(),
+        })
+        .collect()
+}
+
 /// Whether `next` reads as the line after `last` in the same paragraph,
 /// where `last`'s column reaches as far right as `room`.
-fn continues(last: &Line, next: &Line, room: u32) -> bool {
+fn continues(last: &Line, next: &Line, room: u32, display: f32) -> bool {
     // Compared by the size of their letters, not the height of their boxes:
     // "sure." on the last line of a paragraph has a box half as tall as the
     // line above it, and is the same type.
@@ -708,6 +733,13 @@ fn continues(last: &Line, next: &Line, room: u32) -> bool {
     let overlap = i64::from(l.right().min(n.right())) - i64::from(l.x.max(n.x));
     if !left_aligned && overlap * 2 <= i64::from(l.width.min(n.width)) {
         return false;
+    }
+    // A title or a headline set in large type over several lines — "THIS IS
+    // / HOW THEY / TELL ME" — is broken where it looks best, not where the
+    // line was full, and is one sentence all the same: translated a line at
+    // a time it is five fragments.
+    if display > 0.0 && letter_size(last).min(letter_size(next)) >= display {
+        return true;
     }
     // Wrapped, or ended on purpose: had the first word of the next line fitted
     // after this one, it would have been put there.
@@ -1275,6 +1307,10 @@ struct Style {
 /// its letters for it to be replaced; see [`Pixels::replaceable`].
 const MIN_MATCH: f32 = 0.27;
 
+/// Below how good a fit a face as it is gives way to a condensed or extended
+/// one; see [`Pixels::matched`].
+const RESHAPE_BELOW: f32 = 0.3;
+
 /// [`MIN_MATCH`] for a line of forty letters or more.
 const MIN_MATCH_LONG: f32 = 0.18;
 
@@ -1328,7 +1364,21 @@ impl Pixels<'_> {
                 None => counts.push((*p, 1)),
             }
         }
-        let (paper, _) = counts.into_iter().max_by_key(|(_, n)| *n)?;
+        let (group, _) = counts.into_iter().max_by_key(|(_, n)| *n)?;
+        // And of that group, its commonest exact colour rather than whichever
+        // pixel happened to start it: one shade off, a cleared line shows as
+        // a faint box on white paper.
+        let mut exact: Vec<([u8; 3], usize)> = Vec::new();
+        for p in ring.iter().filter(|p| distance(**p, group) <= 3) {
+            match exact.iter_mut().find(|(c, _)| c == p) {
+                Some((_, n)) => *n += 1,
+                None => exact.push((*p, 1)),
+            }
+        }
+        let paper = exact
+            .into_iter()
+            .max_by_key(|(_, n)| *n)
+            .map_or(group, |(c, _)| c);
         let alike = ring
             .iter()
             .filter(|p| distance(**p, paper) <= PAPER_TOLERANCE)
@@ -1539,47 +1589,41 @@ impl Pixels<'_> {
         }
 
         let text = line.text.trim();
-        let mut best: Option<(f32, Style)> = None;
-        let mut best_box = (0f32, 0f32, 0f32, 0f32);
-        for face in fonts.available() {
-            let Some((left, top, right, bottom)) = fonts.ink_box(face, text) else {
-                continue;
-            };
-            let px = rect.width as f32 / (right - left).max(0.01);
-            // Set as wide as the original, it must also be about as tall, or
-            // this is not the face — or the reader misread the line.
-            let tall = (bottom - top) * px / rect.height as f32;
-            if !(0.6..=1.6).contains(&tall) {
-                continue;
-            }
-            let tall_fit = if (0.75..=1.33).contains(&tall) {
-                1.0
-            } else {
-                0.6
-            };
-            let baseline = rect.y as f32 - top * px;
-            let origin = rect.x as f32 - left * px;
+        // How well `set_in`, at `px` from `(origin, baseline)`, covers the
+        // original's ink. Two measures, because each is blind where the other
+        // sees. How well the shapes overlap, blurred so that a fraction of a
+        // pixel out of place does not count against a thin face — that tells
+        // a serif from a sans. And how much ink there is, which no
+        // misalignment changes — that tells bold from regular.
+        let soft_original = blur(&original, w, h);
+        let ink_original = original.iter().sum::<f32>();
+        let cover = |set_in: Face, px: f32, origin: f32, baseline: f32| -> f32 {
             let mut set = vec![0f32; w * h];
-            fonts.render(face, text, px, origin, baseline, |x, y, coverage| {
+            fonts.render(set_in, text, px, origin, baseline, |x, y, coverage| {
                 let (x, y) = (x - rect.x as i32, y - rect.y as i32);
                 if x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h {
                     let at = y as usize * w + x as usize;
                     set[at] = (set[at] + coverage).min(1.0);
                 }
             });
-            // Two measures, because each is blind where the other sees. How
-            // well the shapes overlap, blurred so that a fraction of a pixel
-            // out of place does not count against a thin face — that tells a
-            // serif from a sans. And how much ink there is, which no
-            // misalignment changes — that tells bold from regular.
-            let (soft_original, soft_set) = (blur(&original, w, h), blur(&set, w, h));
+            let soft_set = blur(&set, w, h);
             let (mut both, mut either) = (0f32, 0f32);
             for (a, b) in soft_original.iter().zip(&soft_set) {
                 both += a.min(*b);
                 either += a.max(*b);
             }
-            let (ink_original, ink_set) = (original.iter().sum::<f32>(), set.iter().sum::<f32>());
+            let ink_set = set.iter().sum::<f32>();
             let weight = ink_original.min(ink_set) / ink_original.max(ink_set).max(1.0);
+            (both / either.max(1.0)) * weight
+        };
+        let mut best: Option<(f32, Style)> = None;
+        // Condensed and extended versions, tried only when no face fits as it
+        // is; see below.
+        let mut reshaped: Vec<(Face, f32, f32, f32, f32)> = Vec::new();
+        for face in fonts.available() {
+            let Some((left, top, right, bottom)) = fonts.ink_box(face, text) else {
+                continue;
+            };
             // A serif face has to match clearly better to be chosen: screens
             // are mostly sans-serif, and a sans line misread as serif looks
             // far more wrong than the other way round.
@@ -1591,37 +1635,86 @@ impl Pixels<'_> {
                 Kind::Mono => 0.9,
                 Kind::Sans => 1.0,
             } * if fonts.bold(face) { 0.95 } else { 1.0 };
-            let score = bias * tall_fit * (both / either.max(1.0)) * weight;
-            let style = Style {
-                face,
-                px,
-                baseline,
-                paper,
-                smooth,
-                ink,
-                fit: score,
-            };
-            // Faces are tried in the desktop's own order, its defaults first,
-            // and a later one has to fit clearly better to be chosen: two
-            // sans-serifs fit body text about as well, and letting them take
-            // turns line by line sets one paragraph in two faces and sizes.
-            if best.is_none_or(|(s, _)| score > s * 1.08) {
-                best = Some((score, style));
-                best_box = (left, top, right, bottom);
+            // Each try: the face, the size it is scored at, a factor on its
+            // score, and the size it is drawn at if chosen.
+            let mut tries: Vec<(Face, f32, f32, f32)> = Vec::new();
+            // As the face is: set as wide as the original, which must then be
+            // about as tall, or this is not the face — or the reader misread
+            // the line. The size is then taken between what the width and
+            // the height say, where their errors mostly cancel; a fixed-width
+            // face keeps the width's, which is exact and keeps columns.
+            let by_width = rect.width as f32 / (right - left).max(0.01);
+            let by_height = rect.height as f32 / (bottom - top).max(0.01);
+            let tall = (bottom - top) * by_width / rect.height as f32;
+            if (0.6..=1.6).contains(&tall) {
+                let tall_fit = if (0.75..=1.33).contains(&tall) {
+                    1.0
+                } else {
+                    0.6
+                };
+                // Scored as wide as the original, where its letters line up
+                // with the original's if it is the face.
+                let drawn = if fonts.kind(face) == Kind::Mono {
+                    by_width
+                } else {
+                    (by_width * by_height).sqrt()
+                };
+                tries.push((face, by_width, tall_fit, drawn));
+            }
+            // Condensed or extended: as tall as the original, and narrowed or
+            // widened to its width. Posters, title pages and headlines are set
+            // in faces far narrower than anything installed, and a bold sans
+            // drawn that narrow is most of the way to them.
+            let squeeze = rect.width as f32 / ((right - left) * by_height).max(1.0);
+            if (0.5..=1.5).contains(&squeeze) && (squeeze - 1.0).abs() > 0.06 {
+                reshaped.push((face.squeezed(squeeze), by_height, bias, left, top));
+            }
+            for (set_in, px, fit_factor, drawn) in tries {
+                let baseline = rect.y as f32 - top * px;
+                let origin = rect.x as f32 - left * px * set_in.squeeze;
+                let score = bias * fit_factor * cover(set_in, px, origin, baseline);
+                let style = Style {
+                    face: set_in,
+                    px: drawn,
+                    baseline: rect.y as f32 - top * drawn,
+                    paper,
+                    smooth,
+                    ink,
+                    fit: score,
+                };
+                // Faces are tried in the desktop's own order, its defaults
+                // first, and a later one has to fit clearly better to be
+                // chosen: two sans-serifs fit body text about as well, and
+                // letting them take turns line by line sets one paragraph in
+                // two faces and sizes.
+                if best.is_none_or(|(s, _)| score > s * 1.08) {
+                    best = Some((score, style));
+                }
             }
         }
-        // The size, once the face is known. Its width alone says it wrongly
-        // for a line with a misread letter or two; its height alone, for a
-        // box a pixel too tall. Between the two the errors mostly cancel. A
-        // fixed-width face keeps the width's answer: there the width is
-        // exact, and it is what keeps columns in line.
-        if let Some((_, style)) = best.as_mut() {
-            let (_, top, _, bottom) = best_box;
-            let by_height = rect.height as f32 / (bottom - top).max(0.01);
-            if fonts.kind(style.face) != Kind::Mono {
-                style.px = (style.px * by_height).sqrt();
+        // Only where nothing fits as it is: a narrowed sans is close enough
+        // to a serif's widths to beat it on ordinary print, which is not what
+        // the print is.
+        if best.is_none_or(|(s, _)| s < RESHAPE_BELOW) {
+            for (set_in, px, bias, left, top) in reshaped {
+                let baseline = rect.y as f32 - top * px;
+                let origin = rect.x as f32 - left * px * set_in.squeeze;
+                let score = bias * cover(set_in, px, origin, baseline);
+                if best.is_none_or(|(s, _)| score > s * 1.08) {
+                    best = Some((
+                        score,
+                        Style {
+                            face: set_in,
+                            px,
+                            baseline,
+                            paper,
+                            smooth,
+                            ink,
+                            fit: score,
+                        },
+                    ));
+                }
             }
-            style.baseline = rect.y as f32 - top * style.px;
         }
         // No face fitted: the reader's box is all there is. Its height is a
         // letter's size, near enough, and its bottom near the baseline.
@@ -1717,6 +1810,13 @@ fn fit(
                 return None;
             }
             continue;
+        }
+        // Broken between letters only where words are not separated by
+        // spaces at all — Chinese, Japanese. Anywhere else a word cut in two
+        // reads as two wrong words; better that it does not fit, and the
+        // caller sets the text narrower until it does.
+        if !word.chars().any(east_asian) {
+            return None;
         }
         if !current.is_empty() {
             current.push(' ');
@@ -1830,11 +1930,14 @@ const EXTRA_ROWS: usize = 3;
 /// the language asked for is written in — Chinese for a German line being
 /// put into Turkish. That is the translator guessing at a misread line, not
 /// translating it, and the line is better left as it was.
+/// Whether `c` is Chinese, Japanese or Korean script.
+fn east_asian(c: char) -> bool {
+    matches!(c as u32,
+        0x3040..=0x30FF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF)
+}
+
 pub fn wrong_script(original: &str, translation: &str, target: &str) -> bool {
-    let east = |c: char| {
-        matches!(c as u32,
-            0x3040..=0x30FF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF)
-    };
+    let east = east_asian;
     let target = target.split('-').next().unwrap_or(target);
     if matches!(target, "zh" | "ja" | "ko") || original.chars().any(east) {
         return false;
@@ -2131,7 +2234,8 @@ impl Canvas<'_> {
         let mut set_in = face;
         let texts = 'found: {
             for squeeze in SQUEEZES {
-                set_in = face.squeezed(squeeze);
+                // On top of whatever narrowing the original's face needed.
+                set_in = face.squeezed(face.squeeze * squeeze);
                 for with_extra in 0..=extra.len() {
                     if let Some(texts) = attempt(set_in, with_extra, px) {
                         used_extra = with_extra;
@@ -2515,6 +2619,37 @@ mod tests {
     }
 
     #[test]
+    fn a_title_set_on_several_lines_is_one_block_in_capitals() {
+        let mut lines = vec![
+            line(1212, 673, 245, 75, "THIS IS"),
+            line(1218, 783, 350, 76, "HOW THEY"),
+            line(1212, 894, 260, 75, "TELL ME"),
+            line(1212, 1004, 387, 76, "THE WORLD"),
+            line(1212, 1114, 200, 75, "ENDS"),
+        ];
+        // The rest of the screen in ordinary type.
+        for n in 0..12 {
+            lines.push(line(100, 100 + n * 60, 300, 18, "Some menu item"));
+        }
+        let blocks = paragraphs(lines, |_| 2000);
+        let title = blocks
+            .iter()
+            .find(|b| b.text.starts_with("THIS IS"))
+            .unwrap();
+        assert_eq!(title.text, "THIS IS HOW THEY TELL ME THE WORLD ENDS");
+        assert_eq!(title.lines.len(), 5);
+        assert_eq!(
+            match_case(
+                &title.text,
+                "Bana dünyanın böyle bittiğini söylüyorlar",
+                "tr"
+            ),
+            "BANA DÜNYANIN BÖYLE BİTTİĞİNİ SÖYLÜYORLAR"
+        );
+        assert_eq!(match_case("Share", "Paylaş", "tr"), "Paylaş");
+    }
+
+    #[test]
     fn a_line_without_letters_is_left_alone() {
         let blocks = paragraphs(
             vec![line(0, 0, 50, 16, "12:30"), line(0, 100, 50, 16, "Hi")],
@@ -2845,8 +2980,18 @@ mod tests {
         let pairs: Vec<(Block, String)> = blocks
             .into_iter()
             .zip(translated)
-            .filter_map(|(block, text)| text.map(|text| (block, text)))
+            .filter_map(|(block, text)| {
+                text.map(|text| {
+                    let text = match_case(&block.text, &text, &cfg.target_lang);
+                    (block, text)
+                })
+            })
             .collect();
+        if std::env::var_os("BUBBLETRANSLATE_PAGE_LINES").is_some() {
+            for (block, text) in &pairs {
+                println!("PAIR {:?} => {:?}", block.text, text);
+            }
+        }
         canvas.draw_page(fonts(), &pairs);
         println!("painted in {:?}", started.elapsed());
         let out = path.replace(".png", "-translated.png");

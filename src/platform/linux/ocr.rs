@@ -362,7 +362,90 @@ fn tesseract_in_bands(frame: &Frame, scale: f64) -> Vec<crate::page::Line> {
         lines.len(),
         started.elapsed()
     );
-    lines
+    with_large_type(frame, scale, lines)
+}
+
+/// Which strip number the reading of large type writes its picture as.
+const LARGE_BAND: u32 = 50;
+
+/// `lines`, with whatever is set in large type read again at half the size.
+///
+/// Tesseract reads letters best at the size of ordinary print, and badly at
+/// the size of a title page or a poster: "THIS IS / HOW THEY / TELL ME"
+/// came back with words missing and "HOW TAEY". At half the size those
+/// letters are in its range. Only done when the screen has large type at all
+/// — a line at least twice as tall as most — so an ordinary screen costs
+/// nothing more; and only the large lines are taken from it, in place of the
+/// full-size reading of them.
+fn with_large_type(
+    frame: &Frame,
+    scale: f64,
+    lines: Vec<crate::page::Line>,
+) -> Vec<crate::page::Line> {
+    let mut heights: Vec<u32> = lines.iter().map(|line| line.rect.height).collect();
+    heights.sort_unstable();
+    let Some(&median) = heights.get(heights.len() / 2) else {
+        return lines;
+    };
+    // Large type is at least two and a half times the screen's usual size:
+    // a reading box twice as tall as most is often only a loose one, round a
+    // word set in the same type as its neighbours.
+    if median == 0 || !lines.iter().any(|line| line.rect.height * 2 >= median * 5) {
+        return lines;
+    }
+    let started = std::time::Instant::now();
+    // Half the size the full reading saw: on a scaled display the picture
+    // halved; on an unscaled one, the picture as it is rather than doubled.
+    let (small, back) = if enlargement(scale) == 1 {
+        (frame.resized(frame.width / 2, frame.height / 2), 2)
+    } else {
+        (frame.clone(), 1)
+    };
+    // A scale of 2 reads the picture at the size it is given.
+    let Some(tsv) = tesseract(&small, 2.0, Output::Tsv { band: LARGE_BAND }) else {
+        return lines;
+    };
+    let tall = median * 2;
+    let large: Vec<crate::page::Line> = parse_tsv(&tsv, 2.0)
+        .into_iter()
+        .map(|mut line| {
+            line.rect = crate::page::Rect {
+                x: line.rect.x * back,
+                y: line.rect.y * back,
+                width: line.rect.width * back,
+                height: line.rect.height * back,
+            };
+            line
+        })
+        .filter(|line| line.rect.height >= tall)
+        .collect();
+    let overlaps = |a: &crate::page::Rect, b: &crate::page::Rect| {
+        let w = a.right().min(b.right()).saturating_sub(a.x.max(b.x));
+        let h = a.bottom().min(b.bottom()).saturating_sub(a.y.max(b.y));
+        w * h * 2 > (a.width * a.height).min(b.width * b.height).max(1)
+    };
+    // Like for like only: a line of large type replaces the full-size reading
+    // of it, but a box that came back far taller than the full-size one is a
+    // loose box round ordinary type, and the full-size reading stays.
+    let large: Vec<crate::page::Line> = large
+        .into_iter()
+        .filter(|big| {
+            !lines.iter().any(|line| {
+                overlaps(&big.rect, &line.rect) && line.rect.height * 13 < big.rect.height * 10
+            })
+        })
+        .collect();
+    let mut kept: Vec<crate::page::Line> = lines
+        .into_iter()
+        .filter(|line| !large.iter().any(|big| overlaps(&big.rect, &line.rect)))
+        .collect();
+    crate::trace!(
+        "ocr       read {} lines of large type again at half the size in {:?}",
+        large.len(),
+        started.elapsed()
+    );
+    kept.extend(large);
+    kept
 }
 
 /// What Tesseract is asked to print.

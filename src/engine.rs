@@ -598,7 +598,12 @@ fn translate_page(
     let pairs: Vec<_> = blocks
         .into_iter()
         .zip(translated)
-        .filter_map(|(block, text)| text.map(|text| (block, text)))
+        .filter_map(|(block, text)| {
+            text.map(|text| {
+                let text = crate::page::match_case(&block.text, &text, &cfg.target_lang);
+                (block, text)
+            })
+        })
         .filter(|(block, text)| {
             let wrong = crate::page::wrong_script(&block.text, text, &cfg.target_lang);
             if wrong {

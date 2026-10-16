@@ -27,6 +27,16 @@ running on from the one above. A short word at the start of a line, like
 longer left untranslated, and words like "eSignature" or "iPhone" are no longer
 mistaken for code.
 
+**Titles and headlines set in large type are translated too, as one
+sentence.** A title page or a poster — "THIS IS / HOW THEY / TELL ME / THE
+WORLD / ENDS", in tall narrow capitals — came back with words missing, or not
+at all: letters that large are hard to read at the size of the screen, and no
+installed typeface is that narrow. Large type is now read a second time at
+half the size, the closest typeface is narrowed or widened to the original's
+shape, and a title broken over several lines is translated as the one sentence
+it is, in capitals when it was in capitals. (Linux reads the large type again;
+the rest is the same on every system.)
+
 ## 0.4.15 — 2026-10-16
 
 **The translate box is first in the window, and the shortcuts are said
