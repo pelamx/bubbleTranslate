@@ -340,6 +340,7 @@ pub fn set_bubble_shown(shown: bool) {
     let _ = was;
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn bubble_shown() -> bool {
     BUBBLE_SHOWN.load(std::sync::atomic::Ordering::Relaxed)
 }

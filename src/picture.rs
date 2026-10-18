@@ -55,6 +55,7 @@ pub fn encode(width: u32, height: u32, bgrx: &[u8]) -> Option<Vec<u8>> {
 
 /// The same, for a picture that is already a PNG: the box macOS draws is
 /// written to a file by the system's own screenshot tool.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn encode_png(png: &[u8]) -> Option<Vec<u8>> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(png));
     decoder.set_transformations(png::Transformations::normalize_to_color8());

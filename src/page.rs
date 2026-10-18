@@ -75,6 +75,7 @@ pub struct Word {
 /// doubt about the reading throws the word out, but short of
 /// [`SURE_READING`]: with no score to go on, how well the matching face lands
 /// on the letters is the only check there is, and it keeps its full weight.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub const UNSCORED: f32 = 80.0;
 
 /// How sure the reader has to have been of a line, on average out of 100,
@@ -897,6 +898,7 @@ pub fn append(current: &mut String, line: &str) {
 /// them translated line by line comes back as three fragments. Every reader
 /// that answers with text rather than boxes needs this, which is why it lives
 /// here rather than beside one of them.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn join_lines(raw: &str) -> String {
     let mut paragraphs: Vec<String> = Vec::new();
     let mut current = String::new();
