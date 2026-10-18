@@ -3446,7 +3446,7 @@ mod tests {
         let texts: Vec<String> = blocks.iter().map(|b| b.text.clone()).collect();
         let started = std::time::Instant::now();
         let translated = crate::translate::Translator::new()
-            .translate_many(&texts, &cfg)
+            .translate_many(&texts, None, &cfg)
             .unwrap();
         println!("{} paragraphs in {:?}", texts.len(), started.elapsed());
         let started = std::time::Instant::now();

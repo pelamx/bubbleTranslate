@@ -44,7 +44,9 @@ pub fn encode(width: u32, height: u32, bgrx: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
     let grey: Vec<u8> = bgrx
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .take(width as usize * height as usize)
         .map(|p| luma(p[2], p[1], p[0]))
         .collect();
@@ -62,14 +64,18 @@ pub fn encode_png(png: &[u8]) -> Option<Vec<u8>> {
     let bytes = &buffer[..info.buffer_size()];
     let grey: Vec<u8> = match info.color_type {
         png::ColorType::Rgba => bytes
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|p| luma(p[0], p[1], p[2]))
             .collect(),
         png::ColorType::Rgb => bytes
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|p| luma(p[0], p[1], p[2]))
             .collect(),
-        png::ColorType::GrayscaleAlpha => bytes.chunks_exact(2).map(|p| p[0]).collect(),
+        png::ColorType::GrayscaleAlpha => bytes.as_chunks::<2>().0.iter().map(|p| p[0]).collect(),
         png::ColorType::Grayscale => bytes.to_vec(),
         // Expanded to one of the above by the transformation.
         png::ColorType::Indexed => return None,
