@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.4.18 — 2026-10-18
 
 **Claude reads and translates the screen, if you have an Anthropic key.** A
 box (Ctrl+Shift+E, ⌘⇧E on a Mac) and the whole screen (Ctrl+Shift+F, ⌘⇧F) are
