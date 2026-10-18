@@ -78,9 +78,19 @@ pub fn screen_reading(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
         });
     }
     ui.add_space(2.0);
-    // Said as it is: with a Google Vision key set, the picture does leave.
+    // Said as it is: with Claude set up for the screen, or a Google Vision key
+    // set, the picture does leave.
     ui.label(
-        egui::RichText::new(if cfg.google_vision_api_key.trim().is_empty() {
+        egui::RichText::new(if cfg.screen_goes_to_claude() {
+            t(
+                "With your Anthropic key set, the picture is sent to Claude to be read and \
+                 translated. Turn it off in Settings to keep it on this computer.",
+                "Anthropic anahtarın girili olduğu için görüntü okunup çevrilmek üzere \
+                 Claude'a gönderilir. Bu bilgisayarda kalması için Ayarlar'dan kapat.",
+                "Con tu clave de Anthropic, la imagen se envía a Claude para leerla y \
+                 traducirla. Desactívalo en Ajustes para que no salga de este ordenador.",
+            )
+        } else if cfg.google_vision_api_key.trim().is_empty() {
             t(
                 "The picture is read on this computer and never sent anywhere.",
                 "Görüntü bu bilgisayarda okunur ve hiçbir yere gönderilmez.",

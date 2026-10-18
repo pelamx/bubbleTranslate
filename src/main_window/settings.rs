@@ -276,6 +276,41 @@ pub(super) fn providers(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Conf
         .color(TEXT_MUTED),
     );
 
+    ui.add_space(4.0);
+    dirty |= ui
+        .add_enabled(
+            !cfg.anthropic_api_key.trim().is_empty(),
+            egui::Checkbox::new(
+                &mut cfg.claude_reads_screen,
+                t(
+                    "Translate text read off the screen with Claude first",
+                    "Ekrandan okunan yazıyı önce Claude ile çevir",
+                    "Traducir primero con Claude el texto leído de la pantalla",
+                ),
+            ),
+        )
+        .changed();
+    ui.label(
+        egui::RichText::new(t(
+            "The picture of a box or of the whole screen is sent to Claude Haiku, which \
+             reads it itself and translates it, before the list above is asked. It \
+             reads small text, numbers and accents this computer's reader gets wrong, \
+             and sees the whole screen at once. About a tenth of a cent a screen.",
+            "Kutunun ya da tüm ekranın görüntüsü Claude Haiku'ya gönderilir; Haiku onu \
+             kendisi okur ve yukarıdaki listeye sorulmadan önce çevirir. Bu \
+             bilgisayarın okuyucusunun yanlış okuduğu küçük yazıları, sayıları ve \
+             aksanları okur, ekranın tamamını birlikte görür. Ekran başına yaklaşık \
+             bir sentin onda biri.",
+            "La imagen del recuadro o de la pantalla entera se envía a Claude Haiku, \
+             que la lee él mismo y la traduce antes de preguntar a la lista de arriba. \
+             Lee el texto pequeño, los números y los acentos que el lector de este \
+             ordenador confunde, y ve toda la pantalla a la vez. Alrededor de una \
+             décima de céntimo por pantalla.",
+        ))
+        .size(11.0)
+        .color(TEXT_MUTED),
+    );
+
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         ui.label(

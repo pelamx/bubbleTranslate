@@ -162,7 +162,10 @@ pub fn read_screen_region() -> Option<crate::platform::ScreenRead> {
     // rectangle before admitting that is a worse way to say nothing happened.
     crate::trace!("region    asked to read the screen");
 
-    if !ocr::available() {
+    // Claude reads the picture itself, so a machine with no recognition
+    // language can still be answered when it is set up.
+    let picture_wanted = crate::picture::wanted();
+    if !ocr::available() && !picture_wanted {
         crate::trace!(
             "ocr       no recognition language installed; installed: {:?}",
             ocr::languages()
@@ -171,10 +174,20 @@ pub fn read_screen_region() -> Option<crate::platform::ScreenRead> {
     }
 
     let region = overlay::select_region()?;
-    let text = ocr::recognize(region)?;
+    let picture = if picture_wanted {
+        ocr::picture(region)
+    } else {
+        None
+    };
+    let text = ocr::recognize(region);
+    let text = if picture.is_some() {
+        text.unwrap_or_default()
+    } else {
+        text?
+    };
 
     // Whitespace is what a rectangle drawn over a photograph comes back as.
-    if text.trim().is_empty() {
+    if text.trim().is_empty() && picture.is_none() {
         crate::trace!("ocr       nothing readable in the region");
         return None;
     }
@@ -185,6 +198,7 @@ pub fn read_screen_region() -> Option<crate::platform::ScreenRead> {
             via: crate::platform::CaptureSource::Ocr,
         },
         at: bubble_anchor(region),
+        picture,
     })
 }
 
@@ -300,6 +314,11 @@ pub fn capture_page() -> Option<PageShot> {
 }
 
 /// Every paragraph on the photographed screen, and where it is.
+/// The photograph, ready for Claude to read; see [`crate::picture`].
+pub fn page_picture(shot: &PageShot) -> Option<Vec<u8>> {
+    crate::picture::encode(shot.frame.width, shot.frame.height, &shot.frame.bgrx)
+}
+
 pub fn read_page(shot: &PageShot) -> Vec<crate::page::Block> {
     let lines = ocr::recognize_lines(&shot.frame, f64::from(shot.scale)).unwrap_or_default();
     let pixels = crate::page::Pixels {

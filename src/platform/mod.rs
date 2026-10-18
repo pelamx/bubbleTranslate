@@ -20,7 +20,7 @@ mod macos;
 #[cfg(target_os = "macos")]
 pub use macos::{capture, monitor, shell, speech as speech_command};
 #[cfg(target_os = "macos")]
-pub use macos::{capture_page, on_screen_page_request, read_page, show_page};
+pub use macos::{capture_page, on_screen_page_request, page_picture, read_page, show_page};
 #[cfg(target_os = "macos")]
 pub use macos::{on_screen_region_request, read_screen_region};
 
@@ -172,6 +172,11 @@ pub struct ScreenRead {
     /// finished the drag somewhere arbitrary — at the far corner of whatever
     /// was being read, which is the one place the bubble must not cover.
     pub at: Option<(f64, f64)>,
+    /// The box itself, ready for Claude to read, when [`crate::picture`]
+    /// says it is wanted. With one, `capture.text` may be empty: the reader
+    /// here found nothing, or has no pack for the language, and Claude reads
+    /// the picture instead.
+    pub picture: Option<Vec<u8>>,
 }
 
 /// What the main window can say about reading the screen on this system,
@@ -268,14 +273,14 @@ pub fn keep_on_all_workspaces() -> bool {
 pub use linux::{
     ask_for_screen_page, ask_for_screen_region, capture_page, download_screen_reader,
     keep_on_all_workspaces, mark_as_notification, on_screen_page_request, on_screen_region_request,
-    pointer_over, preferred_zoom, read_page, read_screen_region, screen_reading, show_page,
-    to_points,
+    page_picture, pointer_over, preferred_zoom, read_page, read_screen_region, screen_reading,
+    show_page, to_points,
 };
 #[cfg(target_os = "windows")]
 pub use windows::{
     capture_page, cursor_position, frame_offset, keep_on_all_workspaces, mark_as_notification,
-    on_screen_page_request, on_screen_region_request, pointer_over, preferred_zoom, read_page,
-    read_screen_region, screen_reading, shape_bubble, show_page, to_points,
+    on_screen_page_request, on_screen_region_request, page_picture, pointer_over, preferred_zoom,
+    read_page, read_screen_region, screen_reading, shape_bubble, show_page, to_points,
 };
 
 #[cfg(target_os = "windows")]

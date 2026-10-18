@@ -448,9 +448,14 @@ pub fn read_screen_region() -> Option<crate::platform::ScreenRead> {
     // Before the screen is taken over: a machine that cannot answer should
     // not make the user draw a rectangle first. The first time, this is where
     // the built-in reader's models are fetched.
+    // Claude reads the picture itself, so a machine whose reader cannot be
+    // made ready can still be answered when it is set up.
+    let picture_wanted = crate::picture::wanted();
     if let Err(reason) = ocr::prepare() {
         crate::trace!("ocr       no reader: {reason}");
-        return None;
+        if !picture_wanted {
+            return None;
+        }
     }
 
     let shot = match screen::grab() {
@@ -469,10 +474,20 @@ pub fn read_screen_region() -> Option<crate::platform::ScreenRead> {
         overlay::select(&shot.frame, shot.placement)?
     };
     let region = shot.frame.crop(x, y, width, height);
-    let text = ocr::recognize(&region, shot.scale())?;
+    let picture = if picture_wanted {
+        crate::picture::encode(region.width, region.height, &region.bgrx)
+    } else {
+        None
+    };
+    let text = ocr::recognize(&region, shot.scale());
+    let text = if picture.is_some() {
+        text.unwrap_or_default()
+    } else {
+        text?
+    };
 
     // Whitespace is what a rectangle drawn over a photograph comes back as.
-    if text.trim().is_empty() {
+    if text.trim().is_empty() && picture.is_none() {
         crate::trace!("ocr       nothing readable in the region");
         return None;
     }
@@ -491,6 +506,7 @@ pub fn read_screen_region() -> Option<crate::platform::ScreenRead> {
             via: crate::platform::CaptureSource::Ocr,
         },
         at: (!chosen).then(|| bubble_anchor(region, screen_bottom)),
+        picture,
     })
 }
 
@@ -518,6 +534,12 @@ pub fn capture_page() -> Option<PageShot> {
 }
 
 /// Every paragraph on the photographed screen, and where it is.
+/// The photograph, ready for Claude to read; see [`crate::picture`].
+pub fn page_picture(shot: &PageShot) -> Option<Vec<u8>> {
+    let frame = &shot.0.frame;
+    crate::picture::encode(frame.width, frame.height, &frame.bgrx)
+}
+
 pub fn read_page(shot: &PageShot) -> Vec<crate::page::Block> {
     let shot = &shot.0;
     let lines = ocr::recognize_lines(&shot.frame, shot.scale()).unwrap_or_default();

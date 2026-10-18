@@ -26,6 +26,7 @@ mod ipc;
 mod license;
 mod main_window;
 mod page;
+mod picture;
 mod platform;
 mod quota;
 mod speech;

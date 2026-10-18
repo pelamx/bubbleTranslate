@@ -228,6 +228,13 @@ pub fn recognize(region: Region) -> Option<String> {
     Some(text)
 }
 
+/// `region`, photographed and made ready for Claude to read; see
+/// [`crate::picture`].
+pub fn picture(region: Region) -> Option<Vec<u8>> {
+    let pixels = grab(region)?;
+    crate::picture::encode(region.width as u32, region.height as u32, &pixels)
+}
+
 /// Copies `region` off the screen as top-down BGRA.
 ///
 /// BGRA because that is `BitmapPixelFormat::Bgra8`, which is what the OCR

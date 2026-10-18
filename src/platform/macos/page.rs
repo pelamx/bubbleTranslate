@@ -85,6 +85,11 @@ pub fn capture_page() -> Option<PageShot> {
 /// lines they make are tightened to their ink and dropped where the matching
 /// face would not land on the letters, and what is left is grouped into
 /// paragraphs.
+/// The photograph, ready for Claude to read; see [`crate::picture`].
+pub fn page_picture(shot: &PageShot) -> Option<Vec<u8>> {
+    crate::picture::encode(shot.frame.width, shot.frame.height, &shot.frame.bgrx)
+}
+
 pub fn read_page(shot: &PageShot) -> Vec<Block> {
     let frame = &shot.frame;
     let Some(png) = encode_png(frame) else {

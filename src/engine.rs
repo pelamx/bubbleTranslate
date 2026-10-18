@@ -231,10 +231,13 @@ fn run(
             },
         };
 
-        let (cfg, debounce) = {
+        #[cfg_attr(not(debug_assertions), allow(unused_mut))]
+        let (mut cfg, debounce) = {
             let guard = config.lock().unwrap();
             (guard.clone(), Duration::from_millis(guard.debounce_ms))
         };
+        #[cfg(debug_assertions)]
+        crate::translate::use_development_key(&mut cfg);
         // Whoever reads the screen for this request reads it with Google
         // Vision if a key is set now, and on this computer if not.
         crate::vision::set_key(&cfg.google_vision_api_key);
@@ -242,6 +245,8 @@ fn run(
         // A recogniser asked for the wrong language does not say so; it
         // answers with the wrong letters.
         crate::platform::set_reading_language(&cfg.source_lang);
+        // And hands the picture up for Claude to read, when it is set up to.
+        crate::picture::set_wanted(cfg.screen_goes_to_claude());
 
         // Requests that need no capture are handled here; the rest fall
         // through to the selection pipeline below.
@@ -382,7 +387,7 @@ fn run(
         // switching target language must never cost anything. The repeat
         // window in [`crate::quota`] is what delivers that, rather than an
         // exemption from the meter here.
-        let (text, at, via, metered) = match request {
+        let (mut text, at, via, metered, picture) = match request {
             // Already handled above; the compiler cannot see that.
             Request::Manual(_)
             | Request::ScreenPage
@@ -400,7 +405,7 @@ fn run(
                 // while there is an allowance left. Skipping the meter
                 // entirely instead made the language picker an unmetered
                 // translator: a spent install could go on pressing it.
-                (last_text.clone(), last_at, last_via, true)
+                (last_text.clone(), last_at, last_via, true, None)
             }
             Request::Selection(trigger) | Request::Hotkey(trigger) => {
                 // Applied here rather than in the tap callback, which must not
@@ -439,7 +444,7 @@ fn run(
                     crate::trace!("skip      same text within repeat window");
                     continue;
                 }
-                (text, trigger.at, capture.via, true)
+                (text, trigger.at, capture.via, true, None)
             }
             Request::ScreenRegion => {
                 // Asked before the overlay goes up: someone with no readings
@@ -469,8 +474,10 @@ fn run(
                 );
                 // The same bounds a selection gets. A rectangle dragged over
                 // a whole page of text is as much a mistake as selecting one,
-                // and costs more to translate.
-                if chars < cfg.min_chars || chars > cfg.max_chars {
+                // and costs more to translate. With a picture for Claude to
+                // read, finding too little here is no reason to stop.
+                let too_short = chars < cfg.min_chars && read.picture.is_none();
+                if too_short || chars > cfg.max_chars {
                     crate::trace!(
                         "skip      {chars} chars outside [{}, {}]",
                         cfg.min_chars,
@@ -480,7 +487,7 @@ fn run(
                 }
                 // Not metered as a translation: a box spends one of the
                 // day's screen readings instead, counted when it comes back.
-                (text, read.at, read.capture.via, false)
+                (text, read.at, read.capture.via, false, read.picture)
             }
         };
 
@@ -513,7 +520,24 @@ fn run(
         let _ = ui.send(UiEvent::Working { at, via });
         wake_ui();
 
-        let event = match translator.translate(&text, &cfg) {
+        // Text read off the screen has a translator of its own when Claude is
+        // set up for it — a box, read again off its picture, and the same box
+        // again in another language, from what was read there.
+        let outcome = if let Some(picture) = picture {
+            let outcome = translator.translate_picture(&picture, &text, &cfg);
+            // The picture goes now: it has no reason to outlive the words.
+            drop(picture);
+            outcome.map(|(read, result)| {
+                text = read;
+                last_text = text.clone();
+                result
+            })
+        } else if via == CaptureSource::Ocr {
+            translator.translate_read(&text, &cfg)
+        } else {
+            translator.translate(&text, &cfg)
+        };
+        let event = match outcome {
             Ok(result) => {
                 // Counted here rather than above: a translation nobody
                 // received is not one the user should have paid for.
@@ -597,7 +621,13 @@ fn translate_page(
         return false;
     }
     let texts: Vec<String> = blocks.iter().map(|block| block.text.clone()).collect();
-    let translated = match translator.translate_many(&texts, cfg) {
+    // The screen itself, for Claude to read each paragraph off again.
+    let picture = if cfg.screen_goes_to_claude() {
+        crate::platform::page_picture(&shot)
+    } else {
+        None
+    };
+    let translated = match translator.translate_many(&texts, picture.as_deref(), cfg) {
         Ok(translated) => translated,
         Err(errors) => {
             for (provider, err) in &errors {

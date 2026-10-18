@@ -13,6 +13,24 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**Claude reads and translates the screen, if you have an Anthropic key.** A
+box (Ctrl+Shift+E, ⌘⇧E on a Mac) and the whole screen (Ctrl+Shift+F, ⌘⇧F) are
+now sent to Claude Haiku as a picture. Claude reads the text itself and
+translates it. The computer's own reader gets small text wrong: "rn" for "m", a
+dropped accent, an 8 that was a 3. Until now the translators were handed those
+mistakes and translated them as written, one paragraph at a time. Now a wrong
+number comes out right. A box in a language this computer cannot read is still
+translated. A menu word comes out as a command rather than a verb, because
+Claude sees the whole screen at once.
+
+The picture leaves your computer when this is on, and the window says so. A
+screen costs about a tenth of a cent, billed to your own Anthropic account.
+Without a key nothing changes. If Claude cannot be reached, the screen is read
+and translated as before. You can turn it off in Settings, under the Anthropic
+key.
+
 ## 0.4.17 — 2026-10-16
 
 **A contents page is translated whole, every entry alike.** On a book's

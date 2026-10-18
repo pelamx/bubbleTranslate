@@ -8,7 +8,7 @@ pub mod page;
 pub mod shell;
 pub mod speech;
 
-pub use page::{capture_page, on_screen_page_request, read_page, show_page};
+pub use page::{capture_page, on_screen_page_request, page_picture, read_page, show_page};
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -49,7 +49,10 @@ pub fn read_screen_region() -> Option<crate::platform::ScreenRead> {
         shell::open_url(SCREEN_SETTINGS);
         return None;
     }
-    if !ocr::available() {
+    // Claude reads the picture itself, so a Mac with no recognition language
+    // can still be answered when it is set up.
+    let picture_wanted = crate::picture::wanted();
+    if !ocr::available() && !picture_wanted {
         crate::trace!("ocr       no recognition language installed");
         return None;
     }
@@ -79,13 +82,22 @@ pub fn read_screen_region() -> Option<crate::platform::ScreenRead> {
     }
 
     let source_lang = crate::config::Config::load().source_lang;
-    let text = ocr::recognize(&shot.0, &source_lang)?;
-    // The picture goes now, before the translation is even requested: it is a
+    let picture = picture_wanted
+        .then(|| std::fs::read(&shot.0).ok())
+        .flatten()
+        .and_then(|png| crate::picture::encode_png(&png));
+    let text = ocr::recognize(&shot.0, &source_lang);
+    // The file goes now, before the translation is even requested: it is a
     // picture of the user's screen and has no reason to outlive the words.
     drop(shot);
+    let text = if picture.is_some() {
+        text.unwrap_or_default()
+    } else {
+        text?
+    };
 
     // Whitespace is what a rectangle drawn over a photograph comes back as.
-    if text.trim().is_empty() {
+    if text.trim().is_empty() && picture.is_none() {
         crate::trace!("ocr       nothing readable in the region");
         return None;
     }
@@ -96,6 +108,7 @@ pub fn read_screen_region() -> Option<crate::platform::ScreenRead> {
             via: crate::platform::CaptureSource::Ocr,
         },
         at: monitor::take_last_drag().and_then(bubble_anchor),
+        picture,
     })
 }
 

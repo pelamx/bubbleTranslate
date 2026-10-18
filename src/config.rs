@@ -264,6 +264,12 @@ pub struct Config {
     /// Anthropic API key. Without one Claude is skipped even if listed in
     /// `providers`.
     pub anthropic_api_key: String,
+    /// With an Anthropic key, text read off the screen — a box or the whole
+    /// of it — is translated by Claude Haiku first, wherever Claude sits in
+    /// `providers`; see [`crate::translate::Translator::translate_read`].
+    /// On by default: a reader's text is where the phrase translators fail
+    /// most, and a screen costs a fraction of a cent.
+    pub claude_reads_screen: bool,
     /// Google Cloud Vision API key. With one, the screen — a box or the whole
     /// of it — is read by Google instead of on this computer; see
     /// [`crate::vision`]. Empty by default, which keeps every picture here.
@@ -382,6 +388,7 @@ impl Default for Config {
             ],
             deepl_api_key: String::new(),
             anthropic_api_key: String::new(),
+            claude_reads_screen: true,
             google_vision_api_key: String::new(),
             mymemory_email: String::new(),
             license_key: String::new(),
@@ -503,6 +510,12 @@ impl Config {
                 _ => true,
             })
             .collect()
+    }
+
+    /// Whether text read off the screen goes to Claude Haiku before the
+    /// chain.
+    pub fn screen_goes_to_claude(&self) -> bool {
+        self.claude_reads_screen && !self.anthropic_api_key.trim().is_empty()
     }
 }
 
