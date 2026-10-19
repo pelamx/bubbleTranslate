@@ -325,8 +325,28 @@ pub(super) fn providers(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Conf
             ),
         )
         .changed();
-    ui.label(
-        egui::RichText::new(t(
+    // Linux finds the sentence by reading the screen around the pointer,
+    // which is worth saying: it is a picture taken, even if it stays here.
+    let word_context_note = if cfg!(target_os = "linux") {
+        t(
+            "A selected word is sent to Claude Haiku with the sentence around it, so it \
+             is translated in the meaning that sentence uses — a river's bank, not a \
+             building — with its other meanings listed underneath. The sentence is read \
+             off the screen around the pointer, on this computer; the picture is not \
+             sent. Not on GNOME or KDE, which only take screenshots through a dialog.",
+            "Seçilen kelime, çevresindeki cümleyle birlikte Claude Haiku'ya gönderilir; \
+             böylece o cümlede kullanılan anlamıyla çevrilir — banka değil, nehir \
+             kıyısı — ve diğer anlamları altında listelenir. Cümle, imlecin çevresinden \
+             bu bilgisayarda ekrandan okunur; resim gönderilmez. Ekran görüntüsünü \
+             yalnızca bir pencereyle alan GNOME ve KDE'de çalışmaz.",
+            "La palabra seleccionada se envía a Claude Haiku con la frase que la rodea, \
+             para traducirla en el sentido que usa esa frase — la orilla de un río, no \
+             un banco — con sus otros significados debajo. La frase se lee de la \
+             pantalla alrededor del puntero, en este ordenador; la imagen no se envía. \
+             No en GNOME ni KDE, que solo hacen capturas a través de un diálogo.",
+        )
+    } else {
+        t(
             "A selected word is sent to Claude Haiku with the sentence around it, so it \
              is translated in the meaning that sentence uses — a river's bank, not a \
              building — with its other meanings listed underneath. Works where the \
@@ -342,9 +362,12 @@ pub(super) fn providers(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Conf
              un banco — con sus otros significados debajo. Funciona donde la aplicación \
              dice qué texto rodea la selección; en las demás, la palabra se traduce \
              como antes.",
-        ))
-        .size(11.0)
-        .color(TEXT_MUTED),
+        )
+    };
+    ui.label(
+        egui::RichText::new(word_context_note)
+            .size(11.0)
+            .color(TEXT_MUTED),
     );
 
     ui.add_space(6.0);

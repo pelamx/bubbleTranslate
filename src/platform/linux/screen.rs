@@ -100,6 +100,20 @@ pub fn grab() -> Result<Shot, String> {
     }
 }
 
+/// Takes the picture only where it can be done without the desktop asking
+/// anyone: X11 and the wlroots compositors, never the portal, which may put up
+/// a dialog. For reading around a selected word, where a dialog would be a
+/// surprise rather than an answer.
+pub fn grab_quietly() -> Result<Shot, String> {
+    if super::on_wayland() {
+        wayland_grab()
+    } else if std::env::var_os("DISPLAY").is_some() {
+        x11_grab()
+    } else {
+        Err("no display server".into())
+    }
+}
+
 // --- X11 --------------------------------------------------------------------
 
 fn x11_grab() -> Result<Shot, String> {

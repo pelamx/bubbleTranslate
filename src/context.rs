@@ -76,6 +76,7 @@ fn trim_to_words(text: &str, max: usize, keep_end: bool) -> String {
 /// The sentence around the first place `word` stands as a whole word in
 /// `text`, for a platform that can give the sentence or paragraph a selection
 /// is in but not where in it the selection starts.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn sentence_containing(text: &str, word: &str) -> Option<String> {
     let word = word.trim();
     if word.is_empty() {

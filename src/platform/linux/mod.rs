@@ -39,6 +39,7 @@ mod overlay;
 mod portal;
 mod reader;
 mod screen;
+mod sentence;
 mod wayland;
 mod window;
 mod x11;
@@ -152,6 +153,7 @@ pub fn on_wayland() -> bool {
 ///
 /// `None` on an X11 session, where the server's DPI is not a second opinion —
 /// it is the setting, chosen by the user, and other applications follow it too.
+pub use sentence::sentence_on_screen;
 pub use window::{keep_on_all_workspaces, mark_as_notification};
 
 pub fn preferred_zoom(native_pixels_per_point: f32) -> Option<f32> {

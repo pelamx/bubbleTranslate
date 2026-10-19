@@ -277,6 +277,21 @@ pub fn recognize(frame: &Frame, scale: f64) -> Option<String> {
 /// Reads every line of text in `frame`, with where each one is, in the
 /// frame's own pixels.
 pub fn recognize_lines(frame: &Frame, scale: f64) -> Option<Vec<crate::page::Line>> {
+    let started = std::time::Instant::now();
+    let lines = crate::page::lines_from_words(recognize_words(frame, scale)?);
+    crate::trace!(
+        "ocr       built-in reader found {} lines in {}x{} in {:?}",
+        lines.len(),
+        frame.width,
+        frame.height,
+        started.elapsed()
+    );
+    Some(lines)
+}
+
+/// Every word in `frame` and where it is, in the lines the reader found
+/// them in, before any are joined or cut.
+pub fn recognize_words(frame: &Frame, scale: f64) -> Option<Vec<Vec<crate::page::Word>>> {
     use ocrs::TextItem as _;
 
     let engine = match engine() {
@@ -287,12 +302,11 @@ pub fn recognize_lines(frame: &Frame, scale: f64) -> Option<Vec<crate::page::Lin
         }
     };
     let (grey, width, height) = frame.prepared(scale);
-    let started = std::time::Instant::now();
     let source = ocrs::ImageSource::from_bytes(&grey, (width, height)).ok()?;
     let input = engine.prepare_input(source).ok()?;
     let words = engine.detect_words(&input).ok()?;
     let lines = engine.find_text_lines(&input, &words);
-    let lines: Vec<_> = engine
+    let lines: Vec<Vec<crate::page::Word>> = engine
         .recognize_text(&input, &lines)
         .ok()?
         .into_iter()
@@ -320,12 +334,6 @@ pub fn recognize_lines(frame: &Frame, scale: f64) -> Option<Vec<crate::page::Lin
                 .collect()
         })
         .collect();
-    let lines = crate::page::lines_from_words(lines);
-    crate::trace!(
-        "ocr       built-in reader found {} lines in {width}x{height} in {:?}",
-        lines.len(),
-        started.elapsed()
-    );
     Some(lines)
 }
 

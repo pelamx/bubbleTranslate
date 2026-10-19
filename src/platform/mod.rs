@@ -132,6 +132,17 @@ pub use linux::cursor::position as cursor_position;
 #[cfg(all(test, target_os = "linux"))]
 pub use linux::recognize_lines_for_test;
 
+/// The sentence a selected `word` stands in, read off the screen around `at`,
+/// for a system whose selections carry no surrounding text. macOS and Windows
+/// hand it over with the selection, in [`Capture::context`], and never need
+/// this.
+#[cfg(target_os = "linux")]
+pub use linux::sentence_on_screen;
+#[cfg(not(target_os = "linux"))]
+pub fn sentence_on_screen(_word: &str, _at: (f64, f64)) -> Option<String> {
+    None
+}
+
 /// Whether the pointer is inside `rect`, which is given in the same
 /// coordinate space the bubble is positioned in.
 ///

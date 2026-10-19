@@ -303,6 +303,29 @@ pub fn recognize_lines(frame: &Frame, scale: f64) -> Option<Vec<crate::page::Lin
     }
 }
 
+/// Reads every word in `frame`, line by line as the reader found them, on
+/// this computer and nowhere else — never through Cloud Vision — and without
+/// fetching anything: `None` when neither reader is ready as it stands. For a
+/// strip around a selected word, where what is wanted is each word and where
+/// it is rather than lines fit to be painted over.
+pub fn recognize_words_here(frame: &Frame, scale: f64) -> Option<Vec<Vec<crate::page::Word>>> {
+    if tesseract_ready() {
+        let started = std::time::Instant::now();
+        let tsv = tesseract(frame, scale, Output::Tsv { band: 0 })?;
+        let words = parse_tsv_words(&tsv, scale);
+        crate::trace!(
+            "ocr       {} lines of words in {:?}",
+            words.len(),
+            started.elapsed()
+        );
+        Some(words)
+    } else if matches!(super::reader::state(), super::reader::State::Ready) {
+        super::reader::recognize_words(frame, scale)
+    } else {
+        None
+    }
+}
+
 /// How many strips a whole screen is cut into, each read by its own
 /// Tesseract at the same time. One Tesseract uses one core, and a whole
 /// screen read by one took eight to twelve seconds.
@@ -465,6 +488,12 @@ enum Output {
 /// Turns Tesseract's table into lines: its words grouped by the block,
 /// paragraph and line it says they belong to, each line as wide as its words.
 fn parse_tsv(tsv: &str, scale: f64) -> Vec<crate::page::Line> {
+    crate::page::lines_from_words(parse_tsv_words(tsv, scale))
+}
+
+/// Tesseract's table as its own lines of words, in reading order, before
+/// anything is joined or cut.
+fn parse_tsv_words(tsv: &str, scale: f64) -> Vec<Vec<crate::page::Word>> {
     let mut lines: Vec<((u32, u32, u32), Vec<crate::page::Word>)> = Vec::new();
     for row in tsv.lines().skip(1) {
         let cols: Vec<&str> = row.split('\t').collect();
@@ -498,7 +527,7 @@ fn parse_tsv(tsv: &str, scale: f64) -> Vec<crate::page::Line> {
             _ => lines.push((key, vec![word])),
         }
     }
-    crate::page::lines_from_words(lines.into_iter().map(|(_, words)| words).collect())
+    lines.into_iter().map(|(_, words)| words).collect()
 }
 
 fn tesseract(frame: &Frame, scale: f64, output: Output) -> Option<String> {

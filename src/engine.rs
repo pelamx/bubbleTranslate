@@ -454,7 +454,17 @@ fn run(
                     crate::trace!("skip      same text within repeat window");
                     continue;
                 }
-                (text, trigger.at, capture.via, true, None, capture.context)
+                // A system whose selection came without the text around it
+                // reads that off the screen instead — only for a word Claude
+                // will read in its sentence, and here, before the bubble that
+                // says "working" can be in the picture.
+                let context = capture.context.or_else(|| {
+                    let at = trigger.at?;
+                    (cfg.word_goes_to_claude() && crate::translate::is_single_word(&text))
+                        .then(|| crate::platform::sentence_on_screen(&text, at))
+                        .flatten()
+                });
+                (text, trigger.at, capture.via, true, None, context)
             }
             Request::ScreenRegion => {
                 // Asked before the overlay goes up: someone with no readings
