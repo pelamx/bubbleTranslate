@@ -504,6 +504,7 @@ pub fn read_screen_region() -> Option<crate::platform::ScreenRead> {
         capture: crate::platform::Capture {
             text,
             via: crate::platform::CaptureSource::Ocr,
+            context: None,
         },
         at: (!chosen).then(|| bubble_anchor(region, screen_bottom)),
         picture,

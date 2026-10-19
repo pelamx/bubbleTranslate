@@ -203,6 +203,9 @@ fn run(
     let mut last_text = String::new();
     let mut last_at = None;
     let mut last_via = CaptureSource::PrimarySelection;
+    // The sentence the last selection was taken from, so a change of
+    // language translates the word in it again rather than on its own.
+    let mut last_context: Option<String> = None;
     let mut last_started = Instant::now() - REPEAT_WINDOW;
 
     // Holds a request that arrived mid-debounce and superseded the gesture
@@ -387,7 +390,7 @@ fn run(
         // switching target language must never cost anything. The repeat
         // window in [`crate::quota`] is what delivers that, rather than an
         // exemption from the meter here.
-        let (mut text, at, via, metered, picture) = match request {
+        let (mut text, at, via, metered, picture, context) = match request {
             // Already handled above; the compiler cannot see that.
             Request::Manual(_)
             | Request::ScreenPage
@@ -405,7 +408,14 @@ fn run(
                 // while there is an allowance left. Skipping the meter
                 // entirely instead made the language picker an unmetered
                 // translator: a spent install could go on pressing it.
-                (last_text.clone(), last_at, last_via, true, None)
+                (
+                    last_text.clone(),
+                    last_at,
+                    last_via,
+                    true,
+                    None,
+                    last_context.clone(),
+                )
             }
             Request::Selection(trigger) | Request::Hotkey(trigger) => {
                 // Applied here rather than in the tap callback, which must not
@@ -444,7 +454,7 @@ fn run(
                     crate::trace!("skip      same text within repeat window");
                     continue;
                 }
-                (text, trigger.at, capture.via, true, None)
+                (text, trigger.at, capture.via, true, None, capture.context)
             }
             Request::ScreenRegion => {
                 // Asked before the overlay goes up: someone with no readings
@@ -487,7 +497,7 @@ fn run(
                 }
                 // Not metered as a translation: a box spends one of the
                 // day's screen readings instead, counted when it comes back.
-                (text, read.at, read.capture.via, false, read.picture)
+                (text, read.at, read.capture.via, false, read.picture, None)
             }
         };
 
@@ -516,6 +526,7 @@ fn run(
         last_text = text.clone();
         last_at = at;
         last_via = via;
+        last_context.clone_from(&context);
 
         let _ = ui.send(UiEvent::Working { at, via });
         wake_ui();
@@ -535,7 +546,8 @@ fn run(
         } else if via == CaptureSource::Ocr {
             translator.translate_read(&text, &cfg)
         } else {
-            translator.translate(&text, &cfg)
+            // A single word with its sentence is translated in it.
+            translator.translate_selection(&text, context.as_deref(), &cfg)
         };
         let event = match outcome {
             Ok(result) => {

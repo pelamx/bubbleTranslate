@@ -311,6 +311,42 @@ pub(super) fn providers(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Conf
         .color(TEXT_MUTED),
     );
 
+    ui.add_space(4.0);
+    dirty |= ui
+        .add_enabled(
+            !cfg.anthropic_api_key.trim().is_empty(),
+            egui::Checkbox::new(
+                &mut cfg.claude_word_context,
+                t(
+                    "Translate a single word in its sentence with Claude",
+                    "Tek kelimeyi cümlesiyle birlikte Claude ile çevir",
+                    "Traducir con Claude una palabra suelta dentro de su frase",
+                ),
+            ),
+        )
+        .changed();
+    ui.label(
+        egui::RichText::new(t(
+            "A selected word is sent to Claude Haiku with the sentence around it, so it \
+             is translated in the meaning that sentence uses — a river's bank, not a \
+             building — with its other meanings listed underneath. Works where the \
+             application says what text surrounds a selection; elsewhere the word is \
+             translated as before.",
+            "Seçilen kelime, çevresindeki cümleyle birlikte Claude Haiku'ya gönderilir; \
+             böylece o cümlede kullanılan anlamıyla çevrilir — banka değil, nehir \
+             kıyısı — ve diğer anlamları altında listelenir. Seçimin çevresindeki \
+             metni bildiren uygulamalarda çalışır; diğerlerinde kelime eskisi gibi \
+             çevrilir.",
+            "La palabra seleccionada se envía a Claude Haiku con la frase que la rodea, \
+             para traducirla en el sentido que usa esa frase — la orilla de un río, no \
+             un banco — con sus otros significados debajo. Funciona donde la aplicación \
+             dice qué texto rodea la selección; en las demás, la palabra se traduce \
+             como antes.",
+        ))
+        .size(11.0)
+        .color(TEXT_MUTED),
+    );
+
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         ui.label(

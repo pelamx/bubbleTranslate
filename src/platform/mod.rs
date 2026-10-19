@@ -81,6 +81,10 @@ pub enum CaptureSource {
 pub struct Capture {
     pub text: String,
     pub via: CaptureSource,
+    /// The sentence the selection was taken from, where the system can say
+    /// what text sits around it; see [`crate::context`]. `None` from the
+    /// clipboard, which carries only what was selected.
+    pub context: Option<String>,
 }
 
 /// A selection gesture that just finished: the cue to capture and translate.

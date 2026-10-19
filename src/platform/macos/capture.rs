@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 
 use core_foundation::base::{CFRelease, CFTypeID, CFTypeRef, TCFType};
 use core_foundation::dictionary::CFDictionary;
+use core_foundation::number::{CFNumber, CFNumberRef};
 use core_foundation::string::{CFString, CFStringRef};
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, EventField};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
@@ -42,12 +43,38 @@ unsafe extern "C" {
         value: *mut CFTypeRef,
     ) -> i32;
     fn AXUIElementSetMessagingTimeout(element: AXUIElementRef, timeout: f32) -> i32;
+    fn AXUIElementCopyParameterizedAttributeValue(
+        element: AXUIElementRef,
+        attribute: CFStringRef,
+        parameter: CFTypeRef,
+        value: *mut CFTypeRef,
+    ) -> i32;
+    fn AXValueCreate(kind: u32, value: *const c_void) -> CFTypeRef;
+    fn AXValueGetValue(value: CFTypeRef, kind: u32, out: *mut c_void) -> bool;
+    fn AXValueGetTypeID() -> CFTypeID;
     fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
     /// The same question without the dialog, for asking repeatedly.
     fn AXIsProcessTrusted() -> bool;
     fn CFGetTypeID(cf: CFTypeRef) -> CFTypeID;
     static kAXTrustedCheckOptionPrompt: CFStringRef;
 }
+
+/// `kAXValueCFRangeType`: an AXValue holding a CFRange.
+const AX_VALUE_CF_RANGE: u32 = 4;
+
+/// A run of text in an element, in UTF-16 units — the CFRange inside an
+/// AXValue.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CfRange {
+    location: isize,
+    length: isize,
+}
+
+/// How much text either side of a selection is asked for, in UTF-16 units:
+/// enough for the sentence around a word, which [`crate::context`] then cuts
+/// out.
+const CONTEXT_REACH: isize = 400;
 
 /// Virtual keycode for "c" on any layout (keycodes are physical, not logical).
 const KEYCODE_C: u16 = 8;
@@ -118,12 +145,13 @@ pub fn recheck(was_ok: bool) -> Option<Readiness> {
 /// `allow_clipboard` gates the Cmd+C strategy: with it off, apps that don't
 /// speak AX simply return nothing instead of having their pasteboard borrowed.
 pub fn selected_text(allow_clipboard: bool, clipboard_before: Option<isize>) -> Option<Capture> {
-    if let Some(text) = accessibility_selection() {
+    if let Some((text, context)) = accessibility_selection() {
         let trimmed = text.trim();
         if !trimmed.is_empty() {
             return Some(Capture {
                 text: trimmed.to_string(),
                 via: CaptureSource::Accessibility,
+                context,
             });
         }
     }
@@ -148,6 +176,7 @@ pub fn selected_text(allow_clipboard: bool, clipboard_before: Option<isize>) -> 
                 return Some(Capture {
                     text: trimmed.to_string(),
                     via: CaptureSource::Clipboard,
+                    context: None,
                 });
             }
         }
@@ -156,6 +185,7 @@ pub fn selected_text(allow_clipboard: bool, clipboard_before: Option<isize>) -> 
     clipboard_selection().map(|text| Capture {
         text,
         via: CaptureSource::Clipboard,
+        context: None,
     })
 }
 
@@ -168,7 +198,8 @@ pub fn pasteboard_change_count() -> isize {
 
 // -- Strategy 1: Accessibility ---------------------------------------------
 
-fn accessibility_selection() -> Option<String> {
+/// The selected text, and for a single word the sentence it was taken from.
+fn accessibility_selection() -> Option<(String, Option<String>)> {
     unsafe {
         let system = AXUIElementCreateSystemWide();
         if system.is_null() {
@@ -183,13 +214,146 @@ fn accessibility_selection() -> Option<String> {
         let focused = focused?;
 
         let selected = copy_attribute(focused as AXUIElementRef, "AXSelectedText");
+        let text = selected.and_then(|selected| {
+            let text = cf_string_to_owned(selected as CFStringRef);
+            CFRelease(selected);
+            text
+        });
+        // Only a single word is translated in its sentence, so only then is
+        // the sentence worth the extra round trips to the application.
+        let context = match &text {
+            Some(text) if crate::translate::is_single_word(text) => {
+                let element = focused as AXUIElementRef;
+                sentence_by_range(element, text).or_else(|| sentence_by_marker(element, text))
+            }
+            _ => None,
+        };
         CFRelease(focused);
-
-        let selected = selected?;
-        let text = cf_string_to_owned(selected as CFStringRef);
-        CFRelease(selected);
-        text
+        if context.is_some() {
+            crate::trace!("capture   the word's sentence: {context:?}");
+        }
+        text.map(|text| (text, context))
     }
+}
+
+/// The sentence around the selection, read through the selection's range
+/// and the text either side of it: text fields, TextEdit, Mail, Notes and
+/// most native editors answer this.
+unsafe fn sentence_by_range(element: AXUIElementRef, word: &str) -> Option<String> {
+    let selected = unsafe { copy_range(element, "AXSelectedTextRange") }?;
+    if selected.length <= 0 {
+        return None;
+    }
+    let start = (selected.location - CONTEXT_REACH).max(0);
+    let mut length = selected.location - start + selected.length + CONTEXT_REACH;
+    // Asking past the end of the text is refused outright by some
+    // applications, so the window stops where the text does.
+    if let Some(total) = unsafe { copy_number(element, "AXNumberOfCharacters") } {
+        length = length.min(total - start);
+    }
+    let window = CfRange {
+        location: start,
+        length,
+    };
+    let parameter = unsafe { AXValueCreate(AX_VALUE_CF_RANGE, (&raw const window).cast()) };
+    if parameter.is_null() {
+        return None;
+    }
+    let text = unsafe { copy_parameterized(element, "AXStringForRange", parameter) };
+    unsafe { CFRelease(parameter) };
+    let text = text.and_then(|text| {
+        let owned = unsafe { cf_string_to_owned(text as CFStringRef) };
+        unsafe { CFRelease(text) };
+        owned
+    })?;
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let from = (selected.location - start) as usize;
+    let to = from + selected.length as usize;
+    if to > units.len() {
+        return None;
+    }
+    let found = String::from_utf16_lossy(&units[from..to]);
+    // The range has to hold the word that was selected; an application
+    // that counts in other units would otherwise hand over the wrong text.
+    if found.trim() != word.trim() {
+        crate::trace!("capture   the selection's range does not hold it: {found:?}");
+        return None;
+    }
+    crate::context::sentence_around(
+        &String::from_utf16_lossy(&units[..from]),
+        &found,
+        &String::from_utf16_lossy(&units[to..]),
+    )
+}
+
+/// The same for a web page, which says where its selection is in text
+/// markers rather than a range: Safari, and the browsers built on Chromium.
+unsafe fn sentence_by_marker(element: AXUIElementRef, word: &str) -> Option<String> {
+    let selection = unsafe { copy_attribute(element, "AXSelectedTextMarkerRange") }?;
+    let start =
+        unsafe { copy_parameterized(element, "AXStartTextMarkerForTextMarkerRange", selection) };
+    unsafe { CFRelease(selection) };
+    let start = start?;
+    let sentence =
+        unsafe { copy_parameterized(element, "AXSentenceTextMarkerRangeForTextMarker", start) };
+    unsafe { CFRelease(start) };
+    let sentence = sentence?;
+    let text = unsafe { copy_parameterized(element, "AXStringForTextMarkerRange", sentence) };
+    unsafe { CFRelease(sentence) };
+    let text = text.and_then(|text| {
+        let owned = unsafe { cf_string_to_owned(text as CFStringRef) };
+        unsafe { CFRelease(text) };
+        owned
+    })?;
+    crate::context::sentence_containing(&text, word)
+}
+
+/// Reads one parameterized AX attribute, returning a +1 reference the caller
+/// must release.
+unsafe fn copy_parameterized(
+    element: AXUIElementRef,
+    attribute: &str,
+    parameter: CFTypeRef,
+) -> Option<CFTypeRef> {
+    let name = CFString::new(attribute);
+    let mut value: CFTypeRef = std::ptr::null();
+    let err = unsafe {
+        AXUIElementCopyParameterizedAttributeValue(
+            element,
+            name.as_concrete_TypeRef(),
+            parameter,
+            &mut value,
+        )
+    };
+    if err != AX_SUCCESS || value.is_null() {
+        return None;
+    }
+    Some(value)
+}
+
+/// An attribute that holds a range of text.
+unsafe fn copy_range(element: AXUIElementRef, attribute: &str) -> Option<CfRange> {
+    let value = unsafe { copy_attribute(element, attribute) }?;
+    let mut range = CfRange {
+        location: 0,
+        length: 0,
+    };
+    let ok = unsafe { CFGetTypeID(value) } == unsafe { AXValueGetTypeID() }
+        && unsafe { AXValueGetValue(value, AX_VALUE_CF_RANGE, (&raw mut range).cast()) };
+    unsafe { CFRelease(value) };
+    ok.then_some(range)
+}
+
+/// An attribute that holds a number.
+unsafe fn copy_number(element: AXUIElementRef, attribute: &str) -> Option<isize> {
+    let value = unsafe { copy_attribute(element, attribute) }?;
+    let number = if unsafe { CFGetTypeID(value) } == CFNumber::type_id() {
+        unsafe { CFNumber::wrap_under_get_rule(value as CFNumberRef) }.to_i64()
+    } else {
+        None
+    };
+    unsafe { CFRelease(value) };
+    number.and_then(|n| isize::try_from(n).ok())
 }
 
 /// Reads one AX attribute, returning a +1 reference the caller must release.

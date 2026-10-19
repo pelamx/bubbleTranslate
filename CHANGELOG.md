@@ -13,6 +13,20 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**A single word is translated in the sentence it came from, if you have an
+Anthropic key. (macOS, Windows)** Until now a selected word was translated on
+its own. Most words have several meanings, and the translators picked the
+commonest one, so "bank" came out as the building in a sentence about a river.
+Now the word goes to Claude Haiku with the sentence around it, and the
+translation is the meaning that sentence uses. The word's other meanings are
+still listed underneath. This works where the app says what text surrounds a
+selection: text fields, Mail, Notes, TextEdit, Safari and Chrome on a Mac, and
+most Windows apps. Elsewhere, and without a key, a word is translated as
+before. A word costs about a hundredth of a cent, billed to your own
+Anthropic account. You can turn it off in Settings, under the Anthropic key.
+
 ## 0.4.18 — 2026-10-18
 
 **Claude reads and translates the screen, if you have an Anthropic key.** A

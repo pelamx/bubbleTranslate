@@ -270,6 +270,13 @@ pub struct Config {
     /// On by default: a reader's text is where the phrase translators fail
     /// most, and a screen costs a fraction of a cent.
     pub claude_reads_screen: bool,
+    /// With an Anthropic key, a single selected word is translated by Claude
+    /// Haiku together with the sentence it was taken from, where the system
+    /// can say what that sentence is; see
+    /// [`crate::translate::Translator::translate_selection`]. On by default,
+    /// for the reason the screen is: it is where the phrase translators are
+    /// most often wrong, and a word costs a hundredth of a cent.
+    pub claude_word_context: bool,
     /// Google Cloud Vision API key. With one, the screen — a box or the whole
     /// of it — is read by Google instead of on this computer; see
     /// [`crate::vision`]. Empty by default, which keeps every picture here.
@@ -389,6 +396,7 @@ impl Default for Config {
             deepl_api_key: String::new(),
             anthropic_api_key: String::new(),
             claude_reads_screen: true,
+            claude_word_context: true,
             google_vision_api_key: String::new(),
             mymemory_email: String::new(),
             license_key: String::new(),
@@ -516,6 +524,12 @@ impl Config {
     /// chain.
     pub fn screen_goes_to_claude(&self) -> bool {
         self.claude_reads_screen && !self.anthropic_api_key.trim().is_empty()
+    }
+
+    /// Whether a single word with its sentence goes to Claude Haiku before
+    /// the chain.
+    pub fn word_goes_to_claude(&self) -> bool {
+        self.claude_word_context && !self.anthropic_api_key.trim().is_empty()
     }
 }
 

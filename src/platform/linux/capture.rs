@@ -46,6 +46,7 @@ pub fn selected_text(_allow_clipboard: bool, _clipboard_before: Option<isize>) -
     Some(Capture {
         text: trimmed.to_string(),
         via: CaptureSource::PrimarySelection,
+        context: None,
     })
 }
 

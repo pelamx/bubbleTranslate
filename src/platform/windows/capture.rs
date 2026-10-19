@@ -38,7 +38,9 @@ use windows::Win32::System::DataExchange::{
 };
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows::Win32::UI::Accessibility::{
-    CUIAutomation, IUIAutomation, IUIAutomationTextPattern, UIA_TextPatternId,
+    CUIAutomation, IUIAutomation, IUIAutomationTextPattern, IUIAutomationTextRange,
+    TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start, TextUnit_Paragraph,
+    UIA_TextPatternId,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
@@ -87,12 +89,13 @@ pub fn readiness() -> Readiness {
 /// that says nothing over UI Automation simply returns nothing rather than
 /// having its clipboard borrowed.
 pub fn selected_text(allow_clipboard: bool, clipboard_before: Option<isize>) -> Option<Capture> {
-    if let Some(text) = automation_selection() {
+    if let Some((text, context)) = automation_selection() {
         let trimmed = text.trim();
         if !trimmed.is_empty() {
             return Some(Capture {
                 text: trimmed.to_string(),
                 via: CaptureSource::Accessibility,
+                context,
             });
         }
     }
@@ -116,6 +119,7 @@ pub fn selected_text(allow_clipboard: bool, clipboard_before: Option<isize>) -> 
             return Some(Capture {
                 text: trimmed.to_string(),
                 via: CaptureSource::Clipboard,
+                context: None,
             });
         }
     }
@@ -123,6 +127,7 @@ pub fn selected_text(allow_clipboard: bool, clipboard_before: Option<isize>) -> 
     clipboard_selection().map(|text| Capture {
         text,
         via: CaptureSource::Clipboard,
+        context: None,
     })
 }
 
@@ -180,7 +185,7 @@ fn create_automation() -> Option<IUIAutomation> {
 /// its own and fails with `UIA_E_TIMEOUT` rather than hanging, so an
 /// unresponsive application costs a pause here and then falls through to the
 /// clipboard.
-fn automation_selection() -> Option<String> {
+fn automation_selection() -> Option<(String, Option<String>)> {
     let automation = automation()?;
     unsafe {
         let focused = match automation.GetFocusedElement() {
@@ -202,6 +207,7 @@ fn automation_selection() -> Option<String> {
         let count = ranges.Length().ok()?;
 
         let mut parts = Vec::new();
+        let mut context = None;
         for i in 0..count {
             let Ok(range) = ranges.GetElement(i) else {
                 continue;
@@ -212,11 +218,76 @@ fn automation_selection() -> Option<String> {
             if let Ok(text) = range.GetText(-1) {
                 let text = text.to_string();
                 if !text.trim().is_empty() {
+                    // Only a single word is translated in its sentence, so
+                    // only then is the sentence worth the extra calls.
+                    if count == 1 && crate::translate::is_single_word(&text) {
+                        context = sentence_of(&range, &text);
+                    }
                     parts.push(text);
                 }
             }
         }
-        (!parts.is_empty()).then(|| parts.join("\n"))
+        if context.is_some() {
+            crate::trace!("capture   the word's sentence: {context:?}");
+        }
+        (!parts.is_empty()).then(|| (parts.join("\n"), context))
+    }
+}
+
+/// How much text either side of a selection is read, in characters: enough
+/// for the sentence around a word, which [`crate::context`] then cuts out.
+const CONTEXT_REACH: i32 = 400;
+
+/// The sentence the selected `word` sits in: the paragraph around the
+/// selection, read as the part before it and the part after it.
+unsafe fn sentence_of(selection: &IUIAutomationTextRange, word: &str) -> Option<String> {
+    unsafe {
+        let paragraph = selection.Clone().ok()?;
+        paragraph.ExpandToEnclosingUnit(TextUnit_Paragraph).ok()?;
+
+        let before = selection.Clone().ok()?;
+        before
+            .MoveEndpointByRange(
+                TextPatternRangeEndpoint_End,
+                selection,
+                TextPatternRangeEndpoint_Start,
+            )
+            .ok()?;
+        before
+            .MoveEndpointByRange(
+                TextPatternRangeEndpoint_Start,
+                &paragraph,
+                TextPatternRangeEndpoint_Start,
+            )
+            .ok()?;
+
+        let after = selection.Clone().ok()?;
+        after
+            .MoveEndpointByRange(
+                TextPatternRangeEndpoint_Start,
+                selection,
+                TextPatternRangeEndpoint_End,
+            )
+            .ok()?;
+        after
+            .MoveEndpointByRange(
+                TextPatternRangeEndpoint_End,
+                &paragraph,
+                TextPatternRangeEndpoint_End,
+            )
+            .ok()?;
+
+        // The part before is read whole and its end kept: GetText cuts from
+        // the far end, which is the end nearest the word.
+        let lead = before.GetText(-1).ok()?.to_string();
+        let lead: String = {
+            let count = lead.chars().count();
+            lead.chars()
+                .skip(count.saturating_sub(CONTEXT_REACH as usize))
+                .collect()
+        };
+        let rest = after.GetText(CONTEXT_REACH).ok()?.to_string();
+        crate::context::sentence_around(&lead, word, &rest)
     }
 }
 
