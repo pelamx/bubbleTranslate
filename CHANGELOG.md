@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.4.19 — 2026-10-19
 
 **A single word is translated in the sentence it came from, if you have an
 Anthropic key. (macOS, Windows)** Until now a selected word was translated on
