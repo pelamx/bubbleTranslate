@@ -171,6 +171,31 @@ export async function anthropicAccount(env: Env): Promise<Account | string> {
   }
 }
 
+/** Dollars your organisation was billed from the start of `at`'s UTC day to
+ *  now, from the Cost API. The whole of that first day is counted, so a
+ *  figure entered mid-day errs towards less left rather than more. A string
+ *  is why it could not be read. */
+export async function anthropicSpentSince(env: Env, at: number): Promise<number | string> {
+  if (!env.ANTHROPIC_ADMIN_KEY) return "No Anthropic Admin API key is configured.";
+  const start = Math.floor(at / DAY) * DAY;
+  try {
+    const costs = await report(env, "cost_report", [
+      ["starting_at", new Date(start * 1000).toISOString().replace(".000", "")],
+      ["bucket_width", "1d"],
+      ["limit", "31"],
+    ]);
+    if (typeof costs === "string") return costs;
+    let total = 0;
+    for (const b of costs) {
+      for (const r of Array.isArray(b?.results) ? b.results : []) total += num(r?.amount) / 100;
+    }
+    return total;
+  } catch (err) {
+    console.error("could not read the Anthropic cost", err);
+    return "Anthropic could not be reached just now.";
+  }
+}
+
 const num = (v: unknown) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;

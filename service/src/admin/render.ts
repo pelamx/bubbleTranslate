@@ -7,6 +7,7 @@ import { now } from "../tokens";
 import { type Balance, paddleBalance } from "./balance";
 import { anthropicAccount, claudeCard, claudeReported } from "./claude";
 import { deeplAccount, deeplCard, deeplUse } from "./deepl";
+import { credit, haikuCard, wordUse } from "./haiku";
 import { channels, channelsCard, churn, conversionByCountry, conversionCard } from "./growth";
 import { screenCard, screenUse } from "./screen";
 import { COUNTRY_POINTS, LAND_ROWS, MAP_NORTH, MAP_STEP } from "./world";
@@ -1357,7 +1358,7 @@ export function delta(today: number, yesterday: number): string {
 }
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, licCountry, refunds, balance, licBySub, whyCancel, claudeUse, claudeBill, deeplDays, deeplMonth, screen, byChannel, payByCountry, churnMonths] = await Promise.all([
+  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, licCountry, refunds, balance, licBySub, whyCancel, claudeUse, claudeBill, deeplDays, deeplMonth, screen, byChannel, payByCountry, churnMonths, words, haikuCredit] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -1398,6 +1399,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     channels(env),
     conversionByCountry(env),
     churn(env),
+    wordUse(env),
+    credit(env),
   ]);
   const dl = downloadsNow?.total ?? null;
 
@@ -1612,6 +1615,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
 
      <div class="zone" id="analytics">
      ${backendsCard(backends)}
+
+     ${haikuCard(words, haikuCredit, typeof claudeBill === "string" ? null : claudeBill.days)}
 
      ${claudeCard(claudeUse, claudeBill)}
 

@@ -26,6 +26,7 @@ import { grantsAccess, subscriptionById } from "./mirror";
 import { constantTimeEqual, now, sha256Hex } from "./tokens";
 import { DAY, date } from "./admin/shared";
 import { dashboard } from "./admin/render";
+import { setCredit } from "./admin/haiku";
 
 // -- getting in --------------------------------------------------------------
 
@@ -148,6 +149,22 @@ async function markMineLicence(env: Env, request: Request): Promise<Response> {
     await audit(env, "mine", id, form.get("mine") === "1" ? "marked as mine" : "unmarked as mine");
   }
   return new Response(null, { status: 303, headers: { location: "/admin#licences" } });
+}
+
+/** Takes the Anthropic credit balance as the Console shows it, which no API
+ *  will say; the Haiku card counts it down from here. */
+async function saveAnthropicBalance(env: Env, request: Request): Promise<Response> {
+  if (!sameOrigin(request)) return new Response("Cross-site request refused.", { status: 403 });
+  const form = await request.formData();
+  // "$18.40", "18,40" and "18.40" are all the same figure.
+  const raw = String(form.get("dollars") ?? "").replace(/[$\s]/g, "").replace(",", ".");
+  const dollars = Number(raw);
+  if (!/^\d+(\.\d+)?$/.test(raw) || !Number.isFinite(dollars) || dollars > 1_000_000) {
+    return new Response("That is not an amount in dollars.", { status: 400 });
+  }
+  await setCredit(env, dollars, now());
+  await audit(env, "anthropic-balance", null, `balance set to $${dollars.toFixed(2)}`);
+  return new Response(null, { status: 303, headers: { location: "/admin#haiku" } });
 }
 
 // -- acting on it ------------------------------------------------------------
@@ -471,6 +488,7 @@ export async function handleAdmin(
     if (action === "issue") return issue(env, request);
     if (action === "mine") return markMine(env, request);
     if (action === "mine-licence") return markMineLicence(env, request);
+    if (action === "anthropic-balance") return saveAnthropicBalance(env, request);
     if (["extend", "seats", "rotate", "end", "update", "delete"].includes(action)) {
       return act(env, request, action);
     }

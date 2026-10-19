@@ -454,13 +454,29 @@ CREATE TABLE IF NOT EXISTS alerts_sent (
 );
 
 -- How many single words each install had translated in their sentence on a
--- UTC day (see `word.ts`): a count, never the word or the sentence. Both
--- limits are read from here -- per install, and the day's total across all
--- installs. Rows older than a week are dropped as new ones arrive. Added on
--- 2026-10-19.
+-- UTC day (see `word.ts`), and the tokens Claude spent on them: counts, never
+-- the word or the sentence. Both limits are read from here -- per install,
+-- and the day's total across all installs -- and the admin panel's Haiku card
+-- prices the tokens. Rows older than 35 days are dropped as new ones arrive.
+-- Added on 2026-10-19; `input` and `output` the same day, after the table
+-- was already live:
+--   ALTER TABLE word_usage ADD COLUMN input INTEGER NOT NULL DEFAULT 0;
+--   ALTER TABLE word_usage ADD COLUMN output INTEGER NOT NULL DEFAULT 0;
 CREATE TABLE IF NOT EXISTS word_usage (
   day       TEXT NOT NULL,
   install   TEXT NOT NULL,
   requests  INTEGER NOT NULL DEFAULT 0,
+  input     INTEGER NOT NULL DEFAULT 0,
+  output    INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (day, install)
+);
+
+-- The Anthropic credit balance as the operator last read it off the Console,
+-- and when. Anthropic has no API for the balance, so the admin panel takes
+-- this figure and subtracts what the Cost API says was billed since. One row.
+-- Added on 2026-10-19.
+CREATE TABLE IF NOT EXISTS anthropic_balance (
+  id       INTEGER PRIMARY KEY CHECK (id = 1),
+  dollars  REAL    NOT NULL,
+  at       INTEGER NOT NULL
 );

@@ -83,9 +83,10 @@ export async function wordRelay(env: Env, body: any): Promise<Response> {
   )
     .bind(day, install)
     .first<{ requests: number }>();
-  // Nothing reads past a week; the key's leading `day` keeps this cheap.
+  // The admin panel reads 30 days back; the key's leading `day` keeps this
+  // cheap.
   await env.DB.prepare("DELETE FROM word_usage WHERE day < ?")
-    .bind(new Date((t - 7 * 86_400) * 1000).toISOString().slice(0, 10))
+    .bind(new Date((t - 35 * 86_400) * 1000).toISOString().slice(0, 10))
     .run();
   if ((row?.requests ?? 0) > WORD_PER_INSTALL) {
     return refuse("Translating words in their sentence has run out for today.", 429);
@@ -138,6 +139,14 @@ export async function wordRelay(env: Env, body: any): Promise<Response> {
     return refuse("Claude could not translate this.", 502);
   }
   const answer: any = await res.json().catch(() => null);
+  // What it cost, for the admin panel: tokens, never the text.
+  const input = Number(answer?.usage?.input_tokens) || 0;
+  const output = Number(answer?.usage?.output_tokens) || 0;
+  if (input || output) {
+    await env.DB.prepare("UPDATE word_usage SET input = input + ?3, output = output + ?4 WHERE day = ?1 AND install = ?2")
+      .bind(day, install, input, output)
+      .run();
+  }
   if (answer?.stop_reason === "refusal") return refuse("Claude would not translate this.", 502);
   const reply = (answer?.content ?? [])
     .filter((block: any) => block?.type === "text")

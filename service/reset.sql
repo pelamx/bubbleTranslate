@@ -7,6 +7,7 @@
 -- processors -- only the payments can.
 DROP TABLE IF EXISTS admin_log;
 DROP TABLE IF EXISTS word_usage;
+DROP TABLE IF EXISTS anthropic_balance;
 DROP TABLE IF EXISTS webhook_events;
 DROP TABLE IF EXISTS buy_visits;
 DROP TABLE IF EXISTS download_clicks;

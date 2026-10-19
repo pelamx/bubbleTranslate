@@ -26,6 +26,7 @@ beforeEach(() => {
     Response.json({
       stop_reason: "end_turn",
       content: [{ type: "text", text: JSON.stringify({ source: "EN", text: "kıyı" }) }],
+      usage: { input_tokens: 180, output_tokens: 12 },
     });
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     calls.push({ url: String(input), init: init ?? {} });
@@ -89,4 +90,12 @@ it("passes Anthropic's busy signal on as a rate limit, and anything else as a fa
   expect((await ask(bank)).status).toBe(502);
   reply = () => Response.json({ stop_reason: "refusal", content: [] });
   expect((await ask(bank)).status).toBe(502);
+});
+
+it("counts the tokens each install's words took, never the words", async () => {
+  await ask(bank);
+  await ask(bank);
+  const row = await env.DB.prepare("SELECT * FROM word_usage").first<any>();
+  expect(row).toMatchObject({ install: install("a"), requests: 2, input: 360, output: 24 });
+  expect(JSON.stringify(row)).not.toContain("bank");
 });
