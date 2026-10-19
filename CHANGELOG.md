@@ -13,7 +13,30 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.4.20 — 2026-10-19
+
+**A single word is translated in the sentence it came from, without needing an
+Anthropic key.** Until now this needed a key of your own, so most people still
+got a word translated on its own, with its commonest meaning. Now everyone gets
+it: without a key, the word and its sentence go to Claude through
+bubbleTranslate's server, at no cost to you. Nothing is kept there except a
+count of how many words each copy asked for today, which stops one copy from
+using up everyone's share. With a key of your own the word still goes straight
+to Anthropic, as before. If the server cannot be reached, or the day's share is
+used up, the word is translated on its own, as it was before. You can turn it
+off in Settings, under the Anthropic key.
+
+**On Linux the sentence is read off the screen. (Linux)** macOS and Windows can
+ask an application what text surrounds a selection. On Linux a selection
+carries only the selected text, so when you select a single word, the few lines
+around the pointer are read on your computer, the same way Ctrl+Shift+E reads a
+box, and the sentence is taken from them. The picture never leaves your
+computer: only the word and the sentence are sent. It works in any application,
+terminals included, on Hyprland, sway and the other wlroots desktops and on
+X11. GNOME and KDE only take a screenshot through a dialog, so there a word is
+translated on its own, as before. It needs the screen reader to be ready,
+Tesseract or the built-in reader once it has been downloaded, and adds about a
+third of a second.
 
 **The daily usage ping says a little more, and says it about whole days.**
 The once-a-day "in use" ping now also carries how many requests went to Claude
