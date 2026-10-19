@@ -452,3 +452,15 @@ CREATE TABLE IF NOT EXISTS alerts_sent (
   at    INTEGER NOT NULL,
   PRIMARY KEY (kind, day)
 );
+
+-- How many single words each install had translated in their sentence on a
+-- UTC day (see `word.ts`): a count, never the word or the sentence. Both
+-- limits are read from here -- per install, and the day's total across all
+-- installs. Rows older than a week are dropped as new ones arrive. Added on
+-- 2026-10-19.
+CREATE TABLE IF NOT EXISTS word_usage (
+  day       TEXT NOT NULL,
+  install   TEXT NOT NULL,
+  requests  INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, install)
+);

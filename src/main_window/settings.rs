@@ -314,7 +314,7 @@ pub(super) fn providers(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Conf
     ui.add_space(4.0);
     dirty |= ui
         .add_enabled(
-            !cfg.anthropic_api_key.trim().is_empty(),
+            crate::translate::relay_enabled() || !cfg.anthropic_api_key.trim().is_empty(),
             egui::Checkbox::new(
                 &mut cfg.claude_word_context,
                 t(
@@ -369,6 +369,25 @@ pub(super) fn providers(ui: &mut egui::Ui, state: &mut MainState, cfg: &mut Conf
             .size(11.0)
             .color(TEXT_MUTED),
     );
+    // Without a key the word goes through our server, which is worth saying
+    // where the switch is: it is the one place a selection passes through it.
+    if cfg.anthropic_api_key.trim().is_empty() {
+        ui.label(
+            egui::RichText::new(t(
+                "Without an Anthropic key of your own, the word and its sentence go to \
+                 Claude through bubbleTranslate's server, at no cost to you. Nothing is \
+                 kept there but a count.",
+                "Kendi Anthropic anahtarınız yoksa kelime ve cümlesi Claude'a \
+                 bubbleTranslate'in sunucusu üzerinden, size bir maliyeti olmadan gider. \
+                 Orada bir sayaç dışında hiçbir şey saklanmaz.",
+                "Sin una clave de Anthropic propia, la palabra y su frase van a Claude a \
+                 través del servidor de bubbleTranslate, sin coste para usted. Allí no se \
+                 guarda nada salvo un recuento.",
+            ))
+            .size(11.0)
+            .color(TEXT_MUTED),
+        );
+    }
 
     ui.add_space(6.0);
     ui.horizontal(|ui| {

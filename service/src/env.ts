@@ -24,6 +24,10 @@ export interface Env {
    *  admin panel's Claude card reads the organisation's usage and cost with
    *  it. Never on a translation's path. */
   ANTHROPIC_ADMIN_KEY?: string;
+  /** Anthropic key for translating a single word in its sentence, for copies
+   *  without a key of their own (see `word.ts`). Without it the route
+   *  answers 503 and those copies translate the word on its own. */
+  ANTHROPIC_API_KEY?: string;
 
   // -- Paddle ----------------------------------------------------------------
   /** Sandbox until it is set to "production". Chooses both the API host and

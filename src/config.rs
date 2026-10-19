@@ -270,9 +270,10 @@ pub struct Config {
     /// On by default: a reader's text is where the phrase translators fail
     /// most, and a screen costs a fraction of a cent.
     pub claude_reads_screen: bool,
-    /// With an Anthropic key, a single selected word is translated by Claude
-    /// Haiku together with the sentence it was taken from, where the system
-    /// can say what that sentence is; see
+    /// A single selected word is translated by Claude Haiku together with the
+    /// sentence it was taken from, where the system can say what that sentence
+    /// is — on the user's Anthropic key when there is one, through the service
+    /// otherwise; see
     /// [`crate::translate::Translator::translate_selection`]. On by default,
     /// for the reason the screen is: it is where the phrase translators are
     /// most often wrong, and a word costs a hundredth of a cent.
@@ -529,9 +530,11 @@ impl Config {
     }
 
     /// Whether a single word with its sentence goes to Claude Haiku before
-    /// the chain.
+    /// the chain: on the user's own key when there is one, through the
+    /// service otherwise.
     pub fn word_goes_to_claude(&self) -> bool {
-        self.claude_word_context && !self.anthropic_api_key.trim().is_empty()
+        self.claude_word_context
+            && (!self.anthropic_api_key.trim().is_empty() || crate::translate::relay_enabled())
     }
 }
 

@@ -1,9 +1,11 @@
 // The licence service: the routes the app calls, the routes a buyer's browser
 // calls, and the two a payment processor calls.
 //
-// It is deliberately not on the path of a translation, with one exception: the
-// DeepL fallback in `deepl.ts`, asked only once Google and MyMemory have both
-// failed. Otherwise all it does is decide whether a licence key still entitles
+// It is deliberately not on the path of a translation, with two exceptions:
+// the DeepL fallback in `deepl.ts`, asked only once Google and MyMemory have
+// both failed, and a single word translated in its sentence by Claude Haiku in
+// `word.ts`, for copies without an Anthropic key of their own. If either is
+// down the app translates without it. Otherwise all it does is decide whether a licence key still entitles
 // a machine to have its counter lifted, and say so in a token the app can
 // check on its own for up to thirty days. If this service is down, every install degrades to the free
 // daily allowance rather than to a broken app.
@@ -49,6 +51,7 @@ import {
 } from "./licences";
 import { handleAdmin } from "./admin";
 import { deeplRelay } from "./deepl";
+import { wordRelay } from "./word";
 import { pushConversions, type ClickIds } from "./ads";
 import { sendAlerts } from "./alerts";
 import { sendWeeklyReport } from "./report";
@@ -1258,6 +1261,8 @@ async function route(request: Request, env: Env): Promise<Response> {
         return await alive(env, body);
       case "/v1/deepl":
         return await deeplRelay(env, body);
+      case "/v1/word":
+        return await wordRelay(env, body);
       case "/v1/download":
         return await downloadClick(env, body, request);
       case "/v1/activate":

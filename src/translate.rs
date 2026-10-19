@@ -137,7 +137,7 @@ const RELAY_MAX_CHARS: usize = 1500;
 /// Whether a copy without its own DeepL key may use the service's. A
 /// development build stays off the deployed service unless pointed at one,
 /// as the usage ping does, so tests never spend the shared allowance.
-fn relay_enabled() -> bool {
+pub(crate) fn relay_enabled() -> bool {
     !cfg!(debug_assertions) || std::env::var_os("BUBBLETRANSLATE_LICENSE_API").is_some()
 }
 
@@ -1065,6 +1065,42 @@ impl Translator {
         alt: Option<&str>,
         key: &str,
     ) -> Result<Translation, TranslateError> {
+        // Without a key of its own the copy asks the service, which asks
+        // Claude Haiku on its own key with the same prompt.
+        let (translated, detected) = if key.is_empty() {
+            self.claude_word_relayed(word, sentence, target, alt)?
+        } else {
+            self.claude_word_direct(word, sentence, target, alt, key)?
+        };
+        // Which of the two it went into follows from the word's own language,
+        // which the model names reliably; asked to name the one it chose, it
+        // did not.
+        let into = match alt {
+            Some(alt) if same_language(&detected, target) => alt,
+            _ => target,
+        }
+        .to_string();
+        Ok(Translation {
+            target_lang: into,
+            echoed: false,
+            dictionary: Vec::new(),
+            text: translated,
+            source_lang: detected,
+            provider: Provider::Claude,
+        })
+    }
+
+    /// [`Self::claude_word`] on the user's own key: the translation and the
+    /// word's language. The service sends the same prompt for copies without
+    /// one (`service/src/word.ts`); the two should say the same thing.
+    fn claude_word_direct(
+        &self,
+        word: &str,
+        sentence: &str,
+        target: &str,
+        alt: Option<&str>,
+        key: &str,
+    ) -> Result<(String, String), TranslateError> {
         let target_name = crate::config::language_name(target);
         let into = match alt {
             Some(alt) => format!(
@@ -1105,23 +1141,59 @@ impl Translator {
             }],
         });
         let reply = self.ask_claude(key, &body, None)?;
-        let (translated, detected) = parse_claude(&reply)?;
-        // Which of the two it went into follows from the word's own language,
-        // which the model names reliably; asked to name the one it chose, it
-        // did not.
-        let into = match alt {
-            Some(alt) if same_language(&detected, target) => alt,
-            _ => target,
+        parse_claude(&reply)
+    }
+
+    /// [`Self::claude_word`] through the service, for a copy without an
+    /// Anthropic key: the translation and the word's language. Rationed per
+    /// install and per day there; a refusal sends the word down the chain.
+    fn claude_word_relayed(
+        &self,
+        word: &str,
+        sentence: &str,
+        target: &str,
+        alt: Option<&str>,
+    ) -> Result<(String, String), TranslateError> {
+        if !relay_enabled() {
+            return Err(TranslateError::Unavailable("no API key configured".into()));
         }
-        .to_string();
-        Ok(Translation {
-            target_lang: into,
-            echoed: false,
-            dictionary: Vec::new(),
-            text: translated,
-            source_lang: detected,
-            provider: Provider::Claude,
-        })
+        let payload = serde_json::json!({
+            "install": crate::license::install_id(),
+            "word": word,
+            "sentence": sentence,
+            "target": target,
+            "alt": alt,
+        });
+        let response = self
+            .agent
+            .post(format!("{}/v1/word", crate::license::api_base()))
+            .header("Content-Type", "application/json")
+            .send(payload.to_string().as_str())
+            .map_err(|e| TranslateError::Network(e.to_string()))?;
+        let status = response.status().as_u16();
+        let body = response
+            .into_body()
+            .read_to_string()
+            .map_err(|e| TranslateError::Network(e.to_string()))?;
+        match status {
+            200 => {}
+            429 => return Err(TranslateError::RateLimited),
+            503 => {
+                return Err(TranslateError::Unavailable(
+                    "the service cannot translate words in their sentence".into(),
+                ));
+            }
+            other => {
+                let msg = serde_json::from_str::<Value>(&body)
+                    .ok()
+                    .and_then(|v| v.get("error").and_then(Value::as_str).map(str::to_owned));
+                return Err(match msg {
+                    Some(m) => TranslateError::BadResponse(format!("HTTP {other}: {m}")),
+                    None => TranslateError::Http(other),
+                });
+            }
+        }
+        parse_claude(&body)
     }
 
     // -- Claude, for the screen ----------------------------------------------
