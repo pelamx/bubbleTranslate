@@ -50,6 +50,7 @@ import {
 import { handleAdmin } from "./admin";
 import { deeplRelay } from "./deepl";
 import { pushConversions, type ClickIds } from "./ads";
+import { sendAlerts } from "./alerts";
 import { sendWeeklyReport } from "./report";
 import {
   type CancelFailure,
@@ -135,8 +136,25 @@ async function ping(env: Env, body: any, request: Request) {
     .first<{ first_seen: number; source: string | null }>();
   // Only a brand-new install is matched, and only once: an old one already
   // has its answer, or predates the matching and stays unknown.
+  // A store copy was never a website download, so it is not matched to a
+  // download click: that would take the click away from the install that
+  // really came from it.
+  const channel = body.channel === "store" ? "store" : body.channel === "download" ? "download" : null;
   if (row && row.first_seen === t && row.source === null) {
-    await attributeInstall(env, install, os, country, t);
+    if (channel === "store") {
+      await env.DB.prepare("UPDATE installs SET source = 'store' WHERE install = ?").bind(install).run();
+    } else {
+      await attributeInstall(env, install, os, country, t);
+    }
+  }
+  if (channel) {
+    // Its own statement, and allowed to fail: the column is newer than the
+    // table, and a database without it must not lose the install count.
+    try {
+      await env.DB.prepare("UPDATE installs SET channel = ? WHERE install = ?").bind(channel, install).run();
+    } catch (err) {
+      console.error("could not record the channel", err);
+    }
   }
   // Sent by the app the first time in a day the free allowance runs out. The
   // first time is kept, and each new day adds one, so a copy restarted twice
@@ -155,12 +173,20 @@ async function ping(env: Env, body: any, request: Request) {
       .run();
   }
   await recordProviderHealth(env, body.providers, t);
+  // The app keeps its daily counts until a ping is answered with success, so
+  // a failure to store them is the one thing this route does not hide.
+  const dailyKept = await recordDaily(env, install, os, body.daily, t);
   // The privacy policy promises that an install silent for 13 months is
   // forgotten. Done here rather than in the cron, so the promise holds even
   // when no cron runs; the index on last_seen keeps it cheap.
   await env.DB.prepare("DELETE FROM installs WHERE last_seen < ?").bind(t - 396 * 86_400).run();
   await env.DB.prepare("DELETE FROM updates WHERE at < ?").bind(t - 396 * 86_400).run();
-  return new Response(null, { status: 204 });
+  const forgotten = new Date((t - 396 * 86_400) * 1000).toISOString().slice(0, 10);
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM claude_usage WHERE day < ?").bind(forgotten),
+    env.DB.prepare("DELETE FROM screen_usage WHERE day < ?").bind(forgotten),
+  ]);
+  return new Response(null, { status: dailyKept ? 204 : 503 });
 }
 
 /** "Still open", sent every few minutes by a running copy. Only moves
@@ -250,7 +276,9 @@ async function downloadClick(env: Env, body: any, request: Request): Promise<Res
   return new Response(null, { status: 204 });
 }
 
-/// Adds one install's per-backend tallies into the day's totals.
+/// Adds one install's per-backend tallies into the day's totals, as copies
+/// released up to 0.4.18 send them: today's so far, filed under the day the
+/// ping arrived. Later copies send finished days through `recordDaily`.
 ///
 /// Anything unrecognised is dropped rather than rejected: this rides along on a
 /// ping whose answer is ignored, so a malformed field must never cost the caller
@@ -289,6 +317,106 @@ async function recordProviderHealth(env: Env, reported: unknown, t: number) {
       ).bind(day, row.provider, row.ok, row.failed),
     ),
   );
+}
+
+/// Adds one install's day-by-day counts (see `outbox` in the client): which
+/// backends answered, what it asked of Claude on its own key, and how many
+/// screen readings it made or was refused. Each day is the install's own local
+/// date.
+///
+/// The app keeps a day's counts until a ping has delivered them, so a day
+/// usually arrives once, the morning after; a ping that was received but whose
+/// answer was lost sends it again, and that day is counted twice. Nothing in
+/// it is trusted: days outside the last month, unknown sections, odd names and
+/// absurd counts are dropped or clamped, and a malformed entry must never cost
+/// the ping the install count it came for. False only when the rows could not
+/// be written, so the app keeps them for the next ping.
+async function recordDaily(
+  env: Env,
+  install: string,
+  os: string,
+  reported: unknown,
+  t: number,
+): Promise<boolean> {
+  if (!Array.isArray(reported)) return true;
+  const today = Math.floor(t / 86_400);
+  const count = (counts: any, field: string, cap: number) => {
+    const n = Number(counts?.[field]);
+    return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), cap) : 0;
+  };
+  const statements: D1PreparedStatement[] = [];
+  for (const e of reported.slice(0, 128) as any[]) {
+    // A day ahead is a machine east of UTC, not one from the future.
+    const dayNumber = Number(e?.day);
+    if (!Number.isInteger(dayNumber) || dayNumber < today - 31 || dayNumber > today + 1) continue;
+    const day = new Date(dayNumber * 86_400_000).toISOString().slice(0, 10);
+    const name = String(e?.name ?? "").trim();
+    const counts = e?.counts;
+    switch (e?.section) {
+      case "claude": {
+        if (!/^[a-z0-9.-]{1,48}$/.test(name)) continue;
+        const c = {
+          requests: count(counts, "requests", 100_000),
+          failed: count(counts, "failed", 100_000),
+          input: count(counts, "input", 1_000_000_000),
+          output: count(counts, "output", 1_000_000_000),
+          cache_read: count(counts, "cache_read", 1_000_000_000),
+          cache_write: count(counts, "cache_write", 1_000_000_000),
+        };
+        if (!c.requests && !c.failed) continue;
+        statements.push(
+          env.DB.prepare(
+            `INSERT INTO claude_usage (day, install, model, os, requests, failed, input, output, cache_read, cache_write)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT (day, install, model) DO UPDATE SET
+               os = ?4,
+               requests = requests + ?5, failed = failed + ?6,
+               input = input + ?7, output = output + ?8,
+               cache_read = cache_read + ?9, cache_write = cache_write + ?10`,
+          ).bind(day, install, name, os, c.requests, c.failed, c.input, c.output, c.cache_read, c.cache_write),
+        );
+        break;
+      }
+      case "providers": {
+        const provider = name.slice(0, 24);
+        const ok = count(counts, "ok", 1_000_000);
+        const failed = count(counts, "failed", 1_000_000);
+        if (!provider || (!ok && !failed)) continue;
+        statements.push(
+          env.DB.prepare(
+            `INSERT INTO provider_health (day, provider, ok, failed, reports)
+             VALUES (?1, ?2, ?3, ?4, 1)
+             ON CONFLICT (day, provider) DO UPDATE SET
+               ok = ok + ?3, failed = failed + ?4, reports = reports + 1`,
+          ).bind(day, provider, ok, failed),
+        );
+        break;
+      }
+      case "screen": {
+        if (name !== "box" && name !== "page") continue;
+        const done = count(counts, "done", 100_000);
+        const capped = count(counts, "capped", 100_000);
+        if (!done && !capped) continue;
+        statements.push(
+          env.DB.prepare(
+            `INSERT INTO screen_usage (day, install, kind, os, done, capped)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT (day, install, kind) DO UPDATE SET
+               os = ?4, done = done + ?5, capped = capped + ?6`,
+          ).bind(day, install, name, os, done, capped),
+        );
+        break;
+      }
+    }
+  }
+  if (statements.length === 0) return true;
+  try {
+    await env.DB.batch(statements);
+    return true;
+  } catch (err) {
+    console.error("could not record the daily counts", err);
+    return false;
+  }
 }
 
 /** New machines a licence may take in a month beyond its seat limit. */
@@ -1012,8 +1140,8 @@ export default {
   // The weekly report runs off a cron trigger (see wrangler.toml). waitUntil
   // keeps the isolate alive until the mail is sent; the send is best-effort
   // and never throws, so a mail failure cannot fail the scheduled run.
-  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(sendWeeklyReport(env));
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(controller.cron === "0 6 * * *" ? sendAlerts(env) : sendWeeklyReport(env));
   },
 
   async fetch(request: Request, env: Env): Promise<Response> {

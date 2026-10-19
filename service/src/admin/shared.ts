@@ -22,3 +22,32 @@ export const LOCAL_OFFSET = 3 * 3600;
 export function startOfToday(): number {
   return Math.floor((now() + LOCAL_OFFSET) / DAY) * DAY - LOCAL_OFFSET;
 }
+
+/** A slow outside read -- Paddle, Anthropic, DeepL -- kept for `ttl` seconds
+ *  in the colo's cache, so a panel reloaded twice in a minute does not ask
+ *  all of them again. A string is a reason the read failed, and is never
+ *  kept: the next load should try again rather than repeat the failure. */
+export async function cached<T>(key: string, ttl: number, read: () => Promise<T | string>): Promise<T | string> {
+  const cache = caches.default;
+  const request = new Request(`https://admin-cache.invalid/${encodeURIComponent(key)}`);
+  try {
+    const hit = await cache.match(request);
+    if (hit) return (await hit.json()) as T;
+  } catch {
+    // An unreadable entry is a miss.
+  }
+  const value = await read();
+  if (typeof value !== "string") {
+    try {
+      await cache.put(
+        request,
+        new Response(JSON.stringify(value), {
+          headers: { "content-type": "application/json", "cache-control": `max-age=${ttl}` },
+        }),
+      );
+    } catch (err) {
+      console.error(`could not cache ${key}`, err);
+    }
+  }
+  return value;
+}

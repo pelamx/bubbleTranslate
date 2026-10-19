@@ -5,8 +5,12 @@ import { DEFAULT_SEATS, isLive } from "../licences";
 import { LOGO, escapeHtml, page } from "../pages";
 import { now } from "../tokens";
 import { type Balance, paddleBalance } from "./balance";
+import { anthropicAccount, claudeCard, claudeReported } from "./claude";
+import { deeplAccount, deeplCard, deeplUse } from "./deepl";
+import { channels, channelsCard, churn, conversionByCountry, conversionCard } from "./growth";
+import { screenCard, screenUse } from "./screen";
 import { COUNTRY_POINTS, LAND_ROWS, MAP_NORTH, MAP_STEP } from "./world";
-import { DAY, LOCAL_OFFSET, PAGE_SIZE, date, startOfToday } from "./shared";
+import { DAY, LOCAL_OFFSET, PAGE_SIZE, cached, date, startOfToday } from "./shared";
 import {
   HealthRow,
   LicenceCountryRow,
@@ -1353,7 +1357,7 @@ export function delta(today: number, yesterday: number): string {
 }
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
-  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, licCountry, refunds, balance, licBySub, whyCancel] = await Promise.all([
+  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, licCountry, refunds, balance, licBySub, whyCancel, claudeUse, claudeBill, deeplDays, deeplMonth, screen, byChannel, payByCountry, churnMonths] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -1381,9 +1385,19 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     versionCountries(env),
     licenceCountries(env),
     adjustments(env),
-    paddleBalance(env),
+    // The outside reads are kept for five minutes: Paddle's alone can be
+    // twenty requests, and the panel is reloaded far more often than that.
+    cached(`paddle-balance-${env.PADDLE_ENV ?? "sandbox"}`, 300, () => paddleBalance(env)),
     licencesBySubscription(env),
     cancelReasons(env),
+    claudeReported(env),
+    cached("anthropic-account", 300, () => anthropicAccount(env)),
+    deeplUse(env),
+    deeplAccount(env),
+    screenUse(env),
+    channels(env),
+    conversionByCountry(env),
+    churn(env),
   ]);
   const dl = downloadsNow?.total ?? null;
 
@@ -1599,6 +1613,12 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
      <div class="zone" id="analytics">
      ${backendsCard(backends)}
 
+     ${claudeCard(claudeUse, claudeBill)}
+
+     ${deeplCard(deeplDays, deeplMonth)}
+
+     ${screenCard(screen)}
+
      <section class="card">
        <p class="label">Growth &amp; health</p>
        <div class="scroll"><table>
@@ -1632,6 +1652,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
        <p class="label" style="margin-top:22px">Downloads per release</p>
        ${releasesTable(downloadsNow)}
      </section>
+
+     ${channelsCard(byChannel)}
 
      ${activeVersionsCard(ups, pub)}
 
@@ -1725,6 +1747,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
      </div>
 
      ${revenueCard(money, share)}
+
+     ${conversionCard(payByCountry, churnMonths)}
 
      <p class="muted foot">
        Refunds and cancellations should normally be done in Paddle — its

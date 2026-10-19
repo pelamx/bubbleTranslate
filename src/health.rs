@@ -20,6 +20,10 @@ use serde::{Deserialize, Serialize};
 use crate::config::Provider;
 use crate::quota::local_day;
 
+/// What is reported to the service goes through [`crate::outbox`] instead,
+/// under the day it happened: the ping goes out as a day starts, so today's
+/// tallies would arrive all but empty. This file is what `--health` shows.
+///
 /// Today's record, keyed by the provider's own label so the file stays readable
 /// and a provider that is renamed or removed does not make it unparseable.
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -71,12 +75,14 @@ impl Health {
     pub fn answered(&mut self, provider: Provider) {
         self.entry(provider).ok += 1;
         self.save();
+        crate::outbox::add("providers", provider.label(), &[("ok", 1)]);
     }
 
     /// Records that every provider in the chain refused.
     pub fn refused(&mut self, providers: impl IntoIterator<Item = Provider>) {
         for provider in providers {
             self.entry(provider).failed += 1;
+            crate::outbox::add("providers", provider.label(), &[("failed", 1)]);
         }
         self.save();
     }

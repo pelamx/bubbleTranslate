@@ -18,6 +18,7 @@
 // see `shell::attach_console`.
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
+mod claude_usage;
 mod config;
 mod context;
 mod engine;
@@ -26,6 +27,7 @@ mod i18n;
 mod ipc;
 mod license;
 mod main_window;
+mod outbox;
 mod page;
 mod picture;
 mod platform;

@@ -16,3 +16,6 @@ DROP TABLE IF EXISTS licences;
 DROP TABLE IF EXISTS service_keys;
 DROP TABLE IF EXISTS paddle_subscriptions;
 DROP TABLE IF EXISTS paddle_customers;
+DROP TABLE IF EXISTS claude_usage;
+DROP TABLE IF EXISTS screen_usage;
+DROP TABLE IF EXISTS alerts_sent;

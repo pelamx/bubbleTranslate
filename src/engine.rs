@@ -330,6 +330,7 @@ fn run(
                 let at = crate::platform::cursor_position();
                 crate::trace!("page      screen readings left {left:?}");
                 if left == Some(0) {
+                    crate::outbox::add("screen", "page", &[("capped", 1)]);
                     report_capped(&config);
                     let _ = ui.send(UiEvent::OcrCapped { at });
                     wake_ui();
@@ -337,6 +338,7 @@ fn run(
                 }
                 PAGE_BUSY.store(true, std::sync::atomic::Ordering::Relaxed);
                 if translate_page(&translator, &cfg, &ui, &wake_ui, at, left) {
+                    crate::outbox::add("screen", "page", &[("done", 1)]);
                     licensing.quota.lock().unwrap().record_ocr();
                     page_closed = Some(Instant::now());
                 }
@@ -471,6 +473,7 @@ fn run(
                 // left today should not be made to draw a box first.
                 let entitlement = licensing.license.lock().unwrap().entitlement.clone();
                 if licensing.quota.lock().unwrap().ocr_left(&entitlement) == Some(0) {
+                    crate::outbox::add("screen", "box", &[("capped", 1)]);
                     report_capped(&config);
                     let _ = ui.send(UiEvent::OcrCapped {
                         at: crate::platform::cursor_position(),
@@ -567,6 +570,7 @@ fn run(
                     licensing.quota.lock().unwrap().record(&text);
                 }
                 if screen_read && !result.echoed {
+                    crate::outbox::add("screen", "box", &[("done", 1)]);
                     licensing.quota.lock().unwrap().record_ocr();
                 }
                 health.answered(result.provider);

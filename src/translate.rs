@@ -893,9 +893,15 @@ impl Translator {
         if let Some(timeout) = timeout {
             request = request.config().timeout_global(Some(timeout)).build();
         }
-        let response = request
-            .send(body.to_string().as_str())
-            .map_err(|e| TranslateError::Network(e.to_string()))?;
+        // Counted for the daily ping, see [`crate::claude_usage`].
+        let model = body
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or("claude");
+        let response = request.send(body.to_string().as_str()).map_err(|e| {
+            crate::claude_usage::failed(model);
+            TranslateError::Network(e.to_string())
+        })?;
 
         let status = response.status().as_u16();
         let raw = response
@@ -903,7 +909,13 @@ impl Translator {
             .with_config()
             .limit(16 * 1024 * 1024)
             .read_to_string()
-            .map_err(|e| TranslateError::Network(e.to_string()))?;
+            .map_err(|e| {
+                crate::claude_usage::failed(model);
+                TranslateError::Network(e.to_string())
+            })?;
+        if status != 200 {
+            crate::claude_usage::failed(model);
+        }
 
         match status {
             200 => {}
@@ -935,6 +947,9 @@ impl Translator {
 
         let json: Value = serde_json::from_str(&raw)
             .map_err(|e| TranslateError::BadResponse(format!("not JSON ({e})")))?;
+        // Before the reply is judged: a refusal or a cut-off answer is billed
+        // all the same.
+        crate::claude_usage::answered(model, json.get("usage"));
         match json.get("stop_reason").and_then(Value::as_str) {
             // Declined rather than failed: asking again will not change it,
             // and the next provider in the chain may well translate it.

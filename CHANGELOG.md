@@ -13,6 +13,21 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**The daily usage ping says a little more, and says it about whole days.**
+The once-a-day "in use" ping now also carries how many requests went to Claude
+on your own Anthropic key and how many tokens they used, how many screen
+readings you made and whether you ran out of the free ones, and whether this
+copy came from the website or from a store. As before, it is only counts:
+never the text, the picture, the languages or your key. Claude requests go
+from your computer straight to Anthropic, so until now there was no way to
+know what reading the screen through Claude costs people, or whether it is
+failing for them. Counts are now sent for each finished day, so they are
+complete. Before, the ping went out as the day began and carried almost
+nothing. The ping can still be turned off the same way as before, and that
+stops all of it.
+
 ## 0.4.19 — 2026-10-19
 
 **A single word is translated in the sentence it came from, if you have an

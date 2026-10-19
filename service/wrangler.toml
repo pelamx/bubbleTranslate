@@ -12,7 +12,9 @@ routes = [{ pattern = "api.bubbletranslate.app", custom_domain = true }]
 # Monday at 08:00 UTC. It reads D1 and emails a plain-language summary via
 # Resend. Off the request path entirely -- it never touches a checkout.
 [triggers]
-crons = ["0 8 * * 1"]
+# Monday 08:00 UTC: the weekly report. Every day 06:00 UTC (09:00 in Turkey):
+# the alerts, see alerts.ts.
+crons = ["0 8 * * 1", "0 6 * * *"]
 
 # Local `wrangler dev` ignores database_id and uses a SQLite file under
 # .wrangler/. Replace it with the real one from `wrangler d1 create` before

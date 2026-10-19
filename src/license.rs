@@ -547,13 +547,18 @@ fn post(agent: &ureq::Agent, route: &str, body: serde_json::Value) -> Result<Gra
 }
 
 /// Tells the service this install is in use today: an opaque install id, the
-/// OS, the app version, whether it is on Pro, and how each backend fared today.
-/// Nothing else — no text, no language, no licence. Best effort and silent; the
-/// answer is ignored.
+/// OS, the app version, which channel it came from, whether it is on Pro, and
+/// the day-by-day counts in [`crate::outbox`] — how each backend fared, how
+/// many Claude requests and tokens went out on this copy's own key, and how
+/// many screen readings were made or refused. Nothing else — no text, no
+/// language, no licence. Best effort and silent; the answer is only read to
+/// know the counts arrived.
 ///
 /// The backend tallies are here because the leading provider is an undocumented
 /// endpoint that can start refusing at any time (see [`crate::health`]). Without
-/// them, a day when it breaks for everyone looks exactly like a quiet day.
+/// them, a day when it breaks for everyone looks exactly like a quiet day. The
+/// Claude counts are here because nothing else can say what reading the screen
+/// through Claude costs the people who do it (see [`crate::claude_usage`]).
 pub fn ping(agent: &ureq::Agent, pro: bool) {
     #[cfg(debug_assertions)]
     if std::env::var_os("BUBBLETRANSLATE_LICENSE_API").is_none() {
@@ -561,7 +566,8 @@ pub fn ping(agent: &ureq::Agent, pro: bool) {
         // purpose, so running the tests does not inflate the numbers.
         return;
     }
-    let _ = agent
+    let daily = crate::outbox::unsent();
+    let sent = agent
         .post(format!("{}/v1/ping", api_base()))
         .header("Content-Type", "application/json")
         .send(
@@ -569,24 +575,20 @@ pub fn ping(agent: &ureq::Agent, pro: bool) {
                 "install": install_id(),
                 "os": std::env::consts::OS,
                 "app": env!("CARGO_PKG_VERSION"),
+                // A store copy is updated by its store and was never a
+                // website download, so it is counted apart.
+                "channel": if cfg!(feature = "store") { "store" } else { "download" },
                 "plan": if pro { "pro" } else { "free" },
-                // Counts only, keyed by the backend's name: which of them
-                // answered, and which were asked and could not. Nothing about
-                // what was translated.
-                "providers": crate::health::Health::load()
-                    .today()
-                    .into_iter()
-                    .map(|(provider, tally)| {
-                        (
-                            provider.label().to_string(),
-                            serde_json::json!({ "ok": tally.ok, "failed": tally.failed }),
-                        )
-                    })
-                    .collect::<serde_json::Map<_, _>>(),
+                // Counts only, per local day: every day not yet delivered.
+                "daily": crate::outbox::to_json(&daily),
             })
             .to_string()
             .as_str(),
         );
+    // Kept for the next ping unless the service took this one.
+    if !daily.is_empty() && sent.is_ok_and(|r| r.status().is_success()) {
+        crate::outbox::delivered(&daily);
+    }
 }
 
 /// Tells the service this copy is still open: the install id and nothing else.

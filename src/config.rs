@@ -364,8 +364,10 @@ pub struct Config {
     /// The bubble's colour scheme. See [`BubbleTheme`].
     pub theme: BubbleTheme,
     /// Send one anonymous "in use today" ping a day: an install id, the OS,
-    /// the version and free/pro. It is how the number of people using the
-    /// app is known at all. Between those, while the app is open, a bare
+    /// the version, the channel and free/pro, with counts per day — which
+    /// backends answered, how many Claude requests and tokens went out on the
+    /// user's own key, how many screen readings were made or refused. It is
+    /// how the number of people using the app is known at all. Between those, while the app is open, a bare
     /// "still open" with only the install id every five minutes. Never the
     /// text, never the languages.
     pub usage_ping: bool,

@@ -217,6 +217,12 @@ CREATE INDEX IF NOT EXISTS paddle_adjustments_by_created
 -- It is what the panel's "Online now" counts. Added on 2026-10-06 with
 --   ALTER TABLE installs ADD COLUMN alive_at INTEGER;
 --   CREATE INDEX IF NOT EXISTS installs_by_alive_at ON installs (alive_at);
+--
+-- `channel` is where the copy came from: 'download' for the website build,
+-- 'store' for a Microsoft Store or Mac App Store build. NULL for copies older
+-- than the field. A store install's `source` is 'store', never a download
+-- click. Added on 2026-10-19 with
+--   ALTER TABLE installs ADD COLUMN channel TEXT;
 CREATE TABLE IF NOT EXISTS installs (
   install      TEXT PRIMARY KEY,
   os           TEXT,
@@ -229,7 +235,8 @@ CREATE TABLE IF NOT EXISTS installs (
   last_capped  INTEGER,
   capped_days  INTEGER NOT NULL DEFAULT 0,
   source       TEXT,
-  alive_at     INTEGER
+  alive_at     INTEGER,
+  channel      TEXT
 );
 
 CREATE INDEX IF NOT EXISTS installs_by_last_seen ON installs (last_seen);
@@ -401,4 +408,47 @@ CREATE TABLE IF NOT EXISTS deepl_usage (
   requests  INTEGER NOT NULL DEFAULT 0,
   chars     INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (day, install)
+);
+
+-- What each install asked of Claude on its own Anthropic key, per local day
+-- and model, as the daily ping reports it: requests and tokens, never the text.
+-- The service is not on that path -- the app talks to Anthropic directly -- so
+-- this is the only record of what reading the screen through Claude costs the
+-- people who do it. `day` is the install's own local date. Kept as long as an
+-- install is. Added on 2026-10-19.
+CREATE TABLE IF NOT EXISTS claude_usage (
+  day          TEXT    NOT NULL,
+  install      TEXT    NOT NULL,
+  model        TEXT    NOT NULL,
+  os           TEXT,
+  requests     INTEGER NOT NULL DEFAULT 0,
+  failed       INTEGER NOT NULL DEFAULT 0,
+  input        INTEGER NOT NULL DEFAULT 0,
+  output       INTEGER NOT NULL DEFAULT 0,
+  cache_read   INTEGER NOT NULL DEFAULT 0,
+  cache_write  INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, install, model)
+);
+
+-- Screen readings per install, local day and kind ('box' or 'page'), as the
+-- daily ping reports them: how many came back translated, and how many were
+-- refused because the day's free readings were spent. Counts only. Added on
+-- 2026-10-19.
+CREATE TABLE IF NOT EXISTS screen_usage (
+  day      TEXT    NOT NULL,
+  install  TEXT    NOT NULL,
+  kind     TEXT    NOT NULL,
+  os       TEXT,
+  done     INTEGER NOT NULL DEFAULT 0,
+  capped   INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, install, kind)
+);
+
+-- Which alert was emailed on which UTC day (see `alerts.ts`), so each kind is
+-- sent at most once a day however often the cron runs. Added on 2026-10-19.
+CREATE TABLE IF NOT EXISTS alerts_sent (
+  kind  TEXT    NOT NULL,
+  day   TEXT    NOT NULL,
+  at    INTEGER NOT NULL,
+  PRIMARY KEY (kind, day)
 );
