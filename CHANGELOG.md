@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.4.21 — 2026-10-20
 
 **Anonymous diagnostics now show which parts of the app work for people.**
 bubbleTranslate counts successful translations separately for selected text,
