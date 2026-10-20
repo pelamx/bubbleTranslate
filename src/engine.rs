@@ -172,7 +172,8 @@ fn run(
     ui: Sender<UiEvent>,
     wake_ui: impl Fn(),
 ) {
-    let translator = Translator::new();
+    let mut translator = Translator::new();
+    let mut translation_timeout = Duration::from_secs(10);
     // Rolled over by the day like the counter, and written beside it. Loaded
     // once here rather than per translation: this thread is the only writer.
     let mut health = Health::load();
@@ -237,10 +238,19 @@ fn run(
         #[cfg_attr(not(debug_assertions), allow(unused_mut))]
         let (mut cfg, debounce) = {
             let guard = config.lock().unwrap();
-            (guard.clone(), Duration::from_millis(guard.debounce_ms))
+            let mut effective = guard.clone();
+            crate::telemetry::enable(effective.usage_ping);
+            crate::remote::apply(&mut effective);
+            let delay = Duration::from_millis(effective.debounce_ms);
+            (effective, delay)
         };
         #[cfg(debug_assertions)]
         crate::translate::use_development_key(&mut cfg);
+        let next_timeout = crate::remote::translation_timeout();
+        if next_timeout != translation_timeout {
+            translator = Translator::with_timeout(next_timeout);
+            translation_timeout = next_timeout;
+        }
         // Whoever reads the screen for this request reads it with Google
         // Vision if a key is set now, and on this computer if not.
         crate::vision::set_key(&cfg.google_vision_api_key);
@@ -255,10 +265,12 @@ fn run(
         // through to the selection pipeline below.
         request = match request {
             Request::Manual(text) => {
+                crate::telemetry::record("manual", "attempt");
                 let entitlement = licensing.license.lock().unwrap().entitlement.clone();
                 let verdict = licensing.quota.lock().unwrap().verdict(&text, &entitlement);
                 let event = if let Verdict::Capped { used, limit } = verdict {
                     report_capped(&config);
+                    crate::telemetry::record("manual", "capped");
                     UiEvent::ManualCapped { used, limit }
                 } else {
                     match translator.translate(&text, &cfg) {
@@ -268,9 +280,16 @@ fn run(
                             if verdict == Verdict::Allow {
                                 licensing.quota.lock().unwrap().record(&text);
                             }
+                            crate::telemetry::record(
+                                "manual",
+                                if result.echoed { "echoed" } else { "ok" },
+                            );
                             UiEvent::ManualDone(result)
                         }
-                        Err(errors) => UiEvent::ManualFailed(errors),
+                        Err(errors) => {
+                            crate::telemetry::failed("manual", &errors);
+                            UiEvent::ManualFailed(errors)
+                        }
                     }
                 };
                 let _ = ui.send(event);
@@ -325,11 +344,13 @@ fn run(
                 if page_closed.is_some_and(|at: Instant| at.elapsed() < PAGE_REPEAT) {
                     continue;
                 }
+                crate::telemetry::record("ocr_page", "attempt");
                 let entitlement = licensing.license.lock().unwrap().entitlement.clone();
                 let left = licensing.quota.lock().unwrap().ocr_left(&entitlement);
                 let at = crate::platform::cursor_position();
                 crate::trace!("page      screen readings left {left:?}");
                 if left == Some(0) {
+                    crate::telemetry::record("ocr_page", "capped");
                     crate::outbox::add("screen", "page", &[("capped", 1)]);
                     report_capped(&config);
                     let _ = ui.send(UiEvent::OcrCapped { at });
@@ -338,6 +359,7 @@ fn run(
                 }
                 PAGE_BUSY.store(true, std::sync::atomic::Ordering::Relaxed);
                 if translate_page(&translator, &cfg, &ui, &wake_ui, at, left) {
+                    crate::telemetry::record("ocr_page", "ok");
                     crate::outbox::add("screen", "page", &[("done", 1)]);
                     licensing.quota.lock().unwrap().record_ocr();
                     page_closed = Some(Instant::now());
@@ -386,6 +408,7 @@ fn run(
         // on the same words means "again", not "the same gesture twice".
         let asked_for = matches!(request, Request::Hotkey(_) | Request::ScreenRegion);
         let screen_read = matches!(request, Request::ScreenRegion);
+        let retranslating = matches!(request, Request::Retranslate);
 
         // The last element is whether the allowance applies. Re-reading the
         // same selection in another language is the same translation, so
@@ -427,12 +450,17 @@ fn run(
                     crate::trace!("skip      auto-translate is off");
                     continue;
                 }
+                crate::telemetry::record("selection", "attempt");
                 let Some(capture) =
                     capture::selected_text(cfg.clipboard_fallback, trigger.clipboard_before)
                 else {
+                    crate::telemetry::record("selection", "capture_empty");
                     crate::trace!("capture   nothing (AX empty, clipboard produced nothing)");
                     continue;
                 };
+                if capture.via == CaptureSource::Clipboard {
+                    crate::telemetry::record("clipboard", "attempt");
+                }
                 let text = capture.text;
                 let chars = text.chars().count();
                 crate::trace!(
@@ -441,6 +469,7 @@ fn run(
                     truncate_for_log(&text),
                 );
                 if chars < cfg.min_chars || chars > cfg.max_chars {
+                    crate::telemetry::record(crate::telemetry::source(capture.via), "filtered");
                     crate::trace!(
                         "skip      {chars} chars outside [{}, {}]",
                         cfg.min_chars,
@@ -469,10 +498,12 @@ fn run(
                 (text, trigger.at, capture.via, true, None, context)
             }
             Request::ScreenRegion => {
+                crate::telemetry::record("ocr_box", "attempt");
                 // Asked before the overlay goes up: someone with no readings
                 // left today should not be made to draw a box first.
                 let entitlement = licensing.license.lock().unwrap().entitlement.clone();
                 if licensing.quota.lock().unwrap().ocr_left(&entitlement) == Some(0) {
+                    crate::telemetry::record("ocr_box", "capped");
                     crate::outbox::add("screen", "box", &[("capped", 1)]);
                     report_capped(&config);
                     let _ = ui.send(UiEvent::OcrCapped {
@@ -486,6 +517,7 @@ fn run(
                 // it — this one already waits on captures and providers, and
                 // the UI thread must stay free to keep drawing the bubble.
                 let Some(read) = crate::platform::read_screen_region() else {
+                    crate::telemetry::record("ocr_box", "cancelled_or_unavailable");
                     continue;
                 };
                 let text = read.capture.text;
@@ -501,6 +533,7 @@ fn run(
                 // read, finding too little here is no reason to stop.
                 let too_short = chars < cfg.min_chars && read.picture.is_none();
                 if too_short || chars > cfg.max_chars {
+                    crate::telemetry::record("ocr_box", "filtered");
                     crate::trace!(
                         "skip      {chars} chars outside [{}, {}]",
                         cfg.min_chars,
@@ -526,6 +559,7 @@ fn run(
             match gate(verdict, at) {
                 Gate::Translate { charge } => chargeable = charge,
                 Gate::Refuse(event) => {
+                    crate::telemetry::record(crate::telemetry::source(via), "capped");
                     report_capped(&config);
                     let _ = ui.send(event);
                     wake_ui();
@@ -562,8 +596,14 @@ fn run(
             // A single word with its sentence is translated in it.
             translator.translate_selection(&text, context.as_deref(), &cfg)
         };
+        let feature = if retranslating {
+            "retranslate"
+        } else {
+            crate::telemetry::source(via)
+        };
         let event = match outcome {
             Ok(result) => {
+                crate::telemetry::record(feature, if result.echoed { "echoed" } else { "ok" });
                 // Counted here rather than above: a translation nobody
                 // received is not one the user should have paid for.
                 if charges(chargeable, &result) {
@@ -586,6 +626,7 @@ fn run(
                 }
             }
             Err(errors) => {
+                crate::telemetry::failed(feature, &errors);
                 for (provider, err) in &errors {
                     crate::trace!("translate {} FAILED: {err}", provider.label());
                 }
@@ -618,6 +659,7 @@ fn translate_page(
 ) -> bool {
     // Photographed before the bubble comes up, so it is not in the picture.
     let Some(shot) = crate::platform::capture_page() else {
+        crate::telemetry::record("ocr_page", "capture_failed");
         // Nothing to photograph, or nothing to read it with. Either way the
         // key did something, and the user is owed that much.
         let _ = ui.send(UiEvent::Unreadable { at });
@@ -638,6 +680,7 @@ fn translate_page(
         started.elapsed()
     );
     if blocks.is_empty() {
+        crate::telemetry::record("ocr_page", "ocr_empty");
         // The picture was taken and held no words this could replace. The
         // commonest reason by far is a reader with no pack for the language
         // on the screen: it says nothing, it simply reads nothing.
@@ -656,6 +699,7 @@ fn translate_page(
     let translated = match translator.translate_many(&texts, picture.as_deref(), cfg) {
         Ok(translated) => translated,
         Err(errors) => {
+            crate::telemetry::failed("ocr_page", &errors);
             for (provider, err) in &errors {
                 crate::trace!("translate {} FAILED: {err}", provider.label());
             }
@@ -688,6 +732,15 @@ fn translate_page(
         })
         .collect();
 
+    if pairs.is_empty() {
+        crate::telemetry::record("ocr_page", "no_translated_blocks");
+        let _ = ui.send(UiEvent::Unreadable { at });
+        wake_ui();
+        return false;
+    }
+    if pairs.len() < texts.len() {
+        crate::telemetry::record("ocr_page", "partial");
+    }
     let _ = ui.send(UiEvent::Dismiss);
     wake_ui();
     // Long enough for the bubble's window to be gone before the picture

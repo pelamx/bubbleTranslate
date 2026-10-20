@@ -82,7 +82,7 @@ pub fn escape_down() -> Option<bool> {
     }
 }
 
-/// Sends Ctrl+C to whatever has keyboard focus, as the compositor itself.
+/// Sends Ctrl+C or Ctrl+Insert to the focused application.
 ///
 /// Not a virtual keyboard: on one of those the modifiers the user is still
 /// physically holding merge into the chord at the seat, and Shift held from
@@ -90,13 +90,18 @@ pub fn escape_down() -> Option<bool> {
 /// inspector in a browser. `send_key_state` carries its own modifier mask.
 /// The press and release are split for the reason Omarchy's own copy binding
 /// splits them: `send_shortcut` can leave the key stuck repeating.
-pub fn send_copy() -> bool {
-    let lua = "hl.dispatch(hl.dsp.send_key_state({ mods = 'CTRL', key = 'C', state = 'down' })) \
+pub fn send_copy(key: &str) -> bool {
+    // Only fixed copy keysyms may enter the compositor command.
+    if !matches!(key, "C" | "Insert") {
+        return false;
+    }
+    let lua = "hl.dispatch(hl.dsp.send_key_state({ mods = 'CTRL', key = 'BT_COPY_KEY', state = 'down' })) \
                hl.timer(function() \
-                 hl.dispatch(hl.dsp.send_key_state({ mods = 'CTRL', key = 'C', state = 'up' })) \
+                 hl.dispatch(hl.dsp.send_key_state({ mods = 'CTRL', key = 'BT_COPY_KEY', state = 'up' })) \
                end, { timeout = 30, type = 'oneshot' }) \
                error('BT_SENT')";
-    hyprland_eval(lua).is_some_and(|reply| reply.contains("BT_SENT"))
+    let lua = lua.replace("BT_COPY_KEY", key);
+    hyprland_eval(&lua).is_some_and(|reply| reply.contains("BT_SENT"))
 }
 
 /// The class of the window with keyboard focus, lowercased.

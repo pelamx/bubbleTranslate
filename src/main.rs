@@ -32,7 +32,9 @@ mod page;
 mod picture;
 mod platform;
 mod quota;
+mod remote;
 mod speech;
+mod telemetry;
 mod trace;
 mod translate;
 mod ui;
@@ -197,6 +199,9 @@ fn main() -> eframe::Result<()> {
     }
 
     let (loaded_config, loaded_quota) = load_state();
+    telemetry::enable(loaded_config.usage_ping);
+    telemetry::install_panic_hook();
+    telemetry::record("app", "started");
     i18n::set(loaded_config.ui_lang);
     let config = Arc::new(Mutex::new(loaded_config));
     #[cfg(target_os = "linux")]
@@ -229,6 +234,7 @@ fn main() -> eframe::Result<()> {
     // is where the compositor's protocols are probed.
     let readiness = capture::readiness();
     if !readiness.ok {
+        telemetry::record("app", "capture_not_ready");
         eprintln!("bubbleTranslate: {}", readiness.detail);
         // Open the page rather than leave the sentence to be followed. The
         // system's own dialog offers the same trip, but only once and only if
@@ -285,7 +291,9 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
-    eframe::run_native(
+    let final_config = config.clone();
+    let final_license = licensing.license.clone();
+    let result = eframe::run_native(
         "bubbleTranslate",
         options,
         Box::new(move |cc| {
@@ -303,16 +311,12 @@ fn main() -> eframe::Result<()> {
                 engine.request(Request::RefreshLicense);
             }
 
-            // One anonymous ping a day while running, and a bare "still open"
-            // every five minutes between them; see `Config::usage_ping`.
-            // Re-read every turn, so switching it off in the config stops the
-            // next one without a restart. Checked each turn against the local
-            // day rather than slept for 24 hours: a sleep does not advance
-            // while the machine is suspended, so a laptop closed every night
-            // would otherwise go days without being counted.
+            // Content-free cumulative metrics and presence every five minutes.
+            // Re-read consent each turn; remote controls do not depend on analytics.
             {
                 let config = config.clone();
                 let license = licensing.license.clone();
+                let ctx = cc.egui_ctx.clone();
                 std::thread::spawn(move || {
                     let agent = ureq::Agent::new_with_config(
                         ureq::Agent::config_builder()
@@ -321,17 +325,15 @@ fn main() -> eframe::Result<()> {
                             .user_agent(concat!("bubbleTranslate/", env!("CARGO_PKG_VERSION")))
                             .build(),
                     );
-                    let mut pinged_on: Option<i64> = None;
+                    // Flush cumulative metrics every five minutes, including during day one.
                     loop {
-                        if config.lock().unwrap().usage_ping {
-                            let day = quota::local_day();
-                            if pinged_on != Some(day) {
-                                pinged_on = Some(day);
-                                let pro = license.lock().unwrap().entitlement.is_pro();
-                                license::ping(&agent, pro);
-                            } else {
-                                license::alive(&agent);
-                            }
+                        remote::refresh(&agent);
+                        ctx.request_repaint();
+                        let enabled = config.lock().unwrap().usage_ping;
+                        telemetry::enable(enabled);
+                        if enabled {
+                            let pro = license.lock().unwrap().entitlement.is_pro();
+                            license::ping(&agent, pro);
                         }
                         std::thread::sleep(std::time::Duration::from_secs(300));
                     }
@@ -427,6 +429,7 @@ fn main() -> eframe::Result<()> {
                 // applies the switch instead; it can afford to wait for it.
                 let _ = requests.send(Request::Selection(trigger));
             }) {
+                telemetry::record("app", "monitor_failed");
                 eprintln!("bubbleTranslate: could not start the selection monitor: {err}");
             }
 
@@ -434,7 +437,25 @@ fn main() -> eframe::Result<()> {
                 cc, config, engine, ui_rx, warning, main, licensing, background,
             )))
         }),
-    )
+    );
+    if result.is_err() {
+        telemetry::record("app", "renderer_failed");
+    }
+    // Short sessions may finish before the next five-minute flush. The UI is
+    // already closed, and shutdown waits at most three seconds for this attempt.
+    let enabled = final_config.lock().unwrap().usage_ping;
+    telemetry::enable(enabled);
+    if enabled {
+        let agent = ureq::Agent::new_with_config(
+            ureq::Agent::config_builder()
+                .timeout_global(Some(std::time::Duration::from_secs(3)))
+                .http_status_as_error(false)
+                .build(),
+        );
+        let pro = final_license.lock().unwrap().entitlement.is_pro();
+        license::ping(&agent, pro);
+    }
+    result
 }
 
 /// `bubbleTranslate --license`: says what this install is entitled to and how

@@ -35,13 +35,13 @@ trap 'rm -f "$STAGE_BIN"' EXIT
 ARM="aarch64-apple-darwin"
 INTEL="x86_64-apple-darwin"
 
-cargo build --release --target "$ARM"
+cargo build --locked --release --target "$ARM"
 
 # Intel is best-effort: without its std the build still produces a working
 # Apple Silicon app, which is better than failing the release outright. The
 # warning is loud because shipping that DMG excludes every Intel Mac.
 if rustup target list --installed 2>/dev/null | grep -qx "$INTEL"; then
-    cargo build --release --target "$INTEL"
+    cargo build --locked --release --target "$INTEL"
     lipo -create -output "$STAGE_BIN" \
         "target/$ARM/release/bubbleTranslate" \
         "target/$INTEL/release/bubbleTranslate"

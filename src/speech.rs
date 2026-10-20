@@ -35,6 +35,7 @@ pub fn available(lang: &str) -> bool {
 
 /// Starts reading `text` in `lang`, stopping whatever was being read.
 pub fn speak(text: &str, lang: &str) {
+    crate::telemetry::record("speech", "attempt");
     stop();
     let lang = base(lang);
     let text: String = text.chars().take(MAX_CHARS).collect();
@@ -45,8 +46,14 @@ pub fn speak(text: &str, lang: &str) {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     match cmd.spawn() {
-        Ok(child) => *CURRENT.lock().unwrap() = Some((child, lang.to_string())),
-        Err(e) => crate::trace!("speech    could not start: {e}"),
+        Ok(child) => {
+            crate::telemetry::record("speech", "started");
+            *CURRENT.lock().unwrap() = Some((child, lang.to_string()));
+        }
+        Err(e) => {
+            crate::telemetry::record("speech", "start_failed");
+            crate::trace!("speech    could not start: {e}");
+        }
     }
 }
 

@@ -1,12 +1,9 @@
 //! Daily counts waiting for the next ping.
 //!
-//! The daily ping goes out when the app starts on a new day (see
-//! [`crate::license::ping`]), so anything it reported "for today" would almost
-//! always be empty: the day had barely begun. Instead each count is added
-//! here under the local day it happened, and the ping carries every day not
-//! yet delivered. Only once the service has answered with success are those
-//! amounts taken off; a count added while the ping was in flight stays for the
-//! next one.
+//! Pings flush these counts every five minutes. Counts remain under the local
+//! day they happened, including across restarts and offline days. Only after
+//! a successful service response are the sent amounts subtracted; counts added
+//! while a request was in flight stay for the next delivery.
 //!
 //! A count is a section, a name and a field: `claude` / `claude-haiku-5-5` /
 //! `input`, `providers` / `Google` / `ok`, `screen` / `page` / `done`. Counts

@@ -50,6 +50,7 @@ import {
   sweepRevealedKeys,
 } from "./licences";
 import { handleAdmin } from "./admin";
+import { recordMetrics, remoteSettings } from "./observability";
 import { deeplRelay } from "./deepl";
 import { wordRelay } from "./word";
 import { pushConversions, type ClickIds } from "./ads";
@@ -179,6 +180,7 @@ async function ping(env: Env, body: any, request: Request) {
   // The app keeps its daily counts until a ping is answered with success, so
   // a failure to store them is the one thing this route does not hide.
   const dailyKept = await recordDaily(env, install, os, body.daily, t);
+  const metricsKept = await recordMetrics(env, install, os, channel ?? "download", body.metrics, t);
   // The privacy policy promises that an install silent for 13 months is
   // forgotten. Done here rather than in the cron, so the promise holds even
   // when no cron runs; the index on last_seen keeps it cheap.
@@ -189,7 +191,7 @@ async function ping(env: Env, body: any, request: Request) {
     env.DB.prepare("DELETE FROM claude_usage WHERE day < ?").bind(forgotten),
     env.DB.prepare("DELETE FROM screen_usage WHERE day < ?").bind(forgotten),
   ]);
-  return new Response(null, { status: dailyKept ? 204 : 503 });
+  return new Response(null, { status: dailyKept && metricsKept ? 204 : 503 });
 }
 
 /** "Still open", sent every few minutes by a running copy. Only moves
@@ -1185,6 +1187,12 @@ async function route(request: Request, env: Env): Promise<Response> {
     if (admin) return admin;
 
     if (request.method === "GET") {
+      if (pathname === "/v1/config") {
+        const os = url.searchParams.get("os") ?? "";
+        const channel = url.searchParams.get("channel") ?? "";
+        if (!["linux", "windows", "macos"].includes(os) || !["store", "download"].includes(channel)) return refuse("Invalid configuration scope.");
+        return json(await remoteSettings(env, os, channel));
+      }
       // The checkout domain is reviewed as a site in its own right: Paddle
       // fetches it and looks for a real front page and the three policies.
       // They are written once, on the marketing site, so this points at

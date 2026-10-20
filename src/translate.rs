@@ -212,8 +212,12 @@ pub struct Translator {
 
 impl Translator {
     pub fn new() -> Self {
+        Self::with_timeout(Duration::from_secs(10))
+    }
+
+    pub fn with_timeout(timeout: Duration) -> Self {
         let config = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(10)))
+            .timeout_global(Some(timeout))
             // We inspect status codes ourselves so error bodies stay readable;
             // DeepL in particular explains refusals in the body.
             .http_status_as_error(false)

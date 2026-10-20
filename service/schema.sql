@@ -480,3 +480,24 @@ CREATE TABLE IF NOT EXISTS anthropic_balance (
   dollars  REAL    NOT NULL,
   at       INTEGER NOT NULL
 );
+
+-- Cumulative snapshots from new clients. MAX makes delivery retries harmless.
+CREATE TABLE IF NOT EXISTS feature_metrics (
+  day TEXT NOT NULL,
+  install TEXT NOT NULL,
+  app TEXT NOT NULL,
+  os TEXT NOT NULL,
+  channel TEXT NOT NULL,
+  feature TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, install, app, os, channel, feature, outcome)
+);
+CREATE INDEX IF NOT EXISTS feature_metrics_install ON feature_metrics (install);
+
+-- Small, validated overrides. No secrets, URLs or executable instructions.
+CREATE TABLE IF NOT EXISTS remote_settings (
+  scope TEXT PRIMARY KEY,
+  settings TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);

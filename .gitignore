@@ -84,3 +84,6 @@ Thumbs.db
 # GitHub release beside the binaries they describe, not tracked -- the binaries
 # themselves are release assets too.
 SHA256SUMS.txt
+
+# Versioned release candidates, prepared without publishing.
+/dist/

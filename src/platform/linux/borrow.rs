@@ -5,8 +5,8 @@
 //! nothing the desktop can see — the primary selection stays exactly as it
 //! was — and the page only hands the text over when it is copied.
 //!
-//! So when a drag made with the trigger key held ends in a browser and no
-//! selection appears, Ctrl+C is sent on the user's behalf, the text is read
+//! So when a drag made with the trigger key held ends in a supported app and no
+//! selection appears, a copy shortcut is sent on the user's behalf, the text is read
 //! off the clipboard as it arrives, and the clipboard the user had is put
 //! back. Every condition is there to keep that from happening anywhere a
 //! synthesized copy would do harm:
@@ -15,7 +15,8 @@
 //!     was held — "no idea" is not enough to send a keystroke;
 //!   * only after a drag, or a double click — the two ways a word gets
 //!     selected, and both of them deliberate. A single click is neither;
-//!   * only in a browser: Ctrl+C in a terminal interrupts what is running;
+//!   * only in a browser or VS Code; VS Code uses Ctrl+Insert so its
+//!     integrated terminal never receives an interrupt;
 //!   * only when the page published nothing, so every ordinary selection
 //!     still goes the ordinary way and nothing is copied at all;
 //!   * never over a clipboard that could not be read back whole — every
@@ -142,10 +143,10 @@ fn consider(generation: u64, from: Option<(f64, f64)>, multi_click: bool) {
         crate::trace!("borrow    skip: focused window unknown");
         return;
     };
-    if !is_browser(&class) {
-        crate::trace!("borrow    skip: {class} is not a browser");
+    let Some(copy_key) = copy_key(&class) else {
+        crate::trace!("borrow    skip: {class} has no copy fallback");
         return;
-    }
+    };
     std::thread::sleep(PUBLISH_GRACE);
     if wayland::primary_generation() != generation {
         crate::trace!("borrow    skip: {class} published a selection itself");
@@ -159,7 +160,7 @@ fn consider(generation: u64, from: Option<(f64, f64)>, multi_click: bool) {
         until: Instant::now() + COPY_BUDGET,
         saved,
     });
-    if compositor::send_copy() {
+    if compositor::send_copy(copy_key) {
         crate::trace!("borrow    no selection published in {class}; copying");
     } else {
         crate::trace!("borrow    the compositor would not send the copy");
@@ -167,8 +168,14 @@ fn consider(generation: u64, from: Option<(f64, f64)>, multi_click: bool) {
     }
 }
 
-fn is_browser(class: &str) -> bool {
-    BROWSERS.iter().any(|b| class.contains(b))
+fn copy_key(class: &str) -> Option<&'static str> {
+    match class {
+        "code" | "code-insiders" | "com.microsoft.vscode" | "com.microsoft.vscodeinsiders" => {
+            Some("Insert")
+        }
+        _ if BROWSERS.iter().any(|b| class.contains(b)) => Some("C"),
+        _ => None,
+    }
 }
 
 /// Claims the copy in flight, if there is one, returning the clipboard to
@@ -202,7 +209,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_browsers_are_sent_a_copy() {
+    fn copy_chords_keep_terminals_safe() {
         for class in [
             "google-chrome",
             "chromium",
@@ -210,16 +217,18 @@ mod tests {
             "firefox",
             "zen",
         ] {
-            assert!(is_browser(class), "{class}");
+            assert_eq!(copy_key(class), Some("C"), "{class}");
         }
         for class in [
-            "alacritty",
-            "com.mitchellh.ghostty",
             "code",
-            "kitty",
-            "foot",
+            "code-insiders",
+            "com.microsoft.vscode",
+            "com.microsoft.vscodeinsiders",
         ] {
-            assert!(!is_browser(class), "{class}");
+            assert_eq!(copy_key(class), Some("Insert"), "{class}");
+        }
+        for class in ["alacritty", "com.mitchellh.ghostty", "kitty", "foot"] {
+            assert_eq!(copy_key(class), None, "{class}");
         }
     }
 

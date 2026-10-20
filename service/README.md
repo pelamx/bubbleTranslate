@@ -290,3 +290,10 @@ including a form on someone else's page.
 Buy one with a real card before announcing it. The paths worth walking end to
 end are a purchase, a renewal, a refund, and a cancellation — the last three
 because they are the ones that only fail later.
+
+## Feature analytics and remote controls
+
+The admin dashboard now includes translation-path counts, fixed error codes,
+repeat usage and platform/channel configuration overrides. See
+[OBSERVABILITY.md](OBSERVABILITY.md) for the controls, rollout order and reporting
+limits.

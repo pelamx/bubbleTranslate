@@ -448,6 +448,11 @@ their own text and publish none — bubbleTranslate's own window among them. For
 those, turn on **Also translate on copy (Ctrl+C)** under Behaviour: copying is
 the one gesture that always reaches the desktop.
 
+On Hyprland, holding the trigger key while selecting also tries a copy when
+a browser or VS Code publishes no selection. This includes Codex in VS Code.
+VS Code uses Ctrl+Insert, so its integrated terminal does not receive Ctrl+C;
+the previous clipboard contents are restored after capture.
+
 **Workspaces.** The bubble asks to appear on every workspace with
 `_NET_WM_STATE_STICKY`, which X11 window managers honour. wlroots compositors
 do not implement it for X11 clients: there the equivalent is a *pin*, a state
@@ -577,7 +582,7 @@ watch_clipboard = false     # also translate on copy, for apps with no selection
 auto_hide_secs = 12         # 0 = stay until closed; pauses while hovered
 font_size = 15.0
 ui_scale = 1.0              # whole-interface scale, on top of the display's
-usage_ping = true           # anonymous "in use" pings: daily, plus "still open"
+usage_ping = true           # anonymous usage/error counters and presence, every 5 minutes
 ```
 
 Target language, auto-translate, the trigger key and the DeepL key are also

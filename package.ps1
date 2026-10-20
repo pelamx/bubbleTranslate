@@ -75,7 +75,8 @@ $packageVersion = "$version.0"
 # release notes are this section, and a submission whose notes are written
 # afterwards is written from memory.
 $changelog = Get-Content (Join-Path $PSScriptRoot 'CHANGELOG.md') -Raw
-if ($changelog -notmatch "(?m)^## $([regex]::Escape($version))(\s|$)") {
+if ($changelog -notmatch "(?m)^## $([regex]::Escape($version))(\s|$)" -and
+    $changelog -notmatch "(?m)^## Unreleased\r?$") {
     Write-Host "error: CHANGELOG.md has no section for $version." -ForegroundColor Red
     exit 1
 }
@@ -97,8 +98,8 @@ if ((rustc -vV | Select-String '^host:') -notmatch 'x86_64') {
 & (Join-Path $PSScriptRoot 'windows\make-icon.ps1')
 Remove-Item (Join-Path $PSScriptRoot 'windows\preview-*.png') -ErrorAction SilentlyContinue
 
-if ($toolchain) { cargo $toolchain build --release --target $TARGET --features store }
-else { cargo build --release --target $TARGET --features store }
+if ($toolchain) { cargo $toolchain build --locked --release --target $TARGET --features store }
+else { cargo build --locked --release --target $TARGET --features store }
 if ($LASTEXITCODE -ne 0) { throw "the build failed" }
 
 $built = Join-Path $PSScriptRoot "target\$TARGET\release\bubbleTranslate.exe"

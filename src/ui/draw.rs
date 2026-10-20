@@ -434,6 +434,7 @@ impl BubbleApp {
                         .clicked()
                     {
                         capture::set_clipboard(ui.ctx(), &result.text);
+                        crate::telemetry::record("copy", "used");
                         self.copied_at = Some(Instant::now());
                     }
 
