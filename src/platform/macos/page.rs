@@ -197,7 +197,12 @@ fn frame_from_image(image: &core_graphics::image::CGImage) -> Option<Frame> {
 /// take. Blue-first in memory becomes red-first for the PNG.
 fn encode_png(frame: &Frame) -> Option<Vec<u8>> {
     let mut rgba = vec![0u8; frame.bgrx.len()];
-    for (dst, src) in rgba.as_chunks_mut::<4>().0.iter_mut().zip(frame.bgrx.as_chunks::<4>().0) {
+    for (dst, src) in rgba
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(frame.bgrx.as_chunks::<4>().0)
+    {
         dst[0] = src[2]; // red
         dst[1] = src[1]; // green
         dst[2] = src[0]; // blue
@@ -222,8 +227,8 @@ mod overlay {
     use objc2::rc::Retained;
     use objc2::{AnyThread, MainThreadMarker, MainThreadOnly};
     use objc2_app_kit::{
-        NSBackingStoreType, NSImage, NSImageScaling, NSImageView, NSScreen, NSScreenSaverWindowLevel,
-        NSWindow, NSWindowStyleMask,
+        NSBackingStoreType, NSImage, NSImageScaling, NSImageView, NSScreen,
+        NSScreenSaverWindowLevel, NSWindow, NSWindowStyleMask,
     };
     use objc2_core_foundation::{CGPoint, CGRect, CGSize};
     use objc2_foundation::NSData;

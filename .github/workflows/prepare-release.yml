@@ -29,6 +29,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - name: Read version
         shell: bash
         run: |
@@ -61,7 +63,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           ./release.sh --prepare-only
-          lipo -verify_arch arm64 x86_64 bubbleTranslate.app/Contents/MacOS/bubbleTranslate
+          lipo bubbleTranslate.app/Contents/MacOS/bubbleTranslate -verify_arch arm64 x86_64
       - name: Prepare Windows executable and zip
         if: runner.os == 'Windows'
         shell: pwsh

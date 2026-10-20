@@ -25,7 +25,7 @@ use the preparation flag while staging this version.
 Linux requires cargo-zigbuild and Zig. macOS packaging requires Xcode tools
 and both Rust targets (`aarch64-apple-darwin`, `x86_64-apple-darwin`). Without
 the Intel target the existing bundle script falls back to Apple Silicon only;
-install both and verify with `lipo -verify_arch arm64 x86_64` before release.
+install both and verify with `lipo bubbleTranslate.app/Contents/MacOS/bubbleTranslate -verify_arch arm64 x86_64` before release.
 Windows packaging uses MSVC and PowerShell. The Store package also requires
 the existing `windows/store-identity.json` from Partner Center and the Windows
 SDK; preparing the package does not submit it.
