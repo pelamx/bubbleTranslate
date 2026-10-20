@@ -99,3 +99,33 @@ it("counts the tokens each install's words took, never the words", async () => {
   expect(row).toMatchObject({ install: install("a"), requests: 2, input: 360, output: 24 });
   expect(JSON.stringify(row)).not.toContain("bank");
 });
+
+it("never spends the shared allowance on a refused install", async () => {
+  const day = new Date().toISOString().slice(0, 10);
+  await env.DB.prepare("INSERT INTO word_usage (day, install, requests) VALUES (?, ?, ?)")
+    .bind(day, bank.install, WORD_PER_INSTALL).run();
+  for (let i = 0; i < 3; i++) expect((await ask(bank)).status).toBe(429);
+  const row = await env.DB.prepare("SELECT SUM(requests) AS requests FROM word_usage WHERE day = ?").bind(day).first<any>();
+  expect(row.requests).toBe(WORD_PER_INSTALL);
+  expect(calls).toHaveLength(0);
+});
+
+it("reserves the last daily slot only once under concurrent requests", async () => {
+  const day = new Date().toISOString().slice(0, 10);
+  await env.DB.prepare("INSERT INTO word_usage (day, install, requests) VALUES (?, ?, ?)")
+    .bind(day, install("f"), WORD_DAILY - 1).run();
+  const responses = await Promise.all(["a", "b", "c", "d"].map(n => ask({ ...bank, install: install(n) })));
+  expect(responses.filter(r => r.status === 200)).toHaveLength(1);
+  expect(responses.filter(r => r.status === 429)).toHaveLength(3);
+  expect(calls).toHaveLength(1);
+});
+
+it("caps response cost and refuses a truncated translation while counting its tokens", async () => {
+  reply = () => Response.json({ stop_reason: "max_tokens", content: [{ type: "text", text: JSON.stringify({ text: "partial", source: "en" }) }], usage: { input_tokens: 180, output_tokens: 256 } });
+  expect((await ask(bank)).status).toBe(502);
+  const sent = JSON.parse(calls[0].init.body as string);
+  expect(sent.max_tokens).toBe(256);
+  expect(sent.output_config.format.schema.properties.text.maxLength).toBe(200);
+  const row = await env.DB.prepare("SELECT output FROM word_usage").first<any>();
+  expect(row.output).toBe(256);
+});

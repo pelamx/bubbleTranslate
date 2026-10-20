@@ -13,7 +13,7 @@
 //
 // Rationed twice, like the DeepL fallback: per install per day, and for all
 // installs per day, so a runaway copy or a sudden crowd costs a bounded sum.
-// A word costs about $0.00005 on Claude Haiku 5.5.
+// Cost varies with usage; each response is capped at 256 tokens.
 
 import type { Env } from "./env";
 import { now } from "./tokens";
@@ -68,27 +68,24 @@ export async function wordRelay(env: Env, body: any): Promise<Response> {
 
   const t = now();
   const day = new Date(t * 1000).toISOString().slice(0, 10);
-  const spent = await env.DB.prepare("SELECT COALESCE(SUM(requests), 0) AS requests FROM word_usage WHERE day = ?")
-    .bind(day)
-    .first<{ requests: number }>();
-  if ((spent?.requests ?? 0) >= WORD_DAILY) {
-    return refuse("Translating words in their sentence has run out for today.", 429);
-  }
-  // Counted before Anthropic is asked, so a request that fails still counts:
-  // a copy retrying a failure is exactly what the limit is for.
+  // Reserve both allowances in one statement: concurrent requests cannot
+  // pass a stale daily total, and refusals never spend the shared allowance.
   const row = await env.DB.prepare(
-    `INSERT INTO word_usage (day, install, requests) VALUES (?1, ?2, 1)
+    `INSERT INTO word_usage (day, install, requests)
+     SELECT ?1, ?2, 1
+     WHERE (SELECT COALESCE(SUM(requests), 0) FROM word_usage WHERE day = ?1) < ?3
      ON CONFLICT (day, install) DO UPDATE SET requests = requests + 1
+       WHERE requests < ?4
      RETURNING requests`,
   )
-    .bind(day, install)
+    .bind(day, install, WORD_DAILY, WORD_PER_INSTALL)
     .first<{ requests: number }>();
   // The admin panel reads 30 days back; the key's leading `day` keeps this
   // cheap.
   await env.DB.prepare("DELETE FROM word_usage WHERE day < ?")
     .bind(new Date((t - 35 * 86_400) * 1000).toISOString().slice(0, 10))
     .run();
-  if ((row?.requests ?? 0) > WORD_PER_INSTALL) {
+  if (!row) {
     return refuse("Translating words in their sentence has run out for today.", 429);
   }
 
@@ -115,14 +112,14 @@ export async function wordRelay(env: Env, body: any): Promise<Response> {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 1024,
+      max_tokens: 256,
       output_config: {
         effort: "low",
         format: {
           type: "json_schema",
           schema: {
             type: "object",
-            properties: { source: { type: "string" }, text: { type: "string" } },
+            properties: { source: { type: "string", maxLength: 16 }, text: { type: "string", maxLength: 200 } },
             required: ["source", "text"],
             additionalProperties: false,
           },
@@ -148,6 +145,7 @@ export async function wordRelay(env: Env, body: any): Promise<Response> {
       .run();
   }
   if (answer?.stop_reason === "refusal") return refuse("Claude would not translate this.", 502);
+  if (answer?.stop_reason === "max_tokens") return refuse("Claude sent back nothing.", 502);
   const reply = (answer?.content ?? [])
     .filter((block: any) => block?.type === "text")
     .map((block: any) => block.text)
