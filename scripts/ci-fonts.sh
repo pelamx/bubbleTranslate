@@ -3,12 +3,12 @@
 # discovery still sees every installed family; only the CI defaults are fixed.
 set -euo pipefail
 config="${RUNNER_TEMP:?}/bubbleTranslate-fontconfig.conf"
-cat > "$config" <<'XML'
+cat > "$config" <<XML
 <?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
 <fontconfig>
   <match target="pattern">
-    <test name="family" qual="any"><string>sans-serif</string></test>
+    <test name="family" qual="any"><string>sans</string></test>
     <edit name="family" mode="assign" binding="strong"><string>Liberation Sans</string></edit>
   </match>
   <match target="pattern">
@@ -19,7 +19,8 @@ cat > "$config" <<'XML'
     <test name="family" qual="any"><string>monospace</string></test>
     <edit name="family" mode="assign" binding="strong"><string>Liberation Mono</string></edit>
   </match>
-  <include>/etc/fonts/fonts.conf</include>
+  <dir>/usr/share/fonts</dir>
+  <cachedir>${RUNNER_TEMP}/bubbleTranslate-font-cache</cachedir>
 </fontconfig>
 XML
 printf 'FONTCONFIG_FILE=%s\n' "$config" >> "${GITHUB_ENV:?}"
