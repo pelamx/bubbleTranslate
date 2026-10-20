@@ -14,6 +14,8 @@
 //! cannot be read — is not an error the user sees: the screen is read on the
 //! computer instead.
 
+#![cfg_attr(target_os = "macos", allow(dead_code))]
+
 use std::sync::Mutex;
 use std::time::Duration;
 

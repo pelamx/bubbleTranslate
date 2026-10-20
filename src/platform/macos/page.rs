@@ -197,7 +197,12 @@ fn frame_from_image(image: &core_graphics::image::CGImage) -> Option<Frame> {
 /// take. Blue-first in memory becomes red-first for the PNG.
 fn encode_png(frame: &Frame) -> Option<Vec<u8>> {
     let mut rgba = vec![0u8; frame.bgrx.len()];
-    for (dst, src) in rgba.chunks_exact_mut(4).zip(frame.bgrx.chunks_exact(4)) {
+    for (dst, src) in rgba
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(frame.bgrx.as_chunks::<4>().0.iter())
+    {
         dst[0] = src[2]; // red
         dst[1] = src[1]; // green
         dst[2] = src[0]; // blue
