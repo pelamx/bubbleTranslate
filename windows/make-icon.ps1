@@ -64,7 +64,7 @@ function Draw-Mark($g) {
     # outlines overlap there and no seam is ever visible — the same trick the
     # SVG uses.
     $tail = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $tail.AddPolygon(@(
+    $tail.AddPolygon([System.Drawing.PointF[]]@(
         (New-Object System.Drawing.PointF(40, 96)),
         (New-Object System.Drawing.PointF(40, 116)),
         (New-Object System.Drawing.PointF(62, 96))
@@ -97,7 +97,7 @@ function Draw-Small($g) {
     # Tail first, and its top edge along the card's bottom edge, so the two
     # outlines overlap there rather than meeting in a seam.
     $tail = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $tail.AddPolygon(@(
+    $tail.AddPolygon([System.Drawing.PointF[]]@(
         (New-Object System.Drawing.PointF(30, 90)),
         (New-Object System.Drawing.PointF(30, 124)),
         (New-Object System.Drawing.PointF(66, 90))

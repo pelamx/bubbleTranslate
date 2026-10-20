@@ -14,6 +14,10 @@
 //! cannot be read — is not an error the user sees: the screen is read on the
 //! computer instead.
 
+// macOS currently reads through Apple Vision. Keep the shared Google reader
+// compiled and tested there without treating the unused platform path as an error.
+#![cfg_attr(target_os = "macos", allow(dead_code))]
+
 use std::sync::Mutex;
 use std::time::Duration;
 

@@ -45,6 +45,7 @@ jobs:
           chmod +x "$RUNNER_TEMP/zig-bin/zig"
           echo "$RUNNER_TEMP/zig-bin" >> "$GITHUB_PATH"
           cargo install cargo-zigbuild --version 0.23.4 --locked
+          bash scripts/ci-fonts.sh
       - name: Install both macOS architectures
         if: runner.os == 'macOS'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
