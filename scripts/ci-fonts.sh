@@ -7,13 +7,32 @@ cat > "$config" <<'XML'
 <?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
 <fontconfig>
+  <match target="pattern">
+    <test name="family" qual="any"><string>sans-serif</string></test>
+    <edit name="family" mode="assign" binding="strong"><string>Liberation Sans</string></edit>
+  </match>
+  <match target="pattern">
+    <test name="family" qual="any"><string>serif</string></test>
+    <edit name="family" mode="assign" binding="strong"><string>Liberation Serif</string></edit>
+  </match>
+  <match target="pattern">
+    <test name="family" qual="any"><string>monospace</string></test>
+    <edit name="family" mode="assign" binding="strong"><string>Liberation Mono</string></edit>
+  </match>
   <include>/etc/fonts/fonts.conf</include>
-  <alias><family>sans-serif</family><prefer><family>Liberation Sans</family></prefer></alias>
-  <alias><family>serif</family><prefer><family>Liberation Serif</family></prefer></alias>
-  <alias><family>monospace</family><prefer><family>Liberation Mono</family></prefer></alias>
 </fontconfig>
 XML
 printf 'FONTCONFIG_FILE=%s\n' "$config" >> "${GITHUB_ENV:?}"
 for family in sans-serif serif monospace; do
-    FONTCONFIG_FILE="$config" fc-match "$family"
+    case "$family" in
+        sans-serif) expected="Liberation Sans" ;;
+        serif) expected="Liberation Serif" ;;
+        monospace) expected="Liberation Mono" ;;
+    esac
+    found="$(FONTCONFIG_FILE="$config" fc-match -f '%{family[0]}' "$family")"
+    if [ "$found" != "$expected" ]; then
+        echo "error: $family resolved to $found, expected $expected" >&2
+        exit 1
+    fi
+    echo "$family: $found"
 done
