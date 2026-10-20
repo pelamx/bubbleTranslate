@@ -581,6 +581,7 @@ pub fn ping(agent: &ureq::Agent, pro: bool) {
                 "plan": if pro { "pro" } else { "free" },
                 // Counts only, per local day: every day not yet delivered.
                 "daily": crate::outbox::to_json(&daily),
+                "metrics": crate::telemetry::snapshot(),
             })
             .to_string()
             .as_str(),
@@ -592,10 +593,13 @@ pub fn ping(agent: &ureq::Agent, pro: bool) {
 }
 
 /// Tells the service this copy is still open: the install id and nothing else.
+/// Legacy presence-only route, retained for old clients. New clients flush
+/// cumulative diagnostics through `ping` every five minutes.
 /// Sent every few minutes while the app runs, under the same `usage_ping`
 /// switch as the daily ping, so the service can count how many copies are open
 /// right now rather than only how many were opened today. Best effort and
 /// silent; the answer is ignored.
+#[allow(dead_code)]
 pub fn alive(agent: &ureq::Agent) {
     #[cfg(debug_assertions)]
     if std::env::var_os("BUBBLETRANSLATE_LICENSE_API").is_none() {

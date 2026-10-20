@@ -21,6 +21,17 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+PREPARE_ONLY=false
+case "${1:-}" in
+    --prepare-only) PREPARE_ONLY=true ;;
+    "") ;;
+    *) echo "usage: $0 [--prepare-only]" >&2; exit 2 ;;
+esac
+if [ "$#" -gt 1 ]; then
+    echo "usage: $0 [--prepare-only]" >&2
+    exit 2
+fi
+
 OUT="bubbleTranslate-linux-x86_64"
 SUMS="SHA256SUMS.txt"
 
@@ -30,7 +41,8 @@ SUMS="SHA256SUMS.txt"
 # written from memory, and the people it is for are the two running the app.
 
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
-if ! grep -q "^## $VERSION " CHANGELOG.md && ! grep -q "^## $VERSION$" CHANGELOG.md; then
+if ! grep -q "^## $VERSION " CHANGELOG.md && ! grep -q "^## $VERSION$" CHANGELOG.md &&
+   ! { [ "$PREPARE_ONLY" = true ] && grep -q '^## Unreleased$' CHANGELOG.md; }; then
     echo "error: CHANGELOG.md has no section for $VERSION." >&2
     echo "       Add one -- rename '## Unreleased' to '## $VERSION -- $(date +%Y-%m-%d)'" >&2
     echo "       and say, for the people using the app, what changed and why." >&2
@@ -56,7 +68,11 @@ if ! command -v zig >/dev/null; then
 fi
 
 echo "==> building against glibc $GLIBC_FLOOR"
-cargo zigbuild --release --target "$TARGET.$GLIBC_FLOOR"
+cargo zigbuild --locked --release --target "$TARGET.$GLIBC_FLOOR"
+if [ "$PREPARE_ONLY" = true ]; then
+    mkdir -p "dist/$VERSION/linux"
+    OUT="dist/$VERSION/linux/$OUT"
+fi
 cp "target/$TARGET/release/bubbleTranslate" "$OUT"
 chmod +x "$OUT"
 
@@ -69,6 +85,13 @@ if [ "$(printf '%s\n%s\n' "$NEEDED" "$GLIBC_FLOOR" | sort -V | tail -1)" != "$GL
     exit 1
 fi
 echo "    needs glibc $NEEDED at most"
+
+if [ "$PREPARE_ONLY" = true ]; then
+    (cd "dist/$VERSION/linux" && sha256sum bubbleTranslate-linux-x86_64 > SHA256SUMS.txt)
+    cp CHANGELOG.md "dist/$VERSION/linux/CHANGELOG.md"
+    echo "prepared Linux $VERSION in dist/$VERSION/linux"
+    exit 0
+fi
 
 # --- checksum ---------------------------------------------------------------
 #

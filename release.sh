@@ -20,6 +20,17 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+PREPARE_ONLY=false
+case "${1:-}" in
+    --prepare-only) PREPARE_ONLY=true ;;
+    "") ;;
+    *) echo "usage: $0 [--prepare-only]" >&2; exit 2 ;;
+esac
+if [ "$#" -gt 1 ]; then
+    echo "usage: $0 [--prepare-only]" >&2
+    exit 2
+fi
+
 APP="bubbleTranslate.app"
 DMG="bubbleTranslate.dmg"
 VOLNAME="bubbleTranslate"
@@ -47,7 +58,8 @@ fi
 # written from memory, and the people it is for are the two running the app.
 
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
-if ! grep -q "^## $VERSION " CHANGELOG.md && ! grep -q "^## $VERSION$" CHANGELOG.md; then
+if ! grep -q "^## $VERSION " CHANGELOG.md && ! grep -q "^## $VERSION$" CHANGELOG.md &&
+   ! { [ "$PREPARE_ONLY" = true ] && grep -q '^## Unreleased$' CHANGELOG.md; }; then
     echo "error: CHANGELOG.md has no section for $VERSION." >&2
     echo "       Add one -- rename '## Unreleased' to '## $VERSION -- $(date +%Y-%m-%d)'" >&2
     echo "       and say, for the people using the app, what changed and why." >&2
@@ -210,6 +222,18 @@ if [[ -n "$NOTARY_PROFILE" ]]; then
         echo "error: Gatekeeper rejects $DMG as a download; nothing was published" >&2
         exit 1
     fi
+fi
+
+if [ "$PREPARE_ONLY" = true ]; then
+    PREPARED="dist/$VERSION/macos"
+    mkdir -p "$PREPARED"
+    cp "$DMG" CHANGELOG.md "$PREPARED/"
+    (cd "$PREPARED" && shasum -a 256 "$DMG" > SHA256SUMS.txt)
+    echo "prepared macOS $VERSION in $PREPARED"
+    if [ -z "$NOTARY_PROFILE" ]; then
+        echo "This candidate is not notarized; use the signing machine for the public release."
+    fi
+    exit 0
 fi
 
 # --- tell installed copies ---------------------------------------------------

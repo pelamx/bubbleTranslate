@@ -379,6 +379,10 @@ fn footer(ui: &mut egui::Ui) {
 /// where the app can do that itself (see [`crate::update`]). Where it cannot,
 /// or it tried and failed, the button opens the download instead.
 fn update_banner(ui: &mut egui::Ui) {
+    if let Some(message) = crate::remote::update_message() {
+        ui.label(message);
+        ui.add_space(6.0);
+    }
     let Some(newer) = crate::update::available() else {
         return;
     };
@@ -766,6 +770,7 @@ fn translate_box(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
                 );
                 if ui.small_button(t("Copy", "Kopyala", "Copiar")).clicked() {
                     crate::capture::set_clipboard(ui.ctx(), &result.text);
+                    crate::telemetry::record("copy", "used");
                 }
             });
         }
@@ -807,6 +812,7 @@ fn recent(ui: &mut egui::Ui, state: &MainState) {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.small_button(t("Copy", "Kopyala", "Copiar")).clicked() {
                     crate::capture::set_clipboard(ui.ctx(), &entry.translated);
+                    crate::telemetry::record("copy", "used");
                 }
                 ui.label(
                     egui::RichText::new(entry.provider.label())

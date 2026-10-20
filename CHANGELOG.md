@@ -13,6 +13,36 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**Anonymous diagnostics now show which parts of the app work for people.**
+bubbleTranslate counts successful translations separately for selected text,
+clipboard capture, typed text and screen readings. It also counts copy and
+listen actions and records fixed failure codes, so an empty capture or a
+network failure can be distinguished from a translation that worked. Reports
+are sent every five minutes and when the app closes normally; repeated
+reports do not increase the new counts twice. No selected or translated text,
+screen images, clipboard contents, language choices or keys are included.
+Setting `usage_ping = false` disables these diagnostics. Rust panic counts
+are reported on a later launch; native crashes are not captured.
+
+**A broken translation provider can be disabled without another download.**
+The service can temporarily disable a provider or dictionary lookups, adjust
+translation timeouts and selection settling, and show an update message to
+older versions. These changes leave your saved settings alone. The app uses
+its local settings when it starts offline, and forgets remote overrides after
+24 hours without a valid refresh. Updates still come from the normal download
+or, for Store installations, the Microsoft Store.
+
+**A screen with no usable translations does not spend a screen reading.**
+If none of the paragraphs can be translated, the app says it could not read
+the screen rather than showing an unchanged page and counting it as success.
+
+**Selections in VS Code can use the clipboard fallback. (Linux)**
+When VS Code does not publish selected text, bubbleTranslate uses Ctrl+Insert
+to copy it. This also avoids sending Ctrl+C to its integrated terminal, where
+that shortcut would interrupt the command running there.
+
 ## 0.4.20 — 2026-10-19
 
 **A single word is translated in the sentence it came from, without needing an

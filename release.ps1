@@ -19,6 +19,10 @@
 #   $env:SIGN_THUMBPRINT = "<certificate thumbprint>"
 #   powershell -ExecutionPolicy Bypass -File release.ps1
 
+param(
+    [switch]$PrepareOnly
+)
+
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
@@ -30,7 +34,8 @@ Set-Location $PSScriptRoot
 $version = (Select-String -Path (Join-Path $PSScriptRoot 'Cargo.toml') -Pattern '^version = "(.*)"' |
     Select-Object -First 1).Matches[0].Groups[1].Value
 $changelog = Get-Content (Join-Path $PSScriptRoot 'CHANGELOG.md') -Raw
-if ($changelog -notmatch "(?m)^## $([regex]::Escape($version))(\s|$)") {
+if ($changelog -notmatch "(?m)^## $([regex]::Escape($version))(\s|$)" -and
+    -not ($PrepareOnly -and $changelog -match "(?m)^## Unreleased\r?$")) {
     Write-Host "error: CHANGELOG.md has no section for $version." -ForegroundColor Red
     Write-Host "       Add one - rename '## Unreleased' to '## $version - $(Get-Date -Format yyyy-MM-dd)'"
     Write-Host "       and say, for the people using the app, what changed and why."
@@ -57,8 +62,8 @@ if ((rustc -vV | Select-String '^host:') -notmatch 'x86_64') {
 & (Join-Path $PSScriptRoot 'windows\make-icon.ps1')
 Remove-Item (Join-Path $PSScriptRoot 'windows\preview-*.png') -ErrorAction SilentlyContinue
 
-if ($toolchain) { cargo $toolchain build --release --target $TARGET }
-else { cargo build --release --target $TARGET }
+if ($toolchain) { cargo $toolchain build --locked --release --target $TARGET }
+else { cargo build --locked --release --target $TARGET }
 if ($LASTEXITCODE -ne 0) { throw "the build failed" }
 
 $built = Join-Path $PSScriptRoot "target\$TARGET\release\bubbleTranslate.exe"
@@ -83,7 +88,7 @@ if ($said -match 'channel\s+store') {
     Write-Host "error: this is the Microsoft Store build." -ForegroundColor Red
     Write-Host "       It has no update check, so publishing it as the download would"
     Write-Host "       leave every copy that installed it stuck on this version."
-    Write-Host "       Rebuild without the feature:  cargo build --release --target $TARGET"
+    Write-Host "       Rebuild without the feature:  cargo build --locked --release --target $TARGET"
     exit 1
 }
 
@@ -127,6 +132,19 @@ if ($env:SIGN_THUMBPRINT) {
 $ZIP = Join-Path $PSScriptRoot 'bubbleTranslate-windows-x64.zip'
 Remove-Item $ZIP -Force -ErrorAction SilentlyContinue
 Compress-Archive -Path $OUT -DestinationPath $ZIP -CompressionLevel Optimal
+
+if ($PrepareOnly) {
+    $prepared = Join-Path $PSScriptRoot "dist\$version\windows"
+    New-Item -ItemType Directory -Force -Path $prepared | Out-Null
+    Copy-Item $OUT, $ZIP, (Join-Path $PSScriptRoot 'CHANGELOG.md') -Destination $prepared -Force
+    $checksums = foreach ($file in @($OUT, $ZIP)) {
+        $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$hash  $(Split-Path $file -Leaf)"
+    }
+    $checksums | Set-Content (Join-Path $prepared 'SHA256SUMS.txt') -Encoding ascii
+    Write-Host "prepared Windows $version in $prepared"
+    exit 0
+}
 
 # latest.json is what running copies read to say "a new version is available".
 # It lives in the downloads repository -- the one that stays public -- rather

@@ -364,13 +364,11 @@ pub struct Config {
     pub ui_scale: f32,
     /// The bubble's colour scheme. See [`BubbleTheme`].
     pub theme: BubbleTheme,
-    /// Send one anonymous "in use today" ping a day: an install id, the OS,
-    /// the version, the channel and free/pro, with counts per day — which
-    /// backends answered, how many Claude requests and tokens went out on the
-    /// user's own key, how many screen readings were made or refused. It is
-    /// how the number of people using the app is known at all. Between those, while the app is open, a bare
-    /// "still open" with only the install id every five minutes. Never the
-    /// text, never the languages.
+    /// Send anonymous presence and diagnostic counters every five minutes:
+    /// install id, OS, version, channel, plan and daily usage/outcome counts.
+    /// Includes translation paths, copy/listen actions, provider totals and
+    /// fixed failure codes. Never text, images, languages or raw errors.
+    /// Also controls local collection of the new feature/error counters.
     pub usage_ping: bool,
     /// The language of the app's own interface. English unless changed.
     pub ui_lang: crate::i18n::UiLang,

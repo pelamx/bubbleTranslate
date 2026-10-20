@@ -1,0 +1,73 @@
+# Builds downloadable release candidates on native runners. This workflow does
+# not publish releases, change update manifests, or delete previous downloads.
+name: Prepare release candidates
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["release/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  candidates:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+          - os: macos-latest
+            platform: macos
+          - os: windows-latest
+            platform: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Read version
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Install Linux build and test dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-liberation fonts-noto-cjk python3-pip
+          python3 -m pip install --user --break-system-packages ziglang==0.14.1
+          mkdir -p "$RUNNER_TEMP/zig-bin"
+          printf '#!/bin/sh\nexec python3 -m ziglang "$@"\n' > "$RUNNER_TEMP/zig-bin/zig"
+          chmod +x "$RUNNER_TEMP/zig-bin/zig"
+          echo "$RUNNER_TEMP/zig-bin" >> "$GITHUB_PATH"
+          cargo install cargo-zigbuild --version 0.23.4 --locked
+      - name: Install both macOS architectures
+        if: runner.os == 'macOS'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Check the Windows Store channel
+        if: runner.os == 'Windows'
+        run: cargo check --locked --features store
+      - name: Prepare Linux binary
+        if: runner.os == 'Linux'
+        run: ./release-linux.sh --prepare-only
+      - name: Prepare macOS universal DMG
+        if: runner.os == 'macOS'
+        run: |
+          ./release.sh --prepare-only
+          lipo -verify_arch arm64 x86_64 bubbleTranslate.app/Contents/MacOS/bubbleTranslate
+      - name: Prepare Windows executable and zip
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./release.ps1 -PrepareOnly
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bubbleTranslate-${{ env.VERSION }}-${{ matrix.platform }}-candidate
+          path: dist/${{ env.VERSION }}/${{ matrix.platform }}/
+          if-no-files-found: error
+          retention-days: 14

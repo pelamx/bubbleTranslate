@@ -26,6 +26,7 @@ import { grantsAccess, subscriptionById } from "./mirror";
 import { constantTimeEqual, now, sha256Hex } from "./tokens";
 import { DAY, date } from "./admin/shared";
 import { dashboard } from "./admin/render";
+import { saveRemoteSettings } from "./observability";
 import { setCredit } from "./admin/haiku";
 
 // -- getting in --------------------------------------------------------------
@@ -485,6 +486,10 @@ export async function handleAdmin(
   }
   if (request.method === "POST") {
     const action = pathname.slice("/admin/".length);
+    if (action === "remote-config") {
+      if (!sameOrigin(request)) return new Response("Cross-site request refused.", { status: 403 });
+      return saveRemoteSettings(env, request);
+    }
     if (action === "issue") return issue(env, request);
     if (action === "mine") return markMine(env, request);
     if (action === "mine-licence") return markMineLicence(env, request);
