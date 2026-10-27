@@ -201,7 +201,7 @@ fn encode_png(frame: &Frame) -> Option<Vec<u8>> {
         .as_chunks_mut::<4>()
         .0
         .iter_mut()
-        .zip(frame.bgrx.as_chunks::<4>().0.iter())
+        .zip(frame.bgrx.as_chunks::<4>().0)
     {
         dst[0] = src[2]; // red
         dst[1] = src[1]; // green
@@ -227,8 +227,8 @@ mod overlay {
     use objc2::rc::Retained;
     use objc2::{AnyThread, MainThreadMarker, MainThreadOnly};
     use objc2_app_kit::{
-        NSBackingStoreType, NSImage, NSImageScaling, NSImageView, NSScreen, NSScreenSaverWindowLevel,
-        NSWindow, NSWindowStyleMask,
+        NSBackingStoreType, NSImage, NSImageScaling, NSImageView, NSScreen,
+        NSScreenSaverWindowLevel, NSWindow, NSWindowStyleMask,
     };
     use objc2_core_foundation::{CGPoint, CGRect, CGSize};
     use objc2_foundation::NSData;

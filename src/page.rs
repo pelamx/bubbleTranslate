@@ -3229,12 +3229,25 @@ mod tests {
             // Arial-alikes are the same letters — but never one of another.
             assert_eq!(fonts.kind(style.face), kind, "{kind:?} bold={bold}");
             assert_eq!(fonts.bold(style.face), bold, "{kind:?} bold={bold}");
+            // Point sizes belong to a font's metrics: another face can need
+            // 26px to draw the same ink a 22px face did. Check the resulting
+            // pixels and alignment rather than assuming equal font metrics.
+            let (left, top, right, bottom) = fonts.ink_box(style.face, &line.text).unwrap();
+            let drawn_width = (right - left) * style.px * style.face.squeeze;
+            let drawn_height = (bottom - top) * style.px;
             assert!(
-                (style.px - 22.0).abs() < 1.5,
-                "{kind:?} read as {}",
-                style.px
+                (drawn_width - line.rect.width as f32).abs()
+                    < (line.rect.width as f32 * 0.05).max(2.0),
+                "{kind:?} width {drawn_width}, expected {}",
+                line.rect.width
             );
-            assert!((style.baseline - 40.0).abs() < 1.5);
+            assert!(
+                (drawn_height - line.rect.height as f32).abs()
+                    < (line.rect.height as f32 * 0.05).max(2.0),
+                "{kind:?} height {drawn_height}, expected {}",
+                line.rect.height
+            );
+            assert!((style.baseline + top * style.px - line.rect.y as f32).abs() < 1.5);
             assert_eq!(style.ink, [30, 30, 30]);
         }
     }

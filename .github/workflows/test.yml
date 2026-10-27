@@ -28,7 +28,10 @@ jobs:
       # The page tests draw and recognise real fonts, so the runner needs the
       # serif and CJK faces a desktop has rather than the bare image's few.
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y fonts-liberation fonts-noto-cjk
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-liberation fonts-noto-cjk
+          bash scripts/ci-fonts.sh
       - run: cargo build --locked
       - run: cargo test --locked
       - run: cargo clippy --locked --all-targets -- -D warnings

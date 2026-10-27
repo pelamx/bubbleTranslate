@@ -29,6 +29,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - name: Read version
         shell: bash
         run: |
@@ -45,6 +47,7 @@ jobs:
           chmod +x "$RUNNER_TEMP/zig-bin/zig"
           echo "$RUNNER_TEMP/zig-bin" >> "$GITHUB_PATH"
           cargo install cargo-zigbuild --version 0.23.4 --locked
+          bash scripts/ci-fonts.sh
       - name: Install both macOS architectures
         if: runner.os == 'macOS'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
@@ -60,7 +63,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           ./release.sh --prepare-only
-          lipo -verify_arch arm64 x86_64 bubbleTranslate.app/Contents/MacOS/bubbleTranslate
+          lipo bubbleTranslate.app/Contents/MacOS/bubbleTranslate -verify_arch arm64 x86_64
       - name: Prepare Windows executable and zip
         if: runner.os == 'Windows'
         shell: pwsh
