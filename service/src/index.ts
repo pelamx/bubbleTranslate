@@ -190,6 +190,7 @@ async function ping(env: Env, body: any, request: Request) {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM claude_usage WHERE day < ?").bind(forgotten),
     env.DB.prepare("DELETE FROM screen_usage WHERE day < ?").bind(forgotten),
+    env.DB.prepare("DELETE FROM translate_usage WHERE day < ?").bind(forgotten),
   ]);
   return new Response(null, { status: dailyKept && metricsKept ? 204 : 503 });
 }
@@ -325,8 +326,9 @@ async function recordProviderHealth(env: Env, reported: unknown, t: number) {
 }
 
 /// Adds one install's day-by-day counts (see `outbox` in the client): which
-/// backends answered, what it asked of Claude on its own key, and how many
-/// screen readings it made or was refused. Each day is the install's own local
+/// backends answered, how many translations it made on which plan, what it
+/// asked of Claude on its own key, and how many screen readings it made or was
+/// refused. Each day is the install's own local
 /// date.
 ///
 /// The app keeps a day's counts until a ping has delivered them, so a day
@@ -394,6 +396,22 @@ async function recordDaily(
              ON CONFLICT (day, provider) DO UPDATE SET
                ok = ok + ?3, failed = failed + ?4, reports = reports + 1`,
           ).bind(day, provider, ok, failed),
+        );
+        break;
+      }
+      case "translate": {
+        if (name !== "free" && name !== "pro") continue;
+        const done = count(counts, "done", 100_000);
+        const charged = count(counts, "charged", 100_000);
+        const capped = count(counts, "capped", 100_000);
+        if (!done && !charged && !capped) continue;
+        statements.push(
+          env.DB.prepare(
+            `INSERT INTO translate_usage (day, install, plan, os, done, charged, capped)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT (day, install, plan) DO UPDATE SET
+               os = ?4, done = done + ?5, charged = charged + ?6, capped = capped + ?7`,
+          ).bind(day, install, name, os, done, charged, capped),
         );
         break;
       }

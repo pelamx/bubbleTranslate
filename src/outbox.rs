@@ -6,7 +6,8 @@
 //! while a request was in flight stay for the next delivery.
 //!
 //! A count is a section, a name and a field: `claude` / `claude-haiku-5-5` /
-//! `input`, `providers` / `Google` / `ok`, `screen` / `page` / `done`. Counts
+//! `input`, `providers` / `Google` / `ok`, `screen` / `page` / `done`,
+//! `translate` / `free` / `charged`. Counts
 //! only — nothing that was selected, read or translated ever comes here.
 //!
 //! Deliberately outside the sealed counter in [`crate::quota`]: nothing here

@@ -20,6 +20,7 @@ DROP TABLE IF EXISTS paddle_subscriptions;
 DROP TABLE IF EXISTS paddle_customers;
 DROP TABLE IF EXISTS claude_usage;
 DROP TABLE IF EXISTS screen_usage;
+DROP TABLE IF EXISTS translate_usage;
 DROP TABLE IF EXISTS alerts_sent;
 
 DROP TABLE IF EXISTS feature_metrics;

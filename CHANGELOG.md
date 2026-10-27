@@ -13,6 +13,15 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**The usage ping now includes how many translations were made each day.**
+It counts translations made on the free plan and on Pro, how many of the free
+plan's ten a day were used, and how many were refused once those ten ran out.
+These numbers show whether ten a day is the right allowance. They are counts
+only, like the rest of the ping: no text and no languages. Setting
+`usage_ping = false` still turns all of it off.
+
 ## 0.4.21 — 2026-10-20
 
 **Anonymous diagnostics now show which parts of the app work for people.**

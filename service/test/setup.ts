@@ -10,7 +10,7 @@ const statements = (env as any).SCHEMA_SQL.replace(/--.*$/gm, "")
 
 beforeEach(async () => {
   for (const sql of statements) await env.DB.prepare(sql).run();
-  for (const table of ["feature_metrics", "remote_settings", "seats", "orders", "licences", "paddle_customers", "paddle_subscriptions", "admin_log", "webhook_events", "paddle_transactions", "activations", "paddle_adjustments", "buy_visits", "download_clicks", "updates", "deepl_usage", "claude_usage", "screen_usage", "provider_health", "installs", "alerts_sent", "word_usage", "anthropic_balance"]) {
+  for (const table of ["feature_metrics", "remote_settings", "seats", "orders", "licences", "paddle_customers", "paddle_subscriptions", "admin_log", "webhook_events", "paddle_transactions", "activations", "paddle_adjustments", "buy_visits", "download_clicks", "updates", "deepl_usage", "claude_usage", "screen_usage", "translate_usage", "provider_health", "installs", "alerts_sent", "word_usage", "anthropic_balance"]) {
     await env.DB.prepare(`DELETE FROM ${table}`).run();
   }
 });

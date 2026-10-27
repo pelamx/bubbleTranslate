@@ -150,3 +150,30 @@ it("mails an alert once a day, however often the cron runs", async () => {
   expect(mails).toHaveLength(1);
   expect(String(mails[0][1]?.body)).toContain("30 seçim");
 });
+
+it("counts translations by plan, and how much of the free ten they used", async () => {
+  const day = today();
+  await ping("3".repeat(32), {
+    daily: [
+      { day, section: "providers", name: "Google", counts: { ok: 14 } },
+      { day, section: "translate", name: "free", counts: { done: 12, charged: 10, capped: 3 } },
+      { day, section: "translate", name: "elsewhere", counts: { done: 9 } },
+    ],
+  });
+  await ping("4".repeat(32), {
+    daily: [{ day, section: "translate", name: "free", counts: { done: 2, charged: 2 } }],
+  });
+  const { results } = await env.DB.prepare(
+    "SELECT install, plan, done, charged, capped FROM translate_usage ORDER BY install",
+  ).all<any>();
+  expect(results).toEqual([
+    { install: "3".repeat(32), plan: "free", done: 12, charged: 10, capped: 3 },
+    { install: "4".repeat(32), plan: "free", done: 2, charged: 2, capped: 0 },
+  ]);
+  const html = await (await admin()).text();
+  const card = html.slice(html.indexOf('id="usage"'));
+  expect(card).toContain("Translations a day, last 30 days");
+  expect(card).toContain("<b>14</b>");
+  expect(card).toContain("14 <span class=\"muted\">by 2</span>");
+  expect(card).toContain("<b>50%</b> <span class=\"muted\">1</span>");
+});

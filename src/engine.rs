@@ -271,6 +271,7 @@ fn run(
                 let event = if let Verdict::Capped { used, limit } = verdict {
                     report_capped(&config);
                     crate::telemetry::record("manual", "capped");
+                    count_use(&entitlement, &[("capped", 1)]);
                     UiEvent::ManualCapped { used, limit }
                 } else {
                     match translator.translate(&text, &cfg) {
@@ -280,6 +281,10 @@ fn run(
                             if verdict == Verdict::Allow {
                                 licensing.quota.lock().unwrap().record(&text);
                             }
+                            count_use(
+                                &entitlement,
+                                &[("done", 1), ("charged", u64::from(verdict == Verdict::Allow))],
+                            );
                             crate::telemetry::record(
                                 "manual",
                                 if result.echoed { "echoed" } else { "ok" },
@@ -552,8 +557,8 @@ fn run(
         // short to translate never costs anything, and before the request so
         // nothing is spent on a provider that may fail anyway.
         let mut chargeable = false;
+        let entitlement = licensing.license.lock().unwrap().entitlement.clone();
         if metered {
-            let entitlement = licensing.license.lock().unwrap().entitlement.clone();
             let verdict = licensing.quota.lock().unwrap().verdict(&text, &entitlement);
             crate::trace!("quota     {verdict}");
             match gate(verdict, at) {
@@ -561,6 +566,7 @@ fn run(
                 Gate::Refuse(event) => {
                     crate::telemetry::record(crate::telemetry::source(via), "capped");
                     report_capped(&config);
+                    count_use(&entitlement, &[("capped", 1)]);
                     let _ = ui.send(event);
                     wake_ui();
                     continue;
@@ -606,8 +612,12 @@ fn run(
                 crate::telemetry::record(feature, if result.echoed { "echoed" } else { "ok" });
                 // Counted here rather than above: a translation nobody
                 // received is not one the user should have paid for.
-                if charges(chargeable, &result) {
+                let charged = charges(chargeable, &result);
+                if charged {
                     licensing.quota.lock().unwrap().record(&text);
+                }
+                if metered && !result.echoed {
+                    count_use(&entitlement, &[("done", 1), ("charged", u64::from(charged))]);
                 }
                 if screen_read && !result.echoed {
                     crate::outbox::add("screen", "box", &[("done", 1)]);
@@ -888,6 +898,14 @@ fn settle(rx: &Receiver<Request>, mut latest: Trigger, window: Duration) -> Sett
             }
         }
     }
+}
+
+/// Counts a translation for the panel's daily usage, under the plan it ran
+/// on: one that came back, one charged to the free allowance, one refused
+/// because it was spent. Counts only, delivered with the ping.
+fn count_use(entitlement: &crate::license::Entitlement, fields: &[(&str, u64)]) {
+    let plan = if entitlement.limit.is_some() { "free" } else { "pro" };
+    crate::outbox::add("translate", plan, fields);
 }
 
 /// What a meter verdict means for the selection that produced it.

@@ -444,6 +444,23 @@ CREATE TABLE IF NOT EXISTS screen_usage (
   PRIMARY KEY (day, install, kind)
 );
 
+-- Translations per install, local day and plan ('free' or 'pro'), as the
+-- daily ping reports them: how many came back, how many of those were charged
+-- to the free allowance (a repeat is not), and how many were refused because
+-- the day's ten were spent. Counts only. The plan is the one the copy was on
+-- when it translated, not the one it is on now. Added on 2026-10-27 with this
+-- statement.
+CREATE TABLE IF NOT EXISTS translate_usage (
+  day      TEXT    NOT NULL,
+  install  TEXT    NOT NULL,
+  plan     TEXT    NOT NULL,
+  os       TEXT,
+  done     INTEGER NOT NULL DEFAULT 0,
+  charged  INTEGER NOT NULL DEFAULT 0,
+  capped   INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, install, plan)
+);
+
 -- Which alert was emailed on which UTC day (see `alerts.ts`), so each kind is
 -- sent at most once a day however often the cron runs. Added on 2026-10-19.
 CREATE TABLE IF NOT EXISTS alerts_sent (
