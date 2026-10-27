@@ -13,7 +13,7 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.4.22 — 2026-10-27
 
 **The usage ping now includes how many translations were made each day.**
 It counts translations made on the free plan and on Pro, how many of the free
