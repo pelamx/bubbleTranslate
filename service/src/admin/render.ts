@@ -11,7 +11,7 @@ import { credit, haikuCard, wordUse } from "./haiku";
 import { channels, channelsCard, churn, conversionByCountry, conversionCard } from "./growth";
 import { observabilityCard } from "../observability";
 import { screenCard, screenUse } from "./screen";
-import { translateUse, usageCard } from "./usage";
+import { installCard, installUse, translateUse, usageCard } from "./usage";
 import { COUNTRY_POINTS, LAND_ROWS, MAP_NORTH, MAP_STEP } from "./world";
 import { DAY, LOCAL_OFFSET, PAGE_SIZE, cached, date, startOfToday } from "./shared";
 import {
@@ -399,6 +399,13 @@ export const ADMIN_STYLE = `
   .badge.you { background: rgba(251,146,60,.15); color: var(--orange); }
   .badge.paddle { background: rgba(110,168,254,.18); color: var(--brand); }
   .badge.manual { background: rgba(251,146,60,.15); color: var(--orange); }
+  /* The per-install day grid: a day that spent the whole free allowance
+     stands out, a light one fades. */
+  td.d { text-align: center; min-width: 30px; font-variant-numeric: tabular-nums; }
+  td.d.none { color: var(--faint); }
+  td.d.high { background: rgba(251,146,60,.15); color: var(--orange); }
+  td.d.full { background: rgba(248,113,113,.18); color: var(--red); font-weight: 600; }
+  td.d small { display: block; font-size: 10px; font-weight: 400; }
   .group { border-left: 3px solid var(--border); padding-left: 14px; margin-top: 22px; }
   .group.paddle { border-left-color: var(--brand); }
   .group.manual { border-left-color: var(--orange); }
@@ -1361,7 +1368,7 @@ export function delta(today: number, yesterday: number): string {
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
   const observability = await observabilityCard(env);
-  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, licCountry, refunds, balance, licBySub, whyCancel, claudeUse, claudeBill, deeplDays, deeplMonth, screen, byChannel, payByCountry, churnMonths, words, haikuCredit, translations] = await Promise.all([
+  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, licCountry, refunds, balance, licBySub, whyCancel, claudeUse, claudeBill, deeplDays, deeplMonth, screen, byChannel, payByCountry, churnMonths, words, haikuCredit, translations, perInstall] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -1405,6 +1412,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     wordUse(env),
     credit(env),
     translateUse(env),
+    installUse(env),
   ]);
   const dl = downloadsNow?.total ?? null;
 
@@ -1619,6 +1627,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
 
      <div class="zone" id="analytics">
      ${usageCard(translations)}
+
+     ${installCard(perInstall)}
 
      ${backendsCard(backends)}
 

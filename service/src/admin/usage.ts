@@ -10,7 +10,7 @@
 
 import type { Env } from "../env";
 import { escapeHtml } from "../pages";
-import { NOT_MINE_INSTALL, mineInstalls } from "./queries";
+import { NOT_MINE_INSTALL, mineInstalls, osLabel } from "./queries";
 import { DAY } from "./shared";
 
 /** The free plan's translations a day; `FREE_DAILY_TRANSLATIONS` in the app. */
@@ -147,5 +147,125 @@ export function usageCard(u: Usage): string {
          (a repeat is not charged), <b>Reached ${FREE_LIMIT}</b> is how many installs spent them all, and
          <b>Refused</b> is translations asked for after that. "by" says how many installs. Reported in the ping,
          by copies with usage pings on.</p>
+     </section>`;
+}
+
+// -- each free install, day by day ------------------------------------------
+
+/** How many days the per-install grid shows, newest on the right. */
+export const GRID_DAYS = 14;
+
+export interface InstallUse {
+  install: string;
+  os: string | null;
+  app: string | null;
+  country: string | null;
+  /** The plan on its latest ping: a copy listed here that says `pro` bought. */
+  plan_now: string | null;
+  /** Days in the grid it translated or was refused anything. */
+  days: number;
+  charged: number;
+  /** Days it spent all ten, or was refused. */
+  full_days: number;
+  /** Its own days, keyed by date. */
+  grid: Record<string, { charged: number; capped: number }>;
+}
+
+export interface InstallsUse {
+  /** The grid's dates, oldest first. */
+  dates: string[];
+  installs: InstallUse[];
+}
+
+const iso = (unix: number) => new Date(unix * 1000).toISOString().slice(0, 10);
+
+/** The free installs of the last {@link GRID_DAYS} days, closest to the ten
+ *  first, each with its days. Your own machines are left out. */
+export async function installUse(env: Env): Promise<InstallsUse> {
+  const t = Math.floor(Date.now() / 1000);
+  const dates = Array.from({ length: GRID_DAYS }, (_, i) => iso(t - (GRID_DAYS - 1 - i) * DAY));
+  const mine = await mineInstalls(env);
+  try {
+    const { results: listed } = await env.DB.prepare(
+      `SELECT u.install, i.os, i.app, i.country, i.plan AS plan_now,
+              COUNT(*) AS days, SUM(u.charged) AS charged,
+              SUM(CASE WHEN u.charged >= ${FREE_LIMIT} OR u.capped > 0 THEN 1 ELSE 0 END) AS full_days
+         FROM translate_usage u LEFT JOIN installs i ON i.install = u.install
+        WHERE u.day >= ?1 AND u.plan = 'free'
+          AND u.install NOT IN (SELECT value FROM json_each(?9))
+          AND u.install NOT IN (SELECT install FROM ignored_installs)
+        GROUP BY u.install
+        ORDER BY full_days DESC, SUM(u.charged) * 1.0 / COUNT(*) DESC, MAX(u.day) DESC
+        LIMIT 50`,
+    )
+      .bind(dates[0], null, null, null, null, null, null, null, mine)
+      .all<Omit<InstallUse, "grid">>();
+    const installs: InstallUse[] = (listed ?? []).map((u) => ({ ...u, grid: {} }));
+    if (installs.length) {
+      const { results } = await env.DB.prepare(
+        `SELECT install, day, charged, capped FROM translate_usage
+          WHERE plan = 'free' AND day >= ?1 AND install IN (SELECT value FROM json_each(?2))`,
+      )
+        .bind(dates[0], JSON.stringify(installs.map((u) => u.install)))
+        .all<{ install: string; day: string; charged: number; capped: number }>();
+      const byInstall = new Map(installs.map((u) => [u.install, u]));
+      for (const r of results ?? []) {
+        byInstall.get(r.install)!.grid[r.day] = { charged: r.charged, capped: r.capped };
+      }
+    }
+    return { dates, installs };
+  } catch (err) {
+    // The table is new; a database without it must not take the panel down.
+    console.error("could not read translate_usage by install", err);
+    return { dates, installs: [] };
+  }
+}
+
+/** One install's day: a dot when it did nothing, red when it spent all ten or
+ *  was refused, orange when it came within three. Refusals go under the count. */
+function dayCell(d: { charged: number; capped: number } | undefined): string {
+  if (!d) return `<td class="d none">·</td>`;
+  const full = d.charged >= FREE_LIMIT || d.capped > 0;
+  const cls = full ? "d full" : d.charged >= FREE_LIMIT - 3 ? "d high" : "d";
+  const refused = d.capped ? `<small>+${d.capped} refused</small>` : "";
+  return `<td class="${cls}">${d.charged}${refused}</td>`;
+}
+
+export function installCard(u: InstallsUse): string {
+  if (u.installs.length === 0) {
+    return `<section class="card" id="installs-use">
+       <p class="label">Free translations per install, day by day</p>
+       <p class="sub">Nothing reported yet. Only copies released after 0.4.21 send it.</p>
+     </section>`;
+  }
+  const head = u.dates.map((d) => `<th class="num">${escapeHtml(d.slice(5))}</th>`).join("");
+  const rows = u.installs
+    .map((i) => {
+      const pro = i.plan_now === "pro" ? ` <span class="badge on">Pro now</span>` : "";
+      return `<tr>
+        <td><code>${escapeHtml(i.install.slice(0, 8))}</code>${pro}</td>
+        <td>${escapeHtml(osLabel(i.os ?? "unknown"))}</td>
+        <td>${escapeHtml(i.app ?? "—")}</td>
+        <td>${escapeHtml(i.country ?? "—")}</td>
+        ${u.dates.map((d) => dayCell(i.grid[d])).join("")}
+        <td class="num">${i.charged}</td>
+        <td class="num">${i.days ? (i.charged / i.days).toFixed(1) : "0"}</td>
+        <td class="num">${i.full_days ? `<b>${i.full_days}</b>` : `<span class="muted">0</span>`}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<section class="card" id="installs-use">
+       <p class="label">Free translations per install, day by day</p>
+       <div class="scroll"><table>
+         <tr><th>Install</th><th>OS</th><th>Version</th><th>Country</th>${head}
+             <th class="num">Total</th><th class="num">Per day used</th><th class="num">Days at ${FREE_LIMIT}</th></tr>
+         ${rows}
+       </table></div>
+       <p class="muted foot">Each row is one free install, each column a day: how many of its ${FREE_LIMIT} it spent
+         (a repeat is not charged). <b class="err">Red</b> is a day it spent all ${FREE_LIMIT} or was refused, with
+         the refused translations under the count; <b class="warn">orange</b> is ${FREE_LIMIT - 3} or more; a dot is a
+         day it translated nothing. The 50 installs of the last ${GRID_DAYS} days closest to the limit come first.
+         Days are the install's own date and arrive with the next daily ping, so today's column fills in tomorrow.
+         Only copies released after 0.4.21 report it. Your own machines are left out.</p>
      </section>`;
 }
