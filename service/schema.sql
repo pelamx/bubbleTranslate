@@ -450,11 +450,23 @@ CREATE TABLE IF NOT EXISTS screen_usage (
 -- the day's ten were spent. Counts only. The plan is the one the copy was on
 -- when it translated, not the one it is on now. Added on 2026-10-27 with this
 -- statement.
+--
+-- `app` is the version that reported the day, taken from the ping rather than
+-- from the counts -- the app sends counts only, and which copy sent them is
+-- already known. It is what lets a release be compared with the one before it
+-- on how much people actually translate, which `installs.app` cannot do: that
+-- says only what each copy is on *now*, so every day a copy ever reported
+-- moves to its newest version and a quiet release looks busy. A copy updated
+-- at noon files the whole day under the new version; close enough to compare
+-- releases by, not an exact split of the day. NULL for days reported before
+-- the column. Added on 2026-10-27 to a live table with
+--   ALTER TABLE translate_usage ADD COLUMN app TEXT;
 CREATE TABLE IF NOT EXISTS translate_usage (
   day      TEXT    NOT NULL,
   install  TEXT    NOT NULL,
   plan     TEXT    NOT NULL,
   os       TEXT,
+  app      TEXT,
   done     INTEGER NOT NULL DEFAULT 0,
   charged  INTEGER NOT NULL DEFAULT 0,
   capped   INTEGER NOT NULL DEFAULT 0,

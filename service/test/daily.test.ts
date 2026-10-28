@@ -178,6 +178,49 @@ it("counts translations by plan, and how much of the free ten they used", async 
   expect(card).toContain("<b>50%</b> <span class=\"muted\">1</span>");
 });
 
+it("splits the translations by the version that reported them", async () => {
+  const day = today();
+  const old = (install: string, extra: Record<string, unknown>) =>
+    worker.fetch(
+      new Request("https://api.bubbletranslate.app/v1/ping", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ install, os: "windows", plan: "free", ...extra }),
+      }),
+      env,
+    );
+  // Two versions on the same day, and a copy that reports no version at all.
+  await ping("a".repeat(32), {
+    app: "0.4.23",
+    daily: [{ day, section: "translate", name: "free", counts: { done: 10, charged: 10, capped: 2 } }],
+  });
+  await ping("b".repeat(32), {
+    app: "0.4.22",
+    daily: [{ day, section: "translate", name: "free", counts: { done: 3, charged: 3 } }],
+  });
+  await old("c".repeat(32), {
+    daily: [{ day, section: "translate", name: "free", counts: { done: 1, charged: 1 } }],
+  });
+  const { results } = await env.DB.prepare(
+    "SELECT install, app, done FROM translate_usage ORDER BY install",
+  ).all<any>();
+  expect(results).toEqual([
+    { install: "a".repeat(32), app: "0.4.23", done: 10 },
+    { install: "b".repeat(32), app: "0.4.22", done: 3 },
+    { install: "c".repeat(32), app: null, done: 1 },
+  ]);
+
+  const html = await (await admin()).text();
+  const from = html.slice(html.indexOf('id="usage"'));
+  const card = from.slice(0, from.indexOf("</section>"));
+  expect(card).toContain("Per version");
+  // Busiest first, and a version with no name grouped rather than dropped.
+  expect(card.indexOf("0.4.23")).toBeLessThan(card.indexOf("0.4.22"));
+  expect(card).toContain("not recorded");
+  // One free day of the ten reached, out of 0.4.23's one.
+  expect(card).toContain('<b>100%</b> <span class="muted">1/1</span>');
+});
+
 it("lists each free install day by day, the one that ran out first", async () => {
   const day = today();
   const close = "6".repeat(32);

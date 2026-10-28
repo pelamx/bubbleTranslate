@@ -179,7 +179,7 @@ async function ping(env: Env, body: any, request: Request) {
   await recordProviderHealth(env, body.providers, t);
   // The app keeps its daily counts until a ping is answered with success, so
   // a failure to store them is the one thing this route does not hide.
-  const dailyKept = await recordDaily(env, install, os, body.daily, t);
+  const dailyKept = await recordDaily(env, install, os, app, body.daily, t);
   const metricsKept = await recordMetrics(env, install, os, channel ?? "download", body.metrics, t);
   // The privacy policy promises that an install silent for 13 months is
   // forgotten. Done here rather than in the cron, so the promise holds even
@@ -342,6 +342,7 @@ async function recordDaily(
   env: Env,
   install: string,
   os: string,
+  app: string,
   reported: unknown,
   t: number,
 ): Promise<boolean> {
@@ -407,11 +408,12 @@ async function recordDaily(
         if (!done && !charged && !capped) continue;
         statements.push(
           env.DB.prepare(
-            `INSERT INTO translate_usage (day, install, plan, os, done, charged, capped)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            `INSERT INTO translate_usage (day, install, plan, os, app, done, charged, capped)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT (day, install, plan) DO UPDATE SET
-               os = ?4, done = done + ?5, charged = charged + ?6, capped = capped + ?7`,
-          ).bind(day, install, name, os, done, charged, capped),
+               os = ?4, app = COALESCE(?5, app),
+               done = done + ?6, charged = charged + ?7, capped = capped + ?8`,
+          ).bind(day, install, name, os, app || null, done, charged, capped),
         );
         break;
       }

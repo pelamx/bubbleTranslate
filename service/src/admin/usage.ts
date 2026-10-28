@@ -27,6 +27,21 @@ function buckets(limit: number) {
 /** "4–6", "4", or a dash for a bucket that is empty at this allowance. */
 const range = (from: number, to: number) => (to < from ? "—" : from === to ? String(from) : `${from}–${to}`);
 
+/** One version over the window. `days` counts install-days, not calendar
+ *  days: two installs translating on one day are two. */
+export interface UsageVersion {
+  app: string;
+  installs: number;
+  days: number;
+  done: number;
+  charged: number;
+  capped: number;
+  /** Install-days that spent the whole allowance, or were refused. */
+  full_days: number;
+  /** Of its install-days, the ones on the free plan. */
+  free_days: number;
+}
+
 export interface UsageDay {
   day: string;
   /** Answers from every backend, every version. */
@@ -35,13 +50,13 @@ export interface UsageDay {
   free_done: number;
   free_charged: number;
   free_capped: number;
-  /** Free installs that spent all ten, or were refused, that day. */
+  /** Free installs that spent the whole allowance, or were refused, that day. */
   free_full: number;
   pro_installs: number;
   pro_done: number;
 }
 
-/** Free install-days by how many of the ten they spent. */
+/** Free install-days by how much of the allowance they spent. */
 export interface UsageSpread {
   low: number;
   mid: number;
@@ -54,9 +69,15 @@ export interface Usage {
   limit: number;
   days: UsageDay[];
   spread: UsageSpread;
+  versions: UsageVersion[];
 }
 
-const empty = (limit: number): Usage => ({ limit, days: [], spread: { low: 0, mid: 0, high: 0, full: 0 } });
+const empty = (limit: number): Usage => ({
+  limit,
+  days: [],
+  spread: { low: 0, mid: 0, high: 0, full: 0 },
+  versions: [],
+});
 
 /** The last 30 days. */
 export async function translateUse(env: Env): Promise<Usage> {
@@ -65,7 +86,7 @@ export async function translateUse(env: Env): Promise<Usage> {
   const [mine, limit] = await Promise.all([mineInstalls(env), freeDailyTranslations(env)]);
   const { lowMax, highMin } = buckets(limit);
   try {
-    const [all, split, spread] = await Promise.all([
+    const [all, split, spread, versions] = await Promise.all([
       env.DB.prepare(`SELECT day, SUM(ok) AS n FROM provider_health WHERE day >= ?1 GROUP BY day`)
         .bind(since)
         .all<{ day: string; n: number }>(),
@@ -94,6 +115,22 @@ export async function translateUse(env: Env): Promise<Usage> {
       )
         .bind(since, null, null, null, null, null, null, null, mine)
         .first<UsageSpread>(),
+      // Per version, which is what says whether a release is translated with
+      // more or less than the one before it. `app` is the version that
+      // reported the day, so this cannot be had from `installs.app`.
+      env.DB.prepare(
+        `SELECT COALESCE(app, 'not recorded') AS app,
+                COUNT(DISTINCT install) AS installs, COUNT(*) AS days,
+                SUM(done) AS done, SUM(charged) AS charged, SUM(capped) AS capped,
+                SUM(CASE WHEN plan = 'free' THEN 1 ELSE 0 END) AS free_days,
+                SUM(CASE WHEN plan = 'free' AND (charged >= ${limit} OR capped > 0) THEN 1 ELSE 0 END) AS full_days
+           FROM translate_usage
+          WHERE day >= ?1 AND ${NOT_MINE_INSTALL}
+          GROUP BY COALESCE(app, 'not recorded')
+          ORDER BY done DESC, app DESC`,
+      )
+        .bind(since, null, null, null, null, null, null, null, mine)
+        .all<UsageVersion>(),
     ]);
     const byDay = new Map<string, UsageDay>();
     const zero = (day: string): UsageDay => ({
@@ -110,12 +147,49 @@ export async function translateUse(env: Env): Promise<Usage> {
         high: spread?.high ?? 0,
         full: spread?.full ?? 0,
       },
+      versions: versions.results ?? [],
     };
   } catch (err) {
     // The table is new; a database without it must not take the panel down.
     console.error("could not read translate_usage", err);
     return empty(limit);
   }
+}
+
+/** Each version's share of the window, busiest first.
+ *
+ *  Install-days rather than installs: a version two days old and one two
+ *  weeks old cannot be compared on totals, and "per day" is the figure that
+ *  survives the difference. */
+function versionTable(versions: UsageVersion[], limit: number): string {
+  if (versions.length === 0) return "";
+  const rows = versions
+    .map(
+      (v) => `<tr><td>${escapeHtml(v.app)}</td>
+        <td class="num">${v.installs}</td>
+        <td class="num">${v.days}</td>
+        <td class="num"><b>${v.done}</b></td>
+        <td class="num">${v.days ? (v.done / v.days).toFixed(1) : `<span class="muted">—</span>`}</td>
+        <td class="num">${
+          v.free_days
+            ? `<b>${Math.round((v.full_days / v.free_days) * 100)}%</b> <span class="muted">${v.full_days}/${v.free_days}</span>`
+            : `<span class="muted">—</span>`
+        }</td>
+        <td class="num">${v.capped ? `<b>${v.capped}</b>` : `<span class="muted">0</span>`}</td></tr>`,
+    )
+    .join("");
+  return `<p class="label" style="margin-top:22px">Per version</p>
+       <div class="scroll"><table>
+         <tr><th>Version</th><th class="num">Installs</th><th class="num">Install-days</th>
+             <th class="num">Translations</th><th class="num">Per install-day</th>
+             <th class="num">Free days that reached ${limit}</th><th class="num">Refused</th></tr>
+         ${rows}
+       </table></div>
+       <p class="muted foot">The version that reported each day, so a copy updated at noon files the whole day
+         under the new one. <b>Per install-day</b> is the figure to compare releases on: a version a week old
+         has had a week to add up and a new one has not. Free and Pro days are both counted here —
+         this is what a release is used for, not who is near a limit. Days reported before the version was
+         recorded are grouped as "not recorded"; they fall away as the window moves.</p>`;
 }
 
 export function usageCard(u: Usage): string {
@@ -158,6 +232,7 @@ export function usageCard(u: Usage): string {
              <th class="num">Refused</th><th class="num">Pro</th></tr>
          ${rows}
        </table></div>
+       ${versionTable(u.versions, limit)}
        <p class="muted foot"><b>All versions</b> is every translation a backend answered, from every copy since
          0.3.6, your own machines included. The other columns come only from copies released after 0.4.21,
          without your machines: <b>Free used</b> is how many of the ${limit} a free install spent that day
