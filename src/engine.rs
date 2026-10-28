@@ -798,15 +798,15 @@ fn page_note(left: Option<u32>) -> String {
     };
     let trial = match lang() {
         UiLang::En => format!(
-            "{left} of today's {} free screen translations left — unlimited with Pro",
+            "{left} of today's {} free whole-screen translations left — unlimited with Pro",
             license::FREE_DAILY_OCR
         ),
         UiLang::Tr => format!(
-            "Bugünkü {} ücretsiz ekran çevirisinden {left} kaldı — Pro ile sınırsız",
+            "Bugünkü {} ücretsiz tüm ekran çevirisinden {left} kaldı — Pro ile sınırsız",
             license::FREE_DAILY_OCR
         ),
         UiLang::Es => format!(
-            "Quedan {left} de las {} traducciones de pantalla gratis de hoy — ilimitadas con Pro",
+            "Quedan {left} de las {} traducciones de pantalla completa gratis de hoy — ilimitadas con Pro",
             license::FREE_DAILY_OCR
         ),
     };

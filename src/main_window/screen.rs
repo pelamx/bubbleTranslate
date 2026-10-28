@@ -139,16 +139,15 @@ pub fn screen_reading(ui: &mut egui::Ui, state: &mut MainState, cfg: &Config) {
             egui::RichText::new(t(
                 "Every paragraph is replaced by its translation, in place, in the same font \
                  and size, like a translated web page. Code is left as it is. Any key or click \
-                 puts it away. The free version reads the screen three times a day — a box or \
-                 the whole screen; Pro has no limit.",
+                 puts it away. The free version reads three boxes and three whole screens a \
+                 day; Pro has no limit.",
                 "Her paragraf, çevrilmiş bir web sayfası gibi, aynı yazı tipi ve boyutta \
                  yerinde çevirisiyle değişir. Kod olduğu gibi kalır. Bir tuş ya da tık kapatır. \
-                 Ücretsiz sürüm ekranı günde üç kez okur — bir kutu ya da tüm ekran; Pro'da \
-                 sınır yok.",
+                 Ücretsiz sürüm günde üç kutu ve üç tüm ekran okur; Pro'da sınır yok.",
                 "Cada párrafo se sustituye por su traducción, en su sitio, con la misma letra y \
                  tamaño, como una página web traducida. El código se deja como está. Cualquier \
-                 tecla o clic la cierra. La versión gratis lee la pantalla tres veces al día — \
-                 un recuadro o la pantalla entera; Pro no tiene límite.",
+                 tecla o clic la cierra. La versión gratis lee tres recuadros y tres pantallas \
+                 completas al día; Pro no tiene límite.",
             ))
             .size(12.0)
             .color(TEXT_SECONDARY),

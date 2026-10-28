@@ -272,22 +272,22 @@ impl BubbleApp {
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new(match crate::i18n::lang() {
-                            // After a box: what is left of the screen
-                            // readings, which is what it spent.
+                            // After a box: what is left of the day's
+                            // boxes, which is what it spent.
                             crate::i18n::UiLang::En if screen && left == 1 => {
-                                "1 free screen translation left today".to_string()
+                                "1 free screen box left today".to_string()
                             }
                             crate::i18n::UiLang::En if screen => {
-                                format!("{left} free screen translations left today")
+                                format!("{left} free screen boxes left today")
                             }
                             crate::i18n::UiLang::Tr if screen => {
-                                format!("Bugün {left} ücretsiz ekran çevirisi kaldı")
+                                format!("Bugün {left} ücretsiz ekran kutusu kaldı")
                             }
                             crate::i18n::UiLang::Es if screen && left == 1 => {
-                                "Queda 1 traducción de pantalla gratis hoy".to_string()
+                                "Queda 1 recuadro gratis hoy".to_string()
                             }
                             crate::i18n::UiLang::Es if screen => {
-                                format!("Quedan {left} traducciones de pantalla gratis hoy")
+                                format!("Quedan {left} recuadros gratis hoy")
                             }
                             crate::i18n::UiLang::En if left == 1 => {
                                 "1 free translation left today".to_string()
