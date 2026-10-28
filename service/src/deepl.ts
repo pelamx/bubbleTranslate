@@ -16,6 +16,9 @@ import { now } from "./tokens";
 /** Requests one install may make in a UTC day. A fallback, not an engine:
  *  someone hitting it all day is better told than quietly served. */
 export const DEEPL_PER_INSTALL = 50;
+/** Characters one install may spend in a UTC day: a fifth of everyone's, so
+ *  one copy whose other translators are failing cannot empty the day alone. */
+export const DEEPL_PER_INSTALL_CHARS = 3000;
 /** Characters in one request. A selection longer than this is not a fallback
  *  worth a sixtieth of the day's allowance. */
 export const DEEPL_MAX_CHARS = 1500;
@@ -49,28 +52,25 @@ export async function deeplRelay(env: Env, body: any): Promise<Response> {
 
   const t = now();
   const day = new Date(t * 1000).toISOString().slice(0, 10);
-  const spent = await env.DB.prepare("SELECT COALESCE(SUM(chars), 0) AS chars FROM deepl_usage WHERE day = ?")
-    .bind(day)
-    .first<{ chars: number }>();
-  if ((spent?.chars ?? 0) + text.length > DEEPL_DAILY_CHARS) {
-    return refuse("The DeepL fallback has run out for today.", 429);
-  }
-  // Counted before DeepL is asked, so a request that fails still counts: a
+  // Reserved in one statement, as in `word.ts`: concurrent requests cannot pass
+  // a stale daily total, and a refusal spends nothing of anyone's allowance.
+  // Counted before DeepL is asked, so a request DeepL fails still counts: a
   // copy retrying a failure is exactly what the limit is for.
   const row = await env.DB.prepare(
-    `INSERT INTO deepl_usage (day, install, requests, chars) VALUES (?1, ?2, 1, ?3)
+    `INSERT INTO deepl_usage (day, install, requests, chars)
+     SELECT ?1, ?2, 1, ?3
+     WHERE (SELECT COALESCE(SUM(chars), 0) FROM deepl_usage WHERE day = ?1) + ?3 <= ?4
      ON CONFLICT (day, install) DO UPDATE SET requests = requests + 1, chars = chars + ?3
+       WHERE requests < ?5 AND chars + ?3 <= ?6
      RETURNING requests`,
   )
-    .bind(day, install, text.length)
+    .bind(day, install, text.length, DEEPL_DAILY_CHARS, DEEPL_PER_INSTALL, DEEPL_PER_INSTALL_CHARS)
     .first<{ requests: number }>();
   // Nothing reads past today; the key's leading `day` keeps this cheap.
   await env.DB.prepare("DELETE FROM deepl_usage WHERE day < ?")
     .bind(new Date((t - 7 * 86_400) * 1000).toISOString().slice(0, 10))
     .run();
-  if ((row?.requests ?? 0) > DEEPL_PER_INSTALL) {
-    return refuse("The DeepL fallback has run out for today.", 429);
-  }
+  if (!row) return refuse("The DeepL fallback has run out for today.", 429);
 
   const payload: Record<string, unknown> = { text: [text], target_lang: target };
   if (source) payload.source_lang = source;

@@ -240,7 +240,9 @@ export async function endLicence(env: Env, licence: Licence, status: "cancelled"
       .bind(status, now(), licence.id)
       .run();
   } else {
-    await env.DB.prepare("UPDATE licences SET status = ? WHERE id = ?")
+    // A cancellation that arrives after a refund must not turn it back into a
+    // licence with a grace period left.
+    await env.DB.prepare("UPDATE licences SET status = ? WHERE id = ? AND status != 'refunded'")
       .bind(status, licence.id)
       .run();
   }

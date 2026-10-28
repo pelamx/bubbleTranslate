@@ -181,18 +181,24 @@ async function ping(env: Env, body: any, request: Request) {
   // a failure to store them is the one thing this route does not hide.
   const dailyKept = await recordDaily(env, install, os, app, body.daily, t);
   const metricsKept = await recordMetrics(env, install, os, channel ?? "download", body.metrics, t);
-  // The privacy policy promises that an install silent for 13 months is
-  // forgotten. Done here rather than in the cron, so the promise holds even
-  // when no cron runs; the index on last_seen keeps it cheap.
-  await env.DB.prepare("DELETE FROM installs WHERE last_seen < ?").bind(t - 396 * 86_400).run();
-  await env.DB.prepare("DELETE FROM updates WHERE at < ?").bind(t - 396 * 86_400).run();
+  return new Response(null, { status: dailyKept && metricsKept ? 204 : 503 });
+}
+
+/** Run once a day by the cron, not on every five-minute ping. The privacy
+ *  policy promises that an install silent for 13 months is forgotten; an order
+ *  nobody paid for is kept for the panel's 30-day funnel and then dropped, so
+ *  a script posting to /checkout/paddle cannot grow the table for ever. */
+export async function forgetOld(env: Env) {
+  const t = now();
   const forgotten = new Date((t - 396 * 86_400) * 1000).toISOString().slice(0, 10);
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM installs WHERE last_seen < ?").bind(t - 396 * 86_400),
+    env.DB.prepare("DELETE FROM updates WHERE at < ?").bind(t - 396 * 86_400),
     env.DB.prepare("DELETE FROM claude_usage WHERE day < ?").bind(forgotten),
     env.DB.prepare("DELETE FROM screen_usage WHERE day < ?").bind(forgotten),
     env.DB.prepare("DELETE FROM translate_usage WHERE day < ?").bind(forgotten),
+    env.DB.prepare("DELETE FROM orders WHERE status != 'paid' AND created_at < ?").bind(t - 90 * 86_400),
   ]);
-  return new Response(null, { status: dailyKept && metricsKept ? 204 : 503 });
 }
 
 /** "Still open", sent every few minutes by a running copy. Only moves
@@ -917,7 +923,8 @@ export function refundsWholePurchase(data: any): boolean {
 
 /** A payment: the first one sells a licence, every later one renews it. */
 async function transactionCompleted(env: Env, data: any, eventAt: number): Promise<Response> {
-  const cycle = cycleFromItems(env, data.items ?? []) ?? "monthly";
+  const priced = cycleFromItems(env, data.items ?? []);
+  const cycle = priced ?? "monthly";
   const subscriptionId = data.subscription_id ? String(data.subscription_id) : null;
   const ref = data?.custom_data?.ref ? String(data.custom_data.ref) : null;
   const email = await customerEmail(env, data);
@@ -929,7 +936,10 @@ async function transactionCompleted(env: Env, data: any, eventAt: number): Promi
   if (subscriptionId) {
     const existing = await licenceByProviderRef(env, "paddle", subscriptionId);
     if (existing) {
-      const until = await extendTerm(env, existing, cycle);
+      // A price no longer in the config (one replaced by a new price) still
+      // renews the plan the licence was bought on, not a month of it.
+      const renewed = priced ?? (isCycle(existing.cycle) ? existing.cycle : "monthly");
+      const until = await extendTerm(env, existing, renewed);
       console.log(`extended licence ${existing.id} to ${until}`);
       await noteCountry(env, subscriptionId, data);
       return json({ ok: true });
@@ -1165,11 +1175,16 @@ async function devIssue(env: Env, body: any) {
 // -- the router --------------------------------------------------------------
 
 export default {
-  // The weekly report runs off a cron trigger (see wrangler.toml). waitUntil
-  // keeps the isolate alive until the mail is sent; the send is best-effort
-  // and never throws, so a mail failure cannot fail the scheduled run.
+  // The weekly report and the daily alerts and forgetting run off cron
+  // triggers (see wrangler.toml). waitUntil keeps the isolate alive until they
+  // finish; the sends are best-effort and never throw, so a mail failure
+  // cannot fail the scheduled run.
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(controller.cron === "0 6 * * *" ? sendAlerts(env) : sendWeeklyReport(env));
+    ctx.waitUntil(
+      controller.cron === "0 6 * * *"
+        ? Promise.all([sendAlerts(env), forgetOld(env)])
+        : sendWeeklyReport(env),
+    );
   },
 
   async fetch(request: Request, env: Env): Promise<Response> {

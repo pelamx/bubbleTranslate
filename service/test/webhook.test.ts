@@ -149,6 +149,16 @@ describe("POST /webhooks/paddle", () => {
     expect(renewed.expires_at).toBe(first.expires_at + TERM_SECONDS.monthly);
   });
 
+  it("renews a yearly licence by a year when its price is no longer in the config", async () => {
+    await order("r1");
+    await deliver(completed("r1", "sub_1", env.PADDLE_PRICE_YEARLY));
+    const first = (await licenceByProviderRef(env, "paddle", "sub_1"))!;
+    await deliver(completed(null, "sub_1", "pri_retired"));
+    const renewed = (await licenceById(env, first.id))!;
+    expect(renewed.cycle).toBe("yearly");
+    expect(renewed.expires_at).toBe(first.expires_at + TERM_SECONDS.yearly);
+  });
+
   it("ignores a payment with no ref and no known subscription", async () => {
     const res = await deliver(completed(null, "sub_unknown"));
     expect(res.status).toBe(200);
@@ -181,6 +191,22 @@ describe("POST /webhooks/paddle", () => {
     const after = (await licenceById(env, before.id))!;
     expect(after.status).toBe("refunded");
     expect(after.expires_at).toBeLessThanOrEqual(now());
+  });
+
+  it("stays refunded when the cancellation arrives after the refund", async () => {
+    await order("r1");
+    await deliver(completed("r1", "sub_1"));
+    await deliver({
+      event_type: "adjustment.created",
+      occurred_at: new Date().toISOString(),
+      data: { action: "refund", type: "full", status: "approved", subscription_id: "sub_1" },
+    });
+    await deliver({
+      event_type: "subscription.canceled",
+      occurred_at: new Date().toISOString(),
+      data: { id: "sub_1", status: "canceled", customer_id: "ctm_1" },
+    });
+    expect((await licenceByProviderRef(env, "paddle", "sub_1"))!.status).toBe("refunded");
   });
 
   const adjustment = (event_type: string, data: object) => ({

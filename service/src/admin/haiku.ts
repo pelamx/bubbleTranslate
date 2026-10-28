@@ -24,7 +24,8 @@ export interface WordDay {
   requests: number;
   input: number;
   output: number;
-  /** Installs that asked past their daily share and were refused. */
+  /** Installs that used up their daily share. A refusal is not recorded, so
+   *  this counts those that reached it rather than those turned away. */
   over: number;
 }
 
@@ -35,7 +36,7 @@ export async function wordUse(env: Env): Promise<WordDay[]> {
     const rows = await env.DB.prepare(
       `SELECT day, COUNT(*) AS installs, SUM(requests) AS requests,
               SUM(input) AS input, SUM(output) AS output,
-              SUM(CASE WHEN requests > ?1 THEN 1 ELSE 0 END) AS over
+              SUM(CASE WHEN requests >= ?1 THEN 1 ELSE 0 END) AS over
          FROM word_usage GROUP BY day ORDER BY day DESC LIMIT 30`,
     )
       .bind(WORD_PER_INSTALL)

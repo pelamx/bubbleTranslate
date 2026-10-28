@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import worker from "../src/index";
+import worker, { forgetOld } from "../src/index";
 import { findAlerts, sendAlerts } from "../src/alerts";
 import { churn } from "../src/admin/growth";
 import { issueLicence } from "../src/licences";
@@ -242,4 +242,23 @@ it("lists each free install day by day, the one that ran out first", async () =>
   expect(card).toContain('<td class="d high">2</td>');
   expect(card).toContain('<td class="d">1</td>');
   expect(card).toContain("Days at 3");
+});
+
+it("forgets silent installs and stale unpaid orders once a day, and keeps the rest", async () => {
+  const t = Math.floor(Date.now() / 1000);
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO installs (install, first_seen, last_seen) VALUES ('old', ?1, ?1), ('new', ?2, ?2)")
+      .bind(t - 400 * 86_400, t),
+    env.DB.prepare(
+      `INSERT INTO orders (ref, provider, cycle, status, created_at) VALUES
+         ('stale', 'paddle', 'monthly', 'pending', ?1),
+         ('sold', 'paddle', 'monthly', 'paid', ?1),
+         ('fresh', 'paddle', 'monthly', 'pending', ?2)`,
+    ).bind(t - 100 * 86_400, t),
+  ]);
+  await forgetOld(env);
+  const installs = await env.DB.prepare("SELECT install FROM installs ORDER BY install").all<any>();
+  expect(installs.results.map((r) => r.install)).toEqual(["new"]);
+  const orders = await env.DB.prepare("SELECT ref FROM orders ORDER BY ref").all<any>();
+  expect(orders.results.map((r) => r.ref)).toEqual(["fresh", "sold"]);
 });

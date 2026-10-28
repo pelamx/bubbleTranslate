@@ -13,7 +13,8 @@ routes = [{ pattern = "api.bubbletranslate.app", custom_domain = true }]
 # Resend. Off the request path entirely -- it never touches a checkout.
 [triggers]
 # Monday 08:00 UTC: the weekly report. Every day 06:00 UTC (09:00 in Turkey):
-# the alerts, see alerts.ts.
+# the alerts, see alerts.ts, and forgetting what the privacy policy says
+# is forgotten, see `forgetOld` in index.ts.
 crons = ["0 8 * * 1", "0 6 * * *"]
 
 # Local `wrangler dev` ignores database_id and uses a SQLite file under

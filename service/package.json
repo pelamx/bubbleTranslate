@@ -7,6 +7,7 @@
     "schema": "wrangler d1 execute bubbletranslate-licence --local --file=schema.sql",
     "schema:reset": "wrangler d1 execute bubbletranslate-licence --local --file=reset.sql && npm run schema",
     "schema:remote": "wrangler d1 execute bubbletranslate-licence --remote --file=schema.sql",
+    "predeploy": "git fetch -q origin main && git merge-base --is-ancestor origin/main HEAD || (echo this checkout is behind origin/main: pull before deploying && exit 1)",
     "deploy": "wrangler deploy",
     "test": "vitest run"
   },

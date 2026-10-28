@@ -30,6 +30,20 @@ it("asks for the password", async () => {
   expect((await get("/admin", withPassword, "")).status).toBe(401);
 });
 
+it("slows a guesser down without locking anyone else out", async () => {
+  const from = (ip: string, password: string) =>
+    worker.fetch(
+      new Request("https://api.bubbletranslate.app/admin", {
+        headers: { authorization: `Basic ${btoa(`op:${password}`)}`, "CF-Connecting-IP": ip },
+      }),
+      withPassword,
+    );
+  expect((await from("203.0.113.9", "guess")).status).toBe(401);
+  // Locked out for a second now, even with the right password.
+  expect((await from("203.0.113.9", "letmein")).status).toBe(401);
+  expect((await from("198.51.100.4", "letmein")).status).toBe(200);
+});
+
 it("renders the dashboard and finds a licence by email", async () => {
   await issueLicence(env, { provider: "paddle", cycle: "yearly", email: "someone@example.com" });
   const res = await get("/admin?q=someone%40example.com");

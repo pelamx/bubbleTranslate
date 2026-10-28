@@ -5,7 +5,7 @@
 // `deepl_usage` say how close each day came to the ration; DeepL's own
 // `/v2/usage` says how much of the month's allowance is gone.
 
-import { DEEPL_DAILY_CHARS, DEEPL_PER_INSTALL } from "../deepl";
+import { DEEPL_DAILY_CHARS, DEEPL_PER_INSTALL, DEEPL_PER_INSTALL_CHARS } from "../deepl";
 import type { Env } from "../env";
 import { escapeHtml } from "../pages";
 import { NOT_MINE_INSTALL, mineInstalls } from "./queries";
@@ -16,7 +16,8 @@ export interface DeeplDay {
   chars: number;
   requests: number;
   installs: number;
-  /** Installs that asked more than their daily share and were refused. */
+  /** Installs that used up their daily share. A refusal is not recorded, so
+   *  this counts those that reached it rather than those turned away. */
   over: number;
 }
 
@@ -40,10 +41,10 @@ export async function deeplUse(env: Env): Promise<DeeplUse> {
   const [days, top] = await Promise.all([
     env.DB.prepare(
       `SELECT day, SUM(chars) AS chars, SUM(requests) AS requests, COUNT(*) AS installs,
-              SUM(CASE WHEN requests > ?1 THEN 1 ELSE 0 END) AS over
+              SUM(CASE WHEN requests >= ?1 OR chars >= ?2 THEN 1 ELSE 0 END) AS over
          FROM deepl_usage GROUP BY day ORDER BY day DESC LIMIT 7`,
     )
-      .bind(DEEPL_PER_INSTALL)
+      .bind(DEEPL_PER_INSTALL, DEEPL_PER_INSTALL_CHARS)
       .all<DeeplDay>(),
     env.DB.prepare(
       `SELECT install, requests, chars FROM deepl_usage
@@ -112,7 +113,7 @@ export function deeplCard(use: DeeplUse, account: DeeplAccount | string): string
          ${use.top
            .map(
              (t) => `<tr><td><code>${escapeHtml(t.install.slice(0, 8))}</code></td>
-               <td class="num">${t.requests}${t.requests > DEEPL_PER_INSTALL ? ` <span class="badge">capped</span>` : ""}</td>
+               <td class="num">${t.requests}${t.requests >= DEEPL_PER_INSTALL || t.chars >= DEEPL_PER_INSTALL_CHARS ? ` <span class="badge">capped</span>` : ""}</td>
                <td class="num">${n(t.chars)}</td></tr>`,
            )
            .join("")}
@@ -133,7 +134,8 @@ export function deeplCard(use: DeeplUse, account: DeeplAccount | string): string
        }
        ${top}
        <p class="muted foot">Asked only when Google and MyMemory have both failed, by copies without a DeepL
-         key of their own. Each install may make ${DEEPL_PER_INSTALL} requests a day, and everyone together
+         key of their own. Each install may make ${DEEPL_PER_INSTALL} requests and spend
+         ${n(DEEPL_PER_INSTALL_CHARS)} characters a day, and everyone together
          ${n(DEEPL_DAILY_CHARS)} characters; past either, the fallback says it has run out for today. A day near
          the cap is a day Google and MyMemory were failing for a lot of people.</p>
      </section>`;

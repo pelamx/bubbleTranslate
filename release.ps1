@@ -42,6 +42,17 @@ if ($changelog -notmatch "(?m)^## $([regex]::Escape($version))(\s|$)" -and
     exit 1
 }
 
+# Refused rather than warned: a checkout that is behind builds an older version,
+# and publishing it would announce it over the newer one and prune that away.
+if (-not $PrepareOnly) {
+    $live = (Invoke-RestMethod 'https://raw.githubusercontent.com/pelamx/downloads/main/latest.json').windows.version
+    if ([version]$version -lt [version]$live) {
+        Write-Host "error: Cargo.toml says $version, older than the $live already published." -ForegroundColor Red
+        Write-Host "       Pull first: this checkout is behind."
+        exit 1
+    }
+}
+
 $TARGET = 'x86_64-pc-windows-msvc'
 $OUT = Join-Path $PSScriptRoot 'bubbleTranslate.exe'
 

@@ -49,6 +49,17 @@ if ! grep -q "^## $VERSION " CHANGELOG.md && ! grep -q "^## $VERSION$" CHANGELOG
     exit 1
 fi
 
+# Refused rather than warned: a checkout that is behind builds an older version,
+# and publishing it would announce it over the newer one and prune that away.
+if [ "$PREPARE_ONLY" = false ]; then
+    LIVE="$(curl -fsSL https://raw.githubusercontent.com/pelamx/downloads/main/latest.json | jq -r .linux.version)"
+    if [ "$(printf '%s\n' "$LIVE" "$VERSION" | sort -V | tail -1)" != "$VERSION" ]; then
+        echo "error: Cargo.toml says $VERSION, older than the $LIVE already published." >&2
+        echo "       Pull first: this checkout is behind." >&2
+        exit 1
+    fi
+fi
+
 # --- build ------------------------------------------------------------------
 
 GLIBC_FLOOR="2.28"

@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import worker from "../src/index";
-import { DEEPL_DAILY_CHARS, DEEPL_PER_INSTALL } from "../src/deepl";
+import { DEEPL_DAILY_CHARS, DEEPL_MAX_CHARS, DEEPL_PER_INSTALL, DEEPL_PER_INSTALL_CHARS } from "../src/deepl";
 
 const install = (n: string) => n.repeat(32).slice(0, 32);
 
@@ -75,6 +75,31 @@ it("stops everyone once the day's characters are spent", async () => {
   const res = await ask({ install: install("a"), text: ["Hello"], target_lang: "TR" });
   expect(res.status).toBe(429);
   expect(calls).toHaveLength(0);
+});
+
+it("stops one install at its share of characters, and never spends the day on a refusal", async () => {
+  const long = "x".repeat(DEEPL_MAX_CHARS);
+  for (let i = 0; i < DEEPL_PER_INSTALL_CHARS / DEEPL_MAX_CHARS; i++) {
+    expect((await ask({ install: install("a"), text: [long], target_lang: "TR" })).status).toBe(200);
+  }
+  for (let i = 0; i < 3; i++) {
+    expect((await ask({ install: install("a"), text: [long], target_lang: "TR" })).status).toBe(429);
+  }
+  const day = new Date().toISOString().slice(0, 10);
+  const spent = await env.DB.prepare("SELECT SUM(chars) AS chars FROM deepl_usage WHERE day = ?").bind(day).first<any>();
+  expect(spent.chars).toBe(DEEPL_PER_INSTALL_CHARS);
+  expect((await ask({ install: install("b"), text: [long], target_lang: "TR" })).status).toBe(200);
+});
+
+it("lets only one request take the day's last characters under concurrency", async () => {
+  await env.DB.prepare("INSERT INTO deepl_usage (day, install, requests, chars) VALUES (?, ?, 1, ?)")
+    .bind(new Date().toISOString().slice(0, 10), install("z"), DEEPL_DAILY_CHARS - 5)
+    .run();
+  const responses = await Promise.all(
+    ["a", "b", "c", "d"].map((n) => ask({ install: install(n), text: ["Hello"], target_lang: "TR" })),
+  );
+  expect(responses.filter((r) => r.status === 200)).toHaveLength(1);
+  expect(calls).toHaveLength(1);
 });
 
 it("turns DeepL's spent-quota answer into a 429", async () => {
