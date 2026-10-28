@@ -50,7 +50,7 @@ import {
   sweepRevealedKeys,
 } from "./licences";
 import { handleAdmin } from "./admin";
-import { recordMetrics, remoteSettings } from "./observability";
+import { freeDailyTranslations, recordMetrics, remoteSettings } from "./observability";
 import { deeplRelay } from "./deepl";
 import { wordRelay } from "./word";
 import { pushConversions, type ClickIds } from "./ads";
@@ -596,6 +596,7 @@ async function buy(env: Env, request: Request, url: URL): Promise<Response> {
   const src = url.searchParams.get("src") ?? "direct";
   const base = baseUrl(env, request);
   await logBuyVisit(env, request, src, ctx.lang);
+  const freeDaily = await freeDailyTranslations(env);
 
   if (!paddleConfigured(env)) {
     return buyPage({
@@ -605,6 +606,7 @@ async function buy(env: Env, request: Request, url: URL): Promise<Response> {
       monthly: "",
       yearly: "",
       src,
+      freeDaily,
     });
   }
   return buyPage({
@@ -619,6 +621,7 @@ async function buy(env: Env, request: Request, url: URL): Promise<Response> {
     priceYearly: paddlePriceId(env, "yearly") ?? "",
     country: visitorCountry(request, url),
     successUrl: `${base}/welcome`,
+    freeDaily,
   });
 }
 
@@ -1209,7 +1212,8 @@ async function route(request: Request, env: Env): Promise<Response> {
         const os = url.searchParams.get("os") ?? "";
         const channel = url.searchParams.get("channel") ?? "";
         if (!["linux", "windows", "macos"].includes(os) || !["store", "download"].includes(channel)) return refuse("Invalid configuration scope.");
-        return json(await remoteSettings(env, os, channel));
+        const app = url.searchParams.get("app") ?? "";
+        return json(await remoteSettings(env, os, channel, /^\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(app) ? app : null));
       }
       // The checkout domain is reviewed as a site in its own right: Paddle
       // fetches it and looks for a real front page and the three policies.

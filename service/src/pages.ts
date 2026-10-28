@@ -15,10 +15,13 @@ import { TIERS } from "./tiers";
 import { CANCEL_REASONS } from "./licences";
 import { DEFAULT_LANG, LANGS, type Lang, type Strings, switchedTo, t, withLang } from "./i18n";
 
-/// What the free tier allows per day. Display only: the number the client
-/// enforces is `FREE_DAILY_TRANSLATIONS` in `src/license.rs`, and this one has
-/// to say the same thing or the page and the bubble will disagree.
-const FREE_DAILY_TRANSLATIONS = 10;
+/// What the free tier allows per day when the remote configuration does not
+/// set it. Display only: the numbers the client enforces are
+/// `FREE_DAILY_TRANSLATIONS` and `FREE_DAILY_OCR` in `src/license.rs`, and
+/// these have to say the same thing or the page and the bubble will disagree.
+const FREE_DAILY_TRANSLATIONS = 3;
+/// Boxes read off the screen a day, and whole screens a day, each.
+const FREE_DAILY_OCR = 3;
 
 export const escapeHtml = (value: unknown): string =>
   String(value ?? "")
@@ -407,6 +410,8 @@ const PLAN_SCRIPT = `
 
 export interface BuyOptions {
   ctx: PageContext;
+  /** The free plan's translations a day, if the remote configuration set it. */
+  freeDaily?: number;
   configured: boolean;
   /** A key into the strings, so the reason reads in the page's language. */
   reason?: "reasonPaddleUnconfigured";
@@ -447,13 +452,13 @@ export function buyPage(opts: BuyOptions): Response {
   // place they will read what the wall is and what removes it.
   const heading = `
     <h1>${s.proTitle}</h1>
-    <p>${s.introPaddle}</p>
+    <p>${s.introPaddle(opts.freeDaily ?? FREE_DAILY_TRANSLATIONS, FREE_DAILY_OCR)}</p>
     <div class="tiers">
       ${TIERS.map(
         (tier) => `
       <div class="tier${tier.purchasable ? " pro" : ""}" data-tier="${tier.id}">
         <div class="name">${s[tier.nameKey]}</div>
-        ${tier.id === "free" ? s.tierFree(FREE_DAILY_TRANSLATIONS) : s.tierPro}
+        ${tier.id === "free" ? s.tierFree(opts.freeDaily ?? FREE_DAILY_TRANSLATIONS, FREE_DAILY_OCR) : s.tierPro}
       </div>`,
       ).join("")}
     </div>`;

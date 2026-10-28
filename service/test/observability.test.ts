@@ -74,3 +74,20 @@ it("accepts bounded provider controls and version-scoped update messages", async
   expect(await config()).toEqual(settings);
   expect(await config("windows")).toEqual({});
 });
+
+it("sets the free allowance only for copies that say their version, and says so on the buy page", async () => {
+  const before = await (await worker.fetch(new Request(`${base}/buy?lang=en`), env)).text();
+  expect(before).toContain("3 text translations, 3 screen boxes and 3 whole screens a day");
+  for (const n of [2, 11, 4.5, "5"]) expect((await save({free_daily_translations: n})).status).toBe(400);
+  expect((await save({free_daily_translations: 5, debounce_ms: 300})).status).toBe(303);
+  // A copy before 0.4.23 would reject the whole answer over a control it does
+  // not know, so it is not sent one.
+  expect(await config()).toEqual({debounce_ms: 300});
+  const versioned = await (await worker.fetch(new Request(`${base}/v1/config?os=linux&channel=download&app=0.4.23`), env)).json();
+  expect(versioned).toEqual({debounce_ms: 300, free_daily_translations: 5});
+  const junk = await (await worker.fetch(new Request(`${base}/v1/config?os=linux&channel=download&app=<x>`), env)).json();
+  expect(junk).toEqual({debounce_ms: 300});
+  const buy = await (await worker.fetch(new Request(`${base}/buy?lang=en`), env)).text();
+  expect(buy).toContain("5 text translations, 3 screen boxes and 3 whole screens a day");
+  expect(buy).toContain("allows 5 translations of selected text");
+});

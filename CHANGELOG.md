@@ -13,6 +13,23 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## 0.4.23 — 2026-10-28
+
+**The free version now has three of each a day: three translations of
+selected text, three boxes read off the screen and three whole screens.**
+Until now it was ten translations, and three screen readings shared between
+the box and the whole screen. The box and the whole screen now have three each
+of their own, so you can use both on the same day. Each count comes back at
+your local midnight, and Pro still removes all of them. Ten a day was enough
+that almost nobody ever reached it, so the free version and Pro were hardly
+different, and Pro is what keeps bubbleTranslate going.
+
+**The number of free translations a day can be set from bubbleTranslate's
+server**, from three to ten, so it can be changed without everyone downloading
+a new version. If the server cannot be reached for a day, the app goes back to
+three. The bubble, the window and the buy page always say the number that
+applies.
+
 ## 0.4.22 — 2026-10-27
 
 **The usage ping now includes how many translations were made each day.**

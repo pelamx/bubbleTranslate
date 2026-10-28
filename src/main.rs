@@ -497,6 +497,14 @@ fn license_status() -> i32 {
         },
     );
 
+    // The service may have lowered the free allowance the running app holds
+    // to; asked here too, so this says the same number as the bubble.
+    remote::refresh(&ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .timeout_global(Some(std::time::Duration::from_secs(5)))
+            .http_status_as_error(false)
+            .build(),
+    ));
     match quota.limit(&licence.entitlement) {
         None => {
             println!("allowance unlimited");
@@ -510,8 +518,17 @@ fn license_status() -> i32 {
                 quota.remaining(&licence.entitlement).unwrap_or(0),
             );
             println!(
-                "screen    {} of {} screen translations left today",
-                quota.ocr_left(&licence.entitlement).unwrap_or(0),
+                "box       {} of {} screen boxes left today",
+                quota
+                    .ocr_left(&licence.entitlement, quota::Screen::Box)
+                    .unwrap_or(0),
+                license::FREE_DAILY_OCR,
+            );
+            println!(
+                "screen    {} of {} whole screens left today",
+                quota
+                    .ocr_left(&licence.entitlement, quota::Screen::Page)
+                    .unwrap_or(0),
                 license::FREE_DAILY_OCR,
             );
             println!(
@@ -538,7 +555,7 @@ fn license_status() -> i32 {
     0
 }
 
-/// `bubbleTranslate --dev-reset-quota`: hands today's ten translations back.
+/// `bubbleTranslate --dev-reset-quota`: hands today's translations back.
 ///
 /// Waiting for midnight is a poor way to test the free path, and the free
 /// tier is the path most users see. Debug builds only: in a release this

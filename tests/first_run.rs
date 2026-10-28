@@ -4,7 +4,8 @@
 //! the obvious way to ask for more. Deleting it once handed out unlimited use
 //! forever, because a config with no counter beside it was read as an install
 //! from before metering. Now a missing, edited or foreign counter reads as a
-//! day already spent, and only a machine with no files at all starts with ten.
+//! day already spent, and only a machine with no files at all starts with the day's
+//! allowance.
 //!
 //! Driven through the real binary because the rule depends on the order two
 //! files are loaded in at startup, which no unit test of either one can see.
@@ -13,6 +14,10 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+
+/// `FREE_DAILY_TRANSLATIONS` in `src/license.rs`; a test of the binary cannot
+/// import it.
+const FREE_DAILY_TRANSLATIONS: u32 = 3;
 
 const BIN: &str = env!("CARGO_BIN_EXE_bubbleTranslate");
 
@@ -84,9 +89,9 @@ impl Drop for Sandbox {
 }
 
 /// Every command that creates the config must create the counter too, and a
-/// brand-new install starts metered with its full ten.
+/// brand-new install starts metered with its full allowance.
 #[test]
-fn a_new_install_starts_with_ten() {
+fn a_new_install_starts_with_the_full_allowance() {
     for (name, args) in [
         ("license", vec!["--license"]),
         ("check", vec!["--check"]),
@@ -101,7 +106,10 @@ fn a_new_install_starts_with_ten() {
         );
         // `--translate` may have spent one if the network was there.
         let left = box_.left_today().expect("a new install is unlimited");
-        assert!(left >= 9, "`{name}` left a new install with {left}");
+        assert!(
+            left >= FREE_DAILY_TRANSLATIONS - 1,
+            "`{name}` left a new install with {left}"
+        );
     }
 }
 
@@ -110,7 +118,7 @@ fn a_new_install_starts_with_ten() {
 #[test]
 fn deleting_the_counter_buys_nothing() {
     let box_ = Sandbox::new("deleted");
-    assert_eq!(box_.left_today(), Some(10));
+    assert_eq!(box_.left_today(), Some(FREE_DAILY_TRANSLATIONS));
     std::fs::remove_file(box_.usage()).expect("no counter to remove");
     assert_eq!(
         box_.left_today(),
@@ -123,7 +131,7 @@ fn deleting_the_counter_buys_nothing() {
 #[test]
 fn editing_the_counter_buys_nothing() {
     let box_ = Sandbox::new("edited");
-    assert_eq!(box_.left_today(), Some(10));
+    assert_eq!(box_.left_today(), Some(FREE_DAILY_TRANSLATIONS));
     let raw = std::fs::read_to_string(box_.usage()).unwrap();
     let edited = raw.replacen("\"used\": 0", "\"used\": 3", 1);
     assert_ne!(
@@ -149,6 +157,6 @@ fn editing_the_counter_buys_nothing() {
 #[test]
 fn an_untouched_counter_is_trusted() {
     let box_ = Sandbox::new("untouched");
-    assert_eq!(box_.left_today(), Some(10));
-    assert_eq!(box_.left_today(), Some(10));
+    assert_eq!(box_.left_today(), Some(FREE_DAILY_TRANSLATIONS));
+    assert_eq!(box_.left_today(), Some(FREE_DAILY_TRANSLATIONS));
 }

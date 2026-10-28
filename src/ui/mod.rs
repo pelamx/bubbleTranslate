@@ -180,14 +180,14 @@ impl BubbleApp {
     /// fewer) that running out is near, so it is no surprise when it comes.
     /// `None` on Pro, and while there are plenty.
     ///
-    /// For something read off the screen, the day's screen readings instead,
+    /// For a box read off the screen, the day's boxes left instead,
     /// which are few enough that every one left is worth saying.
     fn few_left(&self, screen: bool) -> Option<u32> {
         // One lock after the other, in the order the engine takes them.
         let entitlement = self.licensing.license.lock().unwrap().entitlement.clone();
         let mut quota = self.licensing.quota.lock().unwrap();
         if screen {
-            return quota.ocr_left(&entitlement);
+            return quota.ocr_left(&entitlement, crate::quota::Screen::Box);
         }
         let left = quota.remaining(&entitlement)?;
         (left <= 3).then_some(left)

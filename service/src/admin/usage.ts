@@ -6,15 +6,26 @@
 // with no install id, so they cannot be split by plan or have your own
 // machines taken out. Copies released after 0.4.21 also report, per install
 // and day, how many translations they made on which plan, how many were
-// charged to the ten free ones and how many were refused (`translate_usage`).
+// charged to the free allowance and how many were refused (`translate_usage`).
 
 import type { Env } from "../env";
 import { escapeHtml } from "../pages";
+import { freeDailyTranslations } from "../observability";
 import { NOT_MINE_INSTALL, mineInstalls, osLabel } from "./queries";
 import { DAY } from "./shared";
 
-/** The free plan's translations a day; `FREE_DAILY_TRANSLATIONS` in the app. */
-const FREE_LIMIT = 10;
+/** Free install-days are bucketed by how much of the allowance they spent:
+ *  "high" from half of it (or three short, whichever is more) up to one
+ *  short, "low" the first three below that, "mid" what is left between. At
+ *  ten that is 1–3, 4–6 and 7–9; at three it is 1, none and 2. */
+function buckets(limit: number) {
+  const highMin = Math.max(1, limit - 3, Math.ceil(limit / 2));
+  const lowMax = Math.min(3, highMin - 1);
+  return { lowMax, highMin };
+}
+
+/** "4–6", "4", or a dash for a bucket that is empty at this allowance. */
+const range = (from: number, to: number) => (to < from ? "—" : from === to ? String(from) : `${from}–${to}`);
 
 export interface UsageDay {
   day: string;
@@ -39,17 +50,20 @@ export interface UsageSpread {
 }
 
 export interface Usage {
+  /** The free plan's translations a day, as every platform is told them now. */
+  limit: number;
   days: UsageDay[];
   spread: UsageSpread;
 }
 
-const empty = (): Usage => ({ days: [], spread: { low: 0, mid: 0, high: 0, full: 0 } });
+const empty = (limit: number): Usage => ({ limit, days: [], spread: { low: 0, mid: 0, high: 0, full: 0 } });
 
 /** The last 30 days. */
 export async function translateUse(env: Env): Promise<Usage> {
   const t = Math.floor(Date.now() / 1000);
   const since = new Date((t - 29 * DAY) * 1000).toISOString().slice(0, 10);
-  const mine = await mineInstalls(env);
+  const [mine, limit] = await Promise.all([mineInstalls(env), freeDailyTranslations(env)]);
+  const { lowMax, highMin } = buckets(limit);
   try {
     const [all, split, spread] = await Promise.all([
       env.DB.prepare(`SELECT day, SUM(ok) AS n FROM provider_health WHERE day >= ?1 GROUP BY day`)
@@ -61,7 +75,7 @@ export async function translateUse(env: Env): Promise<Usage> {
                 SUM(CASE WHEN plan = 'free' THEN done ELSE 0 END) AS free_done,
                 SUM(CASE WHEN plan = 'free' THEN charged ELSE 0 END) AS free_charged,
                 SUM(CASE WHEN plan = 'free' THEN capped ELSE 0 END) AS free_capped,
-                SUM(CASE WHEN plan = 'free' AND (charged >= ${FREE_LIMIT} OR capped > 0) THEN 1 ELSE 0 END) AS free_full,
+                SUM(CASE WHEN plan = 'free' AND (charged >= ${limit} OR capped > 0) THEN 1 ELSE 0 END) AS free_full,
                 SUM(CASE WHEN plan = 'pro' THEN 1 ELSE 0 END) AS pro_installs,
                 SUM(CASE WHEN plan = 'pro' THEN done ELSE 0 END) AS pro_done
            FROM translate_usage
@@ -71,10 +85,10 @@ export async function translateUse(env: Env): Promise<Usage> {
         .bind(since, null, null, null, null, null, null, null, mine)
         .all<Omit<UsageDay, "day" | "all"> & { day: string }>(),
       env.DB.prepare(
-        `SELECT SUM(CASE WHEN charged BETWEEN 1 AND 3 AND capped = 0 THEN 1 ELSE 0 END) AS low,
-                SUM(CASE WHEN charged BETWEEN 4 AND 6 AND capped = 0 THEN 1 ELSE 0 END) AS mid,
-                SUM(CASE WHEN charged BETWEEN 7 AND ${FREE_LIMIT - 1} AND capped = 0 THEN 1 ELSE 0 END) AS high,
-                SUM(CASE WHEN charged >= ${FREE_LIMIT} OR capped > 0 THEN 1 ELSE 0 END) AS full
+        `SELECT SUM(CASE WHEN charged BETWEEN 1 AND ${lowMax} AND capped = 0 THEN 1 ELSE 0 END) AS low,
+                SUM(CASE WHEN charged BETWEEN ${lowMax + 1} AND ${highMin - 1} AND capped = 0 THEN 1 ELSE 0 END) AS mid,
+                SUM(CASE WHEN charged BETWEEN ${highMin} AND ${limit - 1} AND capped = 0 THEN 1 ELSE 0 END) AS high,
+                SUM(CASE WHEN charged >= ${limit} OR capped > 0 THEN 1 ELSE 0 END) AS full
            FROM translate_usage
           WHERE plan = 'free' AND day >= ?1 AND ${NOT_MINE_INSTALL}`,
       )
@@ -88,6 +102,7 @@ export async function translateUse(env: Env): Promise<Usage> {
     for (const r of all.results ?? []) byDay.set(r.day, { ...zero(r.day), all: r.n ?? 0 });
     for (const r of split.results ?? []) byDay.set(r.day, { ...(byDay.get(r.day) ?? zero(r.day)), ...r });
     return {
+      limit,
       days: [...byDay.values()].sort((a, b) => (a.day < b.day ? 1 : -1)),
       spread: {
         low: spread?.low ?? 0,
@@ -99,11 +114,13 @@ export async function translateUse(env: Env): Promise<Usage> {
   } catch (err) {
     // The table is new; a database without it must not take the panel down.
     console.error("could not read translate_usage", err);
-    return empty();
+    return empty(limit);
   }
 }
 
 export function usageCard(u: Usage): string {
+  const { limit } = u;
+  const { lowMax, highMin } = buckets(limit);
   if (u.days.length === 0) {
     return `<section class="card" id="usage">
        <p class="label">Translations a day, last 30 days</p>
@@ -131,20 +148,20 @@ export function usageCard(u: Usage): string {
   return `<section class="card" id="usage">
        <p class="label">Translations a day, last 30 days</p>
        <div class="scroll"><table>
-         <tr><th>Free days that used 1–3 of ${FREE_LIMIT}</th><th>4–6</th><th>7–${FREE_LIMIT - 1}</th>
-             <th>All ${FREE_LIMIT}</th></tr>
+         <tr><th>Free days that used ${range(1, lowMax)} of ${limit}</th><th>${range(lowMax + 1, highMin - 1)}</th><th>${range(highMin, limit - 1)}</th>
+             <th>All ${limit}</th></tr>
          <tr><td>${share(s.low)}</td><td>${share(s.mid)}</td><td>${share(s.high)}</td><td>${share(s.full)}</td></tr>
        </table></div>
        <div class="scroll" style="margin-top:14px"><table>
          <tr><th>Day</th><th class="num">All versions</th><th class="num">Free</th>
-             <th class="num">Free used, average</th><th class="num">Reached ${FREE_LIMIT}</th>
+             <th class="num">Free used, average</th><th class="num">Reached ${limit}</th>
              <th class="num">Refused</th><th class="num">Pro</th></tr>
          ${rows}
        </table></div>
        <p class="muted foot"><b>All versions</b> is every translation a backend answered, from every copy since
          0.3.6, your own machines included. The other columns come only from copies released after 0.4.21,
-         without your machines: <b>Free used</b> is how many of the ${FREE_LIMIT} a free install spent that day
-         (a repeat is not charged), <b>Reached ${FREE_LIMIT}</b> is how many installs spent them all, and
+         without your machines: <b>Free used</b> is how many of the ${limit} a free install spent that day
+         (a repeat is not charged), <b>Reached ${limit}</b> is how many installs spent them all, and
          <b>Refused</b> is translations asked for after that. "by" says how many installs. Reported in the ping,
          by copies with usage pings on.</p>
      </section>`;
@@ -172,6 +189,8 @@ export interface InstallUse {
 }
 
 export interface InstallsUse {
+  /** The free plan's translations a day, as every platform is told them now. */
+  limit: number;
   /** The grid's dates, oldest first. */
   dates: string[];
   installs: InstallUse[];
@@ -179,17 +198,17 @@ export interface InstallsUse {
 
 const iso = (unix: number) => new Date(unix * 1000).toISOString().slice(0, 10);
 
-/** The free installs of the last {@link GRID_DAYS} days, closest to the ten
- *  first, each with its days. Your own machines are left out. */
+/** The free installs of the last {@link GRID_DAYS} days, closest to the
+ *  allowance first, each with its days. Your own machines are left out. */
 export async function installUse(env: Env): Promise<InstallsUse> {
   const t = Math.floor(Date.now() / 1000);
   const dates = Array.from({ length: GRID_DAYS }, (_, i) => iso(t - (GRID_DAYS - 1 - i) * DAY));
-  const mine = await mineInstalls(env);
+  const [mine, limit] = await Promise.all([mineInstalls(env), freeDailyTranslations(env)]);
   try {
     const { results: listed } = await env.DB.prepare(
       `SELECT u.install, i.os, i.app, i.country, i.plan AS plan_now,
               COUNT(*) AS days, SUM(u.charged) AS charged,
-              SUM(CASE WHEN u.charged >= ${FREE_LIMIT} OR u.capped > 0 THEN 1 ELSE 0 END) AS full_days
+              SUM(CASE WHEN u.charged >= ${limit} OR u.capped > 0 THEN 1 ELSE 0 END) AS full_days
          FROM translate_usage u LEFT JOIN installs i ON i.install = u.install
         WHERE u.day >= ?1 AND u.plan = 'free'
           AND u.install NOT IN (SELECT value FROM json_each(?9))
@@ -213,25 +232,27 @@ export async function installUse(env: Env): Promise<InstallsUse> {
         byInstall.get(r.install)!.grid[r.day] = { charged: r.charged, capped: r.capped };
       }
     }
-    return { dates, installs };
+    return { limit, dates, installs };
   } catch (err) {
     // The table is new; a database without it must not take the panel down.
     console.error("could not read translate_usage by install", err);
-    return { dates, installs: [] };
+    return { limit, dates, installs: [] };
   }
 }
 
-/** One install's day: a dot when it did nothing, red when it spent all ten or
- *  was refused, orange when it came within three. Refusals go under the count. */
-function dayCell(d: { charged: number; capped: number } | undefined): string {
+/** One install's day: a dot when it did nothing, red when it spent the whole
+ *  allowance or was refused, orange when it came close (see {@link buckets}).
+ *  Refusals go under the count. */
+function dayCell(d: { charged: number; capped: number } | undefined, limit: number): string {
   if (!d) return `<td class="d none">·</td>`;
-  const full = d.charged >= FREE_LIMIT || d.capped > 0;
-  const cls = full ? "d full" : d.charged >= FREE_LIMIT - 3 ? "d high" : "d";
+  const full = d.charged >= limit || d.capped > 0;
+  const cls = full ? "d full" : d.charged >= buckets(limit).highMin ? "d high" : "d";
   const refused = d.capped ? `<small>+${d.capped} refused</small>` : "";
   return `<td class="${cls}">${d.charged}${refused}</td>`;
 }
 
 export function installCard(u: InstallsUse): string {
+  const { limit } = u;
   if (u.installs.length === 0) {
     return `<section class="card" id="installs-use">
        <p class="label">Free translations per install, day by day</p>
@@ -247,7 +268,7 @@ export function installCard(u: InstallsUse): string {
         <td>${escapeHtml(osLabel(i.os ?? "unknown"))}</td>
         <td>${escapeHtml(i.app ?? "—")}</td>
         <td>${escapeHtml(i.country ?? "—")}</td>
-        ${u.dates.map((d) => dayCell(i.grid[d])).join("")}
+        ${u.dates.map((d) => dayCell(i.grid[d], limit)).join("")}
         <td class="num">${i.charged}</td>
         <td class="num">${i.days ? (i.charged / i.days).toFixed(1) : "0"}</td>
         <td class="num">${i.full_days ? `<b>${i.full_days}</b>` : `<span class="muted">0</span>`}</td>
@@ -258,12 +279,12 @@ export function installCard(u: InstallsUse): string {
        <p class="label">Free translations per install, day by day</p>
        <div class="scroll"><table>
          <tr><th>Install</th><th>OS</th><th>Version</th><th>Country</th>${head}
-             <th class="num">Total</th><th class="num">Per day used</th><th class="num">Days at ${FREE_LIMIT}</th></tr>
+             <th class="num">Total</th><th class="num">Per day used</th><th class="num">Days at ${limit}</th></tr>
          ${rows}
        </table></div>
-       <p class="muted foot">Each row is one free install, each column a day: how many of its ${FREE_LIMIT} it spent
-         (a repeat is not charged). <b class="err">Red</b> is a day it spent all ${FREE_LIMIT} or was refused, with
-         the refused translations under the count; <b class="warn">orange</b> is ${FREE_LIMIT - 3} or more; a dot is a
+       <p class="muted foot">Each row is one free install, each column a day: how many of its ${limit} it spent
+         (a repeat is not charged). <b class="err">Red</b> is a day it spent all ${limit} or was refused, with
+         the refused translations under the count; <b class="warn">orange</b> is ${buckets(limit).highMin} or more; a dot is a
          day it translated nothing. The 50 installs of the last ${GRID_DAYS} days closest to the limit come first.
          Days are the install's own date and arrive with the next daily ping, so today's column fills in tomorrow.
          Only copies released after 0.4.21 report it. Your own machines are left out.</p>

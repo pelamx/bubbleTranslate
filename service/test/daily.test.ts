@@ -184,18 +184,19 @@ it("lists each free install day by day, the one that ran out first", async () =>
   const light = "7".repeat(32);
   await ping(close, {
     daily: [
-      { day: day - 1, section: "translate", name: "free", counts: { done: 12, charged: 10, capped: 4 } },
-      { day, section: "translate", name: "free", counts: { done: 8, charged: 8 } },
+      { day: day - 1, section: "translate", name: "free", counts: { done: 5, charged: 3, capped: 4 } },
+      { day, section: "translate", name: "free", counts: { done: 2, charged: 2 } },
       { day, section: "translate", name: "pro", counts: { done: 30 } },
     ],
   });
-  await ping(light, { daily: [{ day, section: "translate", name: "free", counts: { done: 2, charged: 2 } }] });
+  await ping(light, { daily: [{ day, section: "translate", name: "free", counts: { done: 1, charged: 1 } }] });
   const html = await (await admin()).text();
   const from = html.slice(html.indexOf('id="installs-use"'));
   const card = from.slice(0, from.indexOf("</section>"));
   expect(card).toContain("Free translations per install, day by day");
   expect(card.indexOf(close.slice(0, 8))).toBeLessThan(card.indexOf(light.slice(0, 8)));
-  expect(card).toContain('<td class="d full">10<small>+4 refused</small></td>');
-  expect(card).toContain('<td class="d high">8</td>');
-  expect(card).toContain('<td class="d">2</td>');
+  expect(card).toContain('<td class="d full">3<small>+4 refused</small></td>');
+  expect(card).toContain('<td class="d high">2</td>');
+  expect(card).toContain('<td class="d">1</td>');
+  expect(card).toContain("Days at 3");
 });

@@ -1008,8 +1008,8 @@ function limitCard(hits: LimitHits): string {
              <th class="num">Days capped</th><th>Last</th><th>Plan</th></tr>
          ${rows}
        </table></div>
-       <p class="muted foot">Reported by the app the first time on a day that the ten free
-         translations run out; copies older than 0.3.7 do not send it. A free install that keeps
+       <p class="muted foot">Reported by the app the first time on a day that a free allowance runs out
+         (translations, screen boxes or whole screens); copies older than 0.3.7 do not send it. A free install that keeps
          running out is someone the app is useful to who has not bought — the people pricing is for.
          Your own machines are left out.</p>
      </section>`;

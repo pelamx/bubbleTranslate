@@ -22,17 +22,16 @@ use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Translations a day before a subscription is needed. The count comes back
-/// at the user's local midnight — see [`crate::quota`].
-///
-/// Deliberately also carried in the token as `lim`, so this is only the
-/// fallback for an install that has never talked to the service. Changing the
-/// number for everyone is a server-side edit, not a release.
-pub const FREE_DAILY_TRANSLATIONS: u32 = 10;
+/// Translations of selected or typed text a day before a subscription is
+/// needed. The count comes back at the user's local midnight — see
+/// [`crate::quota`]. The service can set another figure, from 3 to 10, for
+/// as long as it keeps being heard from (see
+/// [`crate::remote::free_daily_translations`]); this is what holds otherwise.
+pub const FREE_DAILY_TRANSLATIONS: u32 = 3;
 
-/// Screen readings a day on the free tier: a box drawn with Ctrl+Shift+E or
-/// the whole screen with Ctrl+Shift+F, together. Counted apart from the
-/// translations of selected text, which have their own ten.
+/// Screen readings a day on the free tier, of each kind: three boxes drawn
+/// with Ctrl+Shift+E and three whole screens with Ctrl+Shift+F, each counted
+/// apart from the other and from the translations of selected text.
 pub const FREE_DAILY_OCR: u32 = 3;
 
 /// What Pro costs, as the app says it out loud. Kept here rather than in the

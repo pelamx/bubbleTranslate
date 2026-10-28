@@ -93,6 +93,15 @@ Supported controls:
 - `update_before_version`: optional numeric `major.minor.patch` threshold;
   the message is shown only on older builds. It does not force an update or
   change the trusted download destination.
+- `free_daily_translations`: integer 3–10, sets the free plan's translations
+  of selected text a day in place of the app's own three, for as long as the
+  app keeps hearing from the service (a day without an answer and it goes back
+  to three). Pro, and a licence with a limit of its own, are unaffected; screen
+  boxes and whole screens keep their three each. Copies from 0.4.23 on send
+  `&app=<version>` and only they are given it: older copies read the settings
+  with unknown fields refused and would discard the whole answer. Set it for
+  all platforms so the buy page and the admin panel say the same number; the
+  website's prices page is changed by hand.
 
 Precedence is global, platform, channel, then platform+channel. Controls are
 fetched from `/v1/config?os=linux&channel=download` every five minutes, even

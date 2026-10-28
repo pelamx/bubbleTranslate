@@ -12,7 +12,7 @@ use crate::config::{Config, Provider};
 use crate::health::Health;
 use crate::license::{self, Licensing};
 use crate::platform::{CaptureSource, Trigger};
-use crate::quota::Verdict;
+use crate::quota::{Screen, Verdict};
 use crate::translate::{TranslateError, Translation, Translator};
 
 /// How long an identical selection is treated as a repeat of the one just
@@ -351,7 +351,11 @@ fn run(
                 }
                 crate::telemetry::record("ocr_page", "attempt");
                 let entitlement = licensing.license.lock().unwrap().entitlement.clone();
-                let left = licensing.quota.lock().unwrap().ocr_left(&entitlement);
+                let left = licensing
+                    .quota
+                    .lock()
+                    .unwrap()
+                    .ocr_left(&entitlement, Screen::Page);
                 let at = crate::platform::cursor_position();
                 crate::trace!("page      screen readings left {left:?}");
                 if left == Some(0) {
@@ -366,7 +370,7 @@ fn run(
                 if translate_page(&translator, &cfg, &ui, &wake_ui, at, left) {
                     crate::telemetry::record("ocr_page", "ok");
                     crate::outbox::add("screen", "page", &[("done", 1)]);
-                    licensing.quota.lock().unwrap().record_ocr();
+                    licensing.quota.lock().unwrap().record_ocr(Screen::Page);
                     page_closed = Some(Instant::now());
                 }
                 PAGE_BUSY.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -507,7 +511,13 @@ fn run(
                 // Asked before the overlay goes up: someone with no readings
                 // left today should not be made to draw a box first.
                 let entitlement = licensing.license.lock().unwrap().entitlement.clone();
-                if licensing.quota.lock().unwrap().ocr_left(&entitlement) == Some(0) {
+                if licensing
+                    .quota
+                    .lock()
+                    .unwrap()
+                    .ocr_left(&entitlement, Screen::Box)
+                    == Some(0)
+                {
                     crate::telemetry::record("ocr_box", "capped");
                     crate::outbox::add("screen", "box", &[("capped", 1)]);
                     report_capped(&config);
@@ -621,7 +631,7 @@ fn run(
                 }
                 if screen_read && !result.echoed {
                     crate::outbox::add("screen", "box", &[("done", 1)]);
-                    licensing.quota.lock().unwrap().record_ocr();
+                    licensing.quota.lock().unwrap().record_ocr(Screen::Box);
                 }
                 health.answered(result.provider);
                 crate::trace!(

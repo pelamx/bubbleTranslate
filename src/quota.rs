@@ -1,16 +1,16 @@
 //! The daily allowance, and what does and does not spend it.
 //!
-//! Ten translations a day on the free tier. The count comes back at the
+//! Three translations a day on the free tier. The count comes back at the
 //! user's midnight, so someone who runs out is never more than a night away
 //! from the free path — and Pro is there for anyone who does not want to wait.
 //!
-//! Ten is a small number, so *what counts* matters more than the number does.
+//! Three is a small number, so *what counts* matters more than the number does.
 //! The bubble fires on every finished selection, which means a user reading a
 //! PDF would burn the day's allowance in under a minute if every trigger were
 //! charged. So the rule is deliberately narrow: only a translation that was
 //! asked for and actually came back spends anything. Failures, language
 //! switches and re-reading the same sentence are all free — until the day is
-//! spent. None of those exemptions outlives the allowance: once the tenth
+//! spent. None of those exemptions outlives the allowance: once the last
 //! translation is in, the next selection is refused whether it is new text or
 //! the same sentence again.
 //!
@@ -36,6 +36,15 @@ const RECENT_MEMORY: usize = 16;
 /// Mixed into the counter's seal. Not a secret -- it is in the binary -- but
 /// it keeps the seal from being a plain hash anyone could recompute by guess.
 const SEAL_SALT: &str = "bubbleTranslate.usage.v1";
+
+/// The two ways of reading the screen, each with an allowance of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Screen {
+    /// A box drawn round some text.
+    Box,
+    /// The whole screen at once.
+    Page,
+}
 
 /// What to do with a selection that has already been captured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,10 +88,15 @@ struct Counter {
     /// When this install first ran a metered build.
     #[serde(default)]
     first_seen: u64,
-    /// Screen readings spent today — a box or the whole screen. Rolls over
-    /// with `used`, and is counted apart from it.
+    /// Boxes read off the screen today. Rolls over with `used`, and is
+    /// counted apart from it. Until 0.4.23 this held the whole screen too,
+    /// from one shared allowance; the name is kept so the file still reads.
     #[serde(default)]
     ocr_used: u32,
+    /// Whole screens read today, an allowance of their own. Absent from a
+    /// counter written before 0.4.23, which is a day with none read.
+    #[serde(default)]
+    page_used: u32,
     /// A hash of the fields above and this machine's id. A counter edited by
     /// hand, copied from another machine or written by an older build does
     /// not match it, and is read as a day already spent -- see [`Quota::load`].
@@ -99,6 +113,7 @@ impl Default for Counter {
             high_water_day: today,
             first_seen: now(),
             ocr_used: 0,
+            page_used: 0,
             seal: String::new(),
         }
     }
@@ -126,7 +141,7 @@ impl Quota {
     ///   deleted counter rather than a new install, and is treated the same.
     /// - An unreadable counter, likewise.
     ///
-    /// Only a machine with neither file is a first run with ten in hand.
+    /// Only a machine with neither file is a first run with the day's allowance in hand.
     /// `config_existed` has to be sampled before
     /// [`crate::config::Config::load`], which writes the file it asks about.
     ///
@@ -189,29 +204,39 @@ impl Quota {
         // The screen readings are in the same file, so a file that cannot be
         // trusted cannot vouch for them either.
         self.counter.ocr_used = self.counter.ocr_used.max(FREE_DAILY_OCR);
+        self.counter.page_used = self.counter.page_used.max(FREE_DAILY_OCR);
         self.recent.clear();
     }
 
-    /// Screen readings left today, or `None` where they are not counted at
-    /// all — Pro.
-    pub fn ocr_left(&mut self, entitlement: &Entitlement) -> Option<u32> {
+    /// Readings of this kind left today, or `None` where they are not counted
+    /// at all — Pro.
+    pub fn ocr_left(&mut self, entitlement: &Entitlement, kind: Screen) -> Option<u32> {
         self.roll();
+        let used = match kind {
+            Screen::Box => self.counter.ocr_used,
+            Screen::Page => self.counter.page_used,
+        };
         entitlement
             .limit
-            .map(|_| FREE_DAILY_OCR.saturating_sub(self.counter.ocr_used))
+            .map(|_| FREE_DAILY_OCR.saturating_sub(used))
     }
 
-    /// Records a screen reading — a box or the whole screen — that came back
-    /// translated.
-    pub fn record_ocr(&mut self) {
+    /// Records a screen reading of this kind that came back translated.
+    pub fn record_ocr(&mut self, kind: Screen) {
         self.roll();
-        self.counter.ocr_used = self.counter.ocr_used.saturating_add(1);
+        let used = match kind {
+            Screen::Box => &mut self.counter.ocr_used,
+            Screen::Page => &mut self.counter.page_used,
+        };
+        *used = used.saturating_add(1);
         self.save();
     }
 
-    /// Translations a day, or `None` for unlimited.
+    /// Translations a day, or `None` for unlimited. The service may set the
+    /// free allowance (see [`crate::remote::free_daily_translations`]); Pro
+    /// is untouched by it.
     pub fn limit(&self, entitlement: &Entitlement) -> Option<u32> {
-        entitlement.limit
+        set_by(entitlement, crate::remote::free_daily_translations())
     }
 
     /// Translations spent today. `&mut` because asking rolls the day over
@@ -273,7 +298,7 @@ impl Quota {
     ///
     /// A day number *behind* the high-water mark means the system clock went
     /// backwards — a timezone change, an NTP correction, or someone hoping for
-    /// a fresh ten. The count is kept in that case, and it is kept again when
+    /// a fresh allowance. The count is kept in that case, and it is kept again when
     /// the clock catches back up, because the high-water mark is what the
     /// comparison is against rather than the current day.
     ///
@@ -290,6 +315,7 @@ impl Quota {
         if today > self.counter.high_water_day {
             self.counter.used = 0;
             self.counter.ocr_used = 0;
+            self.counter.page_used = 0;
             self.counter.high_water_day = today;
             self.recent.clear();
         }
@@ -328,6 +354,16 @@ impl Quota {
                 crate::trace!("quota     could not save {}: {err}", path.display());
             }
         }
+    }
+}
+
+/// The service's figure in place of the built-in free one. Only the free
+/// plan's: a licence carries its own limit, set for it alone, and Pro stays
+/// unlimited.
+fn set_by(entitlement: &Entitlement, remote: Option<u32>) -> Option<u32> {
+    match entitlement.plan {
+        crate::license::Plan::Free => entitlement.limit.map(|n| remote.unwrap_or(n)),
+        _ => entitlement.limit,
     }
 }
 
@@ -436,6 +472,10 @@ fn seal(counter: &Counter, machine: &str) -> String {
     if counter.ocr_used > 0 {
         hasher.update(format!("|o{}", counter.ocr_used).as_bytes());
     }
+    // Likewise for whole screens, counted apart from 0.4.23 on.
+    if counter.page_used > 0 {
+        hasher.update(format!("|p{}", counter.page_used).as_bytes());
+    }
     hasher
         .finalize()
         .iter()
@@ -463,6 +503,7 @@ mod tests {
                 high_water_day: high_water,
                 first_seen: 0,
                 ocr_used: 0,
+                page_used: 0,
                 seal: String::new(),
             },
             recent: Vec::new(),
@@ -487,24 +528,57 @@ mod tests {
         }
     }
 
-    /// Three screen readings a day, apart from the ten translations, and
-    /// back the next day.
+    /// Three boxes and three whole screens a day, each apart from the other
+    /// and from the translations, and back the next day.
     #[test]
-    fn screen_readings_are_three_a_day_of_their_own() {
+    fn boxes_and_whole_screens_each_have_three_a_day() {
         let today = local_day();
         let mut q = today_quota(0);
         for left in (1..=FREE_DAILY_OCR).rev() {
-            assert_eq!(q.ocr_left(&free()), Some(left));
-            q.record_ocr();
+            assert_eq!(q.ocr_left(&free(), Screen::Box), Some(left));
+            q.record_ocr(Screen::Box);
         }
-        assert_eq!(q.ocr_left(&free()), Some(0));
-        // The ten translations are untouched by them.
+        assert_eq!(q.ocr_left(&free(), Screen::Box), Some(0));
+        // Spending the boxes leaves the whole screens alone.
+        assert_eq!(q.ocr_left(&free(), Screen::Page), Some(FREE_DAILY_OCR));
+        for _ in 0..FREE_DAILY_OCR {
+            q.record_ocr(Screen::Page);
+        }
+        assert_eq!(q.ocr_left(&free(), Screen::Page), Some(0));
+        // The translations are untouched by them.
         assert_eq!(q.verdict("some text", &free()), Verdict::Allow);
-        assert_eq!(q.ocr_left(&pro()), None);
+        assert_eq!(q.ocr_left(&pro(), Screen::Box), None);
         // Tomorrow they are back.
         q.counter.day = today - 1;
         q.counter.high_water_day = today - 1;
-        assert_eq!(q.ocr_left(&free()), Some(FREE_DAILY_OCR));
+        assert_eq!(q.ocr_left(&free(), Screen::Box), Some(FREE_DAILY_OCR));
+        assert_eq!(q.ocr_left(&free(), Screen::Page), Some(FREE_DAILY_OCR));
+    }
+
+    /// A counter sealed before whole screens were counted apart is still
+    /// trusted after: the seal only covers `page_used` once it is above zero.
+    #[test]
+    fn an_old_seal_survives_the_whole_screen_field() {
+        let mut q = today_quota(2);
+        q.counter.ocr_used = 1;
+        let old_seal = seal(&q.counter, &q.machine);
+        let json = serde_json::to_string(&Counter {
+            seal: old_seal,
+            ..q.counter.clone()
+        })
+        .unwrap()
+        .replace(",\"page_used\":0", "");
+        assert!(!json.contains("page_used"));
+        let mut reopened = Quota::open(Some(&json), true, "test-machine".into());
+        assert_eq!(reopened.counter.used, 2);
+        assert_eq!(
+            reopened.ocr_left(&free(), Screen::Box),
+            Some(FREE_DAILY_OCR - 1)
+        );
+        assert_eq!(
+            reopened.ocr_left(&free(), Screen::Page),
+            Some(FREE_DAILY_OCR)
+        );
     }
 
     /// A counter sealed before the trial existed is still trusted after it.
@@ -521,12 +595,15 @@ mod tests {
         assert!(!json.contains("ocr_used"));
         let mut reopened = Quota::open(Some(&json), true, "test-machine".into());
         assert_eq!(reopened.counter.used, 4);
-        assert_eq!(reopened.ocr_left(&free()), Some(FREE_DAILY_OCR));
+        assert_eq!(
+            reopened.ocr_left(&free(), Screen::Box),
+            Some(FREE_DAILY_OCR)
+        );
     }
 
     /// The allowance runs out, and says so with the numbers the bubble shows.
     #[test]
-    fn the_tenth_translation_is_the_last_free_one_today() {
+    fn the_last_allowed_translation_is_the_last_free_one_today() {
         let mut q = today_quota(0);
         for n in 0..FREE_DAILY_TRANSLATIONS {
             assert_eq!(q.verdict(&format!("text {n}"), &free()), Verdict::Allow);
@@ -534,10 +611,8 @@ mod tests {
         }
         assert!(matches!(
             q.verdict("something new", &free()),
-            Verdict::Capped {
-                used: 10,
-                limit: 10
-            },
+            Verdict::Capped { used, limit }
+                if used == FREE_DAILY_TRANSLATIONS && limit == FREE_DAILY_TRANSLATIONS,
         ));
     }
 
@@ -638,6 +713,21 @@ mod tests {
         assert_eq!(q.remaining(&free()), Some(FREE_DAILY_TRANSLATIONS));
     }
 
+    /// The service's figure replaces the built-in free one, the built-in one
+    /// stands when the service has said nothing, and Pro stays unlimited
+    /// whatever it says.
+    #[test]
+    fn a_remote_allowance_sets_the_free_one_and_leaves_pro_alone() {
+        assert_eq!(set_by(&free(), Some(5)), Some(5));
+        assert_eq!(set_by(&free(), None), Some(FREE_DAILY_TRANSLATIONS));
+        assert_eq!(set_by(&pro(), Some(5)), None);
+        let limited = Entitlement {
+            limit: Some(20),
+            ..pro()
+        };
+        assert_eq!(set_by(&limited, Some(5)), Some(20));
+    }
+
     #[test]
     fn pro_is_unlimited_whatever_the_counter_says() {
         let q = Quota::open(None, true, "m".into());
@@ -652,10 +742,10 @@ mod tests {
         q.record("merhaba dünya");
         // Spend some of the day on other things, but not all of it: the
         // exemption is for a day with something still in it.
-        for n in 0..(FREE_DAILY_TRANSLATIONS - 3) {
+        for n in 0..(FREE_DAILY_TRANSLATIONS - 2) {
             q.record(&format!("other {n}"));
         }
-        assert_eq!(q.used_today(), FREE_DAILY_TRANSLATIONS - 2);
+        assert_eq!(q.used_today(), FREE_DAILY_TRANSLATIONS - 1);
         assert_eq!(q.verdict("merhaba dünya", &free()), Verdict::Repeat);
         // Whitespace differences are the same selection to a human.
         assert_eq!(q.verdict("  merhaba dünya  ", &free()), Verdict::Repeat);
@@ -702,10 +792,8 @@ mod tests {
         for n in 0..5 {
             assert!(matches!(
                 q.verdict(&format!("try {n}"), &free()),
-                Verdict::Capped {
-                    used: 10,
-                    limit: 10
-                },
+                Verdict::Capped { used, limit }
+                    if used == FREE_DAILY_TRANSLATIONS && limit == FREE_DAILY_TRANSLATIONS,
             ));
         }
     }

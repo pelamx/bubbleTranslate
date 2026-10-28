@@ -102,12 +102,12 @@ pub fn how_to(ui: &mut egui::Ui, cfg: &Config) {
     tip(
         ui,
         t(
-            "Free: 10 text translations and 3 screen translations a day, back at midnight. Pro \
-             has no limit.",
-            "Ücretsiz: günde 10 metin ve 3 ekran çevirisi, gece yarısı yenilenir. Pro'da sınır \
-             yok.",
-            "Gratis: 10 traducciones de texto y 3 de pantalla al día, se renuevan a medianoche. \
-             Pro no tiene límite.",
+            "Free: 3 text translations, 3 screen boxes and 3 whole screens a day, back at \
+             midnight. Pro has no limit.",
+            "Ücretsiz: günde 3 metin çevirisi, 3 ekran kutusu ve 3 tüm ekran, gece yarısı \
+             yenilenir. Pro'da sınır yok.",
+            "Gratis: 3 traducciones de texto, 3 recuadros y 3 pantallas completas al día, se \
+             renuevan a medianoche. Pro no tiene límite.",
         ),
     );
     tip(

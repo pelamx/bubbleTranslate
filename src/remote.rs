@@ -13,6 +13,8 @@ struct Settings {
     dictionary_enabled: Option<bool>,
     update_message: Option<String>,
     update_before_version: Option<String>,
+    /// Sets the free plan's translations a day: see [`free_daily_translations`].
+    free_daily_translations: Option<u32>,
 }
 static CURRENT: Mutex<Option<(Instant, Settings)>> = Mutex::new(None);
 
@@ -60,6 +62,16 @@ pub fn translation_timeout() -> Duration {
     )
 }
 
+/// The free plan's translations a day as the service last set them, within
+/// 3 to 10. `None` when it has not set one, or has not been heard from in a
+/// day, and the compiled-in allowance stands. Lets the number be changed for
+/// every copy without a release, in either direction.
+pub fn free_daily_translations() -> Option<u32> {
+    settings()
+        .free_daily_translations
+        .filter(|n| (3..=10).contains(n))
+}
+
 fn version(raw: &str) -> Option<(u64, u64, u64)> {
     let mut parts = raw.split('.');
     let value = (
@@ -89,14 +101,19 @@ pub fn refresh(agent: &ureq::Agent) {
         return;
     }
     let url = format!(
-        "{}/v1/config?os={}&channel={}",
+        "{}/v1/config?os={}&channel={}&app={}",
         crate::license::api_base(),
         std::env::consts::OS,
         if cfg!(feature = "store") {
             "store"
         } else {
             "download"
-        }
+        },
+        // Says this copy knows the newer controls: the settings are read with
+        // `deny_unknown_fields`, so a copy sent one it does not know would
+        // throw the whole answer away, and the service leaves them out for
+        // copies that do not send this.
+        env!("CARGO_PKG_VERSION"),
     );
     let Ok(mut response) = agent.get(url).call() else {
         return;
@@ -132,6 +149,8 @@ fn parse_settings(raw: &str) -> Option<Settings> {
         || s.update_message
             .as_ref()
             .is_some_and(|v| v.chars().count() > 300)
+        || s.free_daily_translations
+            .is_some_and(|n| !(3..=10).contains(&n))
     {
         return None;
     }
@@ -163,12 +182,20 @@ mod tests {
             r#"{"translation_timeout_ms":30001}"#,
             r#"{"disabled_providers":["unknown"]}"#,
             r#"{"update_before_version":"bad"}"#,
+            r#"{"free_daily_translations":2}"#,
+            r#"{"free_daily_translations":11}"#,
         ] {
             assert!(parse_settings(raw).is_none(), "accepted {raw}");
         }
         assert!(
             parse_settings(r#"{"translation_timeout_ms":2000,"update_before_version":"0.4.22"}"#)
                 .is_some()
+        );
+        assert_eq!(
+            parse_settings(r#"{"free_daily_translations":5}"#)
+                .unwrap()
+                .free_daily_translations,
+            Some(5)
         );
         assert!(version("0.4.9") < version("0.4.20"));
     }

@@ -43,21 +43,33 @@ export interface RemoteSettings {
   dictionary_enabled?: boolean;
   update_message?: string;
   update_before_version?: string;
+  /** Sets the free plan's translations a day, 3 to 10. Only copies that
+   *  send their version are given it -- see {@link remoteSettings}. */
+  free_daily_translations?: number;
 }
+
+/** The free plan's translations a day the app builds in. */
+export const FREE_DAILY_TRANSLATIONS = 3;
 export function validateSettings(input: unknown): RemoteSettings | null {
   if (!input || typeof input !== "object" || Array.isArray(input)) return null;
   const s = input as Record<string, unknown>;
-  if (Object.keys(s).some(k => !["debounce_ms", "translation_timeout_ms", "disabled_providers", "dictionary_enabled", "update_message", "update_before_version"].includes(k))) return null;
+  if (Object.keys(s).some(k => !["debounce_ms", "translation_timeout_ms", "disabled_providers", "dictionary_enabled", "update_message", "update_before_version", "free_daily_translations"].includes(k))) return null;
   if (s.debounce_ms !== undefined && (!Number.isInteger(s.debounce_ms) || Number(s.debounce_ms) < 0 || Number(s.debounce_ms) > 2000)) return null;
   if (s.translation_timeout_ms !== undefined && (!Number.isInteger(s.translation_timeout_ms) || Number(s.translation_timeout_ms) < 2000 || Number(s.translation_timeout_ms) > 30000)) return null;
   if (s.disabled_providers !== undefined && (!Array.isArray(s.disabled_providers) || s.disabled_providers.length > 4 || s.disabled_providers.some(p => !["google", "mymemory", "deepl", "claude"].includes(p)))) return null;
   if (s.dictionary_enabled !== undefined && typeof s.dictionary_enabled !== "boolean") return null;
   if (s.update_message !== undefined && (typeof s.update_message !== "string" || [...s.update_message].length > 300)) return null;
   if (s.update_before_version !== undefined && (typeof s.update_before_version !== "string" || !/^\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(s.update_before_version))) return null;
+  if (s.free_daily_translations !== undefined && (!Number.isInteger(s.free_daily_translations) || Number(s.free_daily_translations) < 3 || Number(s.free_daily_translations) > 10)) return null;
   return s as RemoteSettings;
 }
 
-export async function remoteSettings(env: Env, os: string, channel: string): Promise<RemoteSettings> {
+/** What a copy on `os` and `channel` is told. `app` is the version a copy
+ *  sends from 0.4.23 on; the app reads its settings with `deny_unknown_fields`,
+ *  so an older copy given a control it does not know would throw the whole
+ *  answer away, emergency switches and all. Newer controls go only to copies
+ *  that say which version they are. */
+export async function remoteSettings(env: Env, os: string, channel: string, app: string | null = null): Promise<RemoteSettings> {
   const scopes = ["*:*", `${os}:*`, `*:${channel}`, `${os}:${channel}`];
   const { results } = await env.DB.prepare("SELECT scope, settings FROM remote_settings WHERE scope IN (?, ?, ?, ?)")
     .bind(...scopes).all<{scope: string; settings: string}>();
@@ -68,7 +80,22 @@ export async function remoteSettings(env: Env, os: string, channel: string): Pro
       try { Object.assign(combined, validateSettings(JSON.parse(row.settings)) ?? {}); } catch { /* use defaults */ }
     }
   }
+  if (!app) delete combined.free_daily_translations;
   return combined;
+}
+
+/** The free plan's translations a day as every platform is told them: the
+ *  all-platforms override, or what the app builds in. What the buy page and
+ *  the panel say, so neither promises more than the bubble allows. A
+ *  platform-only override is not reflected here. */
+export async function freeDailyTranslations(env: Env): Promise<number> {
+  try {
+    const row = await env.DB.prepare("SELECT settings FROM remote_settings WHERE scope = '*:*'").first<{ settings: string }>();
+    const n = row ? validateSettings(JSON.parse(row.settings))?.free_daily_translations : undefined;
+    return n ?? FREE_DAILY_TRANSLATIONS;
+  } catch {
+    return FREE_DAILY_TRANSLATIONS;
+  }
 }
 
 export async function saveRemoteSettings(env: Env, request: Request): Promise<Response> {
@@ -80,7 +107,7 @@ export async function saveRemoteSettings(env: Env, request: Request): Promise<Re
   const raw = String(form.get("settings") ?? "{}");
   if (raw.length > 4096) return new Response("Settings too large", {status: 400});
   try { settings = validateSettings(JSON.parse(raw)); } catch { settings = null; }
-  if (!settings) return new Response("Invalid settings. Allowed: debounce_ms (0–2000), translation_timeout_ms (2000–30000), disabled_providers (provider names), dictionary_enabled (boolean), update_message (up to 300 characters), update_before_version (major.minor.patch).", {status: 400});
+  if (!settings) return new Response("Invalid settings. Allowed: debounce_ms (0–2000), translation_timeout_ms (2000–30000), disabled_providers (provider names), dictionary_enabled (boolean), update_message (up to 300 characters), update_before_version (major.minor.patch), free_daily_translations (3–10, sets the free allowance; only 0.4.23 and later).", {status: 400});
   const scope = `${os}:${channel}`;
   const t = Math.floor(Date.now() / 1000);
   await env.DB.batch([
@@ -148,7 +175,8 @@ export async function observabilityCard(env: Env): Promise<string> {
       <form method="post" action="/admin/remote-config"><label>Platform <select name="os"><option value="*">All</option><option>linux</option><option>windows</option><option>macos</option></select></label>
       <label>Channel <select name="channel"><option value="*">All</option><option>download</option><option>store</option></select></label>
       <p><textarea name="settings" rows="4" cols="60" maxlength="4096">{}</textarea></p>
-      <p class="sub">Example: {&quot;debounce_ms&quot;:180,&quot;translation_timeout_ms&quot;:10000,&quot;disabled_providers&quot;:[&quot;mymemory&quot;],&quot;dictionary_enabled&quot;:false,&quot;update_message&quot;:&quot;Please update to the latest version.&quot;,&quot;update_before_version&quot;:&quot;0.4.22&quot;}</p>
+      <p class="sub">Example: {&quot;debounce_ms&quot;:180,&quot;translation_timeout_ms&quot;:10000,&quot;disabled_providers&quot;:[&quot;mymemory&quot;],&quot;dictionary_enabled&quot;:false,&quot;update_message&quot;:&quot;Please update to the latest version.&quot;,&quot;update_before_version&quot;:&quot;0.4.22&quot;,&quot;free_daily_translations&quot;:5}</p>
+      <p class="sub"><b>free_daily_translations</b> sets the free plan's translations a day (3–10; the app's own is 3). Only copies from 0.4.23 on are told it; set it for All platforms so the buy page says the same number, and change the website's prices page by hand.</p>
       <button type="submit">Save configuration</button></form></section>`;
   } catch (err) {
     console.error("could not read observability", err);

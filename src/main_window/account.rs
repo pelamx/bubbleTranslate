@@ -109,15 +109,26 @@ pub(super) fn account(
                         "Sayaç gece yarısı yenilenir. Pro sınırı kaldırır.",
                         "El contador vuelve a medianoche. Pro quita el límite.",
                     )
+                    .to_string()
                 } else {
-                    t(
-                        "Ten a day, counted at your local midnight. Re-reading something \
-                         already translated does not count.",
-                        "Günde on çeviri, yerel gece yarısında sıfırlanır. Zaten çevrilmiş \
-                         bir şeyi tekrar okumak sayılmaz.",
-                        "Diez al día, contadas desde tu medianoche local. Releer algo ya \
-                         traducido no cuenta.",
-                    )
+                    let ocr = license::FREE_DAILY_OCR;
+                    match i18n::lang() {
+                        UiLang::En => format!(
+                            "{limit} a day, and {ocr} screen boxes and {ocr} whole screens, \
+                             counted at your local midnight. Re-reading something already \
+                             translated does not count."
+                        ),
+                        UiLang::Tr => format!(
+                            "Günde {limit} çeviri, {ocr} ekran kutusu ve {ocr} tüm ekran; yerel \
+                             gece yarısında sıfırlanır. Zaten çevrilmiş bir şeyi tekrar okumak \
+                             sayılmaz."
+                        ),
+                        UiLang::Es => format!(
+                            "{limit} al día, y {ocr} recuadros y {ocr} pantallas completas, \
+                             contadas desde tu medianoche local. Releer algo ya traducido no \
+                             cuenta."
+                        ),
+                    }
                 })
                 .size(11.0)
                 .color(TEXT_MUTED),

@@ -78,11 +78,11 @@ const en = {
   checkoutUnavailable: "Checkout is not available yet.",
   providerNotConfigured: "The payment provider for your region is not configured.",
   reasonPaddleUnconfigured: "Paddle is not configured on this server yet.",
-  introPaddle:
-    "The free version is limited to ten translations a day. Pro removes the limit; billed through Paddle.",
+  introPaddle: (n: number, ocr: number) =>
+    `The free version allows ${n} translations of selected text, ${ocr} screen boxes and ${ocr} whole screens a day. Pro removes the limit; billed through Paddle.`,
   tierFreeName: "Free",
-  tierFree: (n: number) =>
-    `${n} translations a day, one machine. The count comes back at midnight; past it, you need Pro to keep going.`,
+  tierFree: (n: number, ocr: number) =>
+    `${n} text translations, ${ocr} screen boxes and ${ocr} whole screens a day, one machine. The counts come back at midnight; past them, you need Pro to keep going.`,
   tierProName: "Pro",
   tierPro: "Unlimited translations, three devices. No daily limit.",
   monthly: "Monthly",
@@ -183,11 +183,11 @@ const tr: Strings = {
   checkoutUnavailable: "Ödeme henüz kullanılamıyor.",
   providerNotConfigured: "Bölgeniz için ödeme sağlayıcısı ayarlanmamış.",
   reasonPaddleUnconfigured: "Paddle bu sunucuda henüz ayarlanmadı.",
-  introPaddle:
-    "Ücretsiz sürüm günde on çeviriyle sınırlıdır. Pro sınırı kaldırır; ödeme Paddle üzerinden alınır.",
+  introPaddle: (n: number, ocr: number) =>
+    `Ücretsiz sürümde günde ${n} metin çevirisi, ${ocr} ekran kutusu ve ${ocr} tüm ekran çevirisi var. Pro sınırı kaldırır; ödeme Paddle üzerinden alınır.`,
   tierFreeName: "Ücretsiz",
-  tierFree: (n: number) =>
-    `Günde ${n} çeviri, tek cihaz. Sayaç her gece yarısı sıfırlanır; sonrasında devam etmek için Pro gerekir.`,
+  tierFree: (n: number, ocr: number) =>
+    `Günde ${n} metin çevirisi, ${ocr} ekran kutusu ve ${ocr} tüm ekran, tek cihaz. Sayaçlar her gece yarısı sıfırlanır; sonrasında devam etmek için Pro gerekir.`,
   tierProName: "Pro",
   tierPro: "Sınırsız çeviri, üç cihaz. Günlük limit yok.",
   monthly: "Aylık",
@@ -281,11 +281,11 @@ const es: Strings = {
   checkoutUnavailable: "El pago aún no está disponible.",
   providerNotConfigured: "El proveedor de pagos de tu región no está configurado.",
   reasonPaddleUnconfigured: "Paddle aún no está configurado en este servidor.",
-  introPaddle:
-    "La versión gratuita está limitada a diez traducciones al día. Pro elimina el límite; se cobra a través de Paddle.",
+  introPaddle: (n: number, ocr: number) =>
+    `La versión gratuita incluye ${n} traducciones de texto, ${ocr} recuadros y ${ocr} pantallas completas al día. Pro elimina el límite; se cobra a través de Paddle.`,
   tierFreeName: "Gratis",
-  tierFree: (n: number) =>
-    `${n} traducciones al día, un equipo. El contador se reinicia a medianoche; a partir de ahí necesitas Pro para seguir.`,
+  tierFree: (n: number, ocr: number) =>
+    `${n} traducciones de texto, ${ocr} recuadros y ${ocr} pantallas completas al día, un equipo. Los contadores se reinician a medianoche; a partir de ahí necesitas Pro para seguir.`,
   tierProName: "Pro",
   tierPro: "Traducciones ilimitadas, tres dispositivos. Sin límite diario.",
   monthly: "Mensual",

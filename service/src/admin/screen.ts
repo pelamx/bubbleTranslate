@@ -1,6 +1,7 @@
 // Screen readings: a box (Ctrl+Shift+E) or the whole screen (Ctrl+Shift+F).
 //
-// The free plan has three a day of its own, apart from the ten translations.
+// The free plan has three boxes and three whole screens a day, each of its
+// own and apart from the translations (until 0.4.23 the two shared three).
 // Whether that is the right number depends on how many people use the
 // feature at all, and how many run into the three -- which is what the daily
 // ping now reports per install and day (`screen_usage`).

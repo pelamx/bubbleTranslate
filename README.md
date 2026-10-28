@@ -17,8 +17,8 @@ selected, which is a surprisingly large difference: see
 | **Windows** | [`bubbleTranslate-windows-x64.zip`](https://github.com/pelamx/downloads/releases/latest/download/bubbleTranslate-windows-x64.zip) (7 MB, Windows 10 and 11) — or the [bare `.exe`](https://github.com/pelamx/downloads/releases/latest/download/bubbleTranslate.exe) (17 MB) | One executable to double-click |
 | **Linux** | [`bubbleTranslate-linux-x86_64`](https://github.com/pelamx/downloads/releases/latest/download/bubbleTranslate-linux-x86_64) (16 MB, any distribution with glibc 2.28 or newer) | One executable to `chmod +x` and run once; it installs itself |
 
-The download is the metered build: ten free translations a day, and Pro to
-lift the limit — see [The free allowance and Pro](#the-free-allowance-and-pro).
+The download is the metered build: three free translations a day, three
+screen boxes and three whole screens, and Pro to lift the limit — see [The free allowance and Pro](#the-free-allowance-and-pro).
 It needs no Rust toolchain; building from source is covered below.
 
 ### macOS — from the DMG
@@ -287,8 +287,10 @@ Every change saves immediately to the config file.
 
 ## The free allowance and Pro
 
-Ten translations a day, free. The count comes back at your local midnight.
-After the tenth, the bubble still appears where the translation would have and
+Three translations of selected text a day, free, and apart from them three
+boxes read off the screen (Ctrl+Shift+E) and three whole screens
+(Ctrl+Shift+F). Each count comes back at your local midnight. After the last
+one, the bubble still appears where the translation would have and
 says today's allowance is spent, with the button that lifts it. It does not
 fail silently, it does not stop responding to the gesture, and it does not hide
 the one control that solves the problem it is describing.
@@ -297,7 +299,7 @@ the one control that solves the problem it is describing.
 $2/month or $20/year. Billing goes through Paddle, which is the merchant of
 record, so it is charged in your own currency with local tax included.
 
-What counts against the day is deliberately narrow, because ten is a small
+What counts against the day is deliberately narrow, because three is a small
 number and the bubble fires on every finished selection:
 
 | Counted | Not counted |
