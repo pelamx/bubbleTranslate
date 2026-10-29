@@ -565,15 +565,29 @@ export const ADMIN_STYLE = `
     .side a .count { position: absolute; top: 2px; right: 2px; margin: 0; font-size: 10px; }
   }
   @media (max-width: 900px) {
-    .shell { grid-template-columns: minmax(0, 1fr); padding: 0 14px; }
-    .side { flex-direction: row; overflow-x: auto; top: 58px; z-index: 4; background: var(--bg); padding: 8px 0; }
+    .shell { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0 10px; }
+    .side { flex-direction: row; overflow-x: auto; top: 46px; z-index: 4; background: var(--bg); padding: 8px 0; }
     .side a { white-space: nowrap; padding: 7px 10px; }
     .side .hint { display: none; }
-    .appbar { padding: 10px 14px; flex-wrap: wrap; }
     .appbar a.btn span { display: none; }
     .places .split { grid-template-columns: minmax(0, 1fr); }
     svg.world { width: 100%; height: auto; }
+    /* A phone: the header stays one row, and the nav sits right under it. */
+    .main { padding-bottom: 8px; }
+    .appbar { flex-wrap: nowrap; gap: 6px; padding: 8px 12px; }
+    .appbar .tag { display: none; }
+    .appbar .brand { font-size: 17px; gap: 8px; }
+    .appbar .brand svg { width: 26px; height: 26px; }
+    .appbar a.btn, .appbar .env { padding: 5px 8px; font-size: 12px; }
+    .card { padding: 14px 12px; }
+    details.card > summary { padding: 13px 12px; }
+    details.card > .body { padding: 0 12px 14px; }
+    /* Tables scroll sideways instead of wrapping every header into a tower. */
+    th, td:not([colspan]) { white-space: nowrap; }
+    .places .title { flex-wrap: wrap; gap: 2px 10px; }
   }
+  /* The remote-config example is one long JSON line. */
+  .main p { overflow-wrap: anywhere; }
 `;
 
 /** Line icons for the panel, drawn inline so the page fetches nothing. */

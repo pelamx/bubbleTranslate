@@ -161,14 +161,14 @@ export async function observabilityCard(env: Env): Promise<string> {
     const failures = errors.results.map(r => `<tr><td>${e(r.app)} / ${e(r.os)}</td><td>${e(r.feature)} / ${e(r.outcome)}</td><td>${r.n}</td><td>${r.people}</td></tr>`).join("");
     return `<section class="card" id="feature-analytics"><p class="label">Feature analytics, last 30 days</p>
       <p>${activation?.successful ?? 0} of ${activation?.active ?? 0} reporting installs completed a translation. Counts exclude echoed text. Older clients do not report these metrics.</p>
-      <table><tr><th>Feature</th><th>Outcome</th><th>Count</th><th>Users</th></tr>${rows || '<tr><td colspan="4">Nothing reported yet.</td></tr>'}</table>
+      <div class="scroll"><table><tr><th>Feature</th><th>Outcome</th><th>Count</th><th>Users</th></tr>${rows || '<tr><td colspan="4">Nothing reported yet.</td></tr>'}</table></div>
       <p class="sub">Repeat use: successful translations on at least two separate days in this window; this is not a cohort retention rate.</p>
-      <table><tr><th>Feature</th><th>Successful users</th><th>Used on 2+ days</th></tr>${repeats}</table>
+      <div class="scroll"><table><tr><th>Feature</th><th>Successful users</th><th>Used on 2+ days</th></tr>${repeats}</table></div>
       <p class="sub">Top 50 reporting installs, last 30 days. Successful requests include retranslations; page OCR counts one completed screen.</p>
-      <table><tr><th>Install</th><th>Current version / OS</th><th>Translations</th><th>Translation failures</th></tr>${installRows}</table></section>
+      <div class="scroll"><table><tr><th>Install</th><th>Current version / OS</th><th>Translations</th><th>Translation failures</th></tr>${installRows}</table></div></section>
       <section class="card" id="error-monitoring"><p class="label">Error monitoring, last 30 days</p>
       <p class="sub">Fixed error codes only; no text or screenshots. Empty selection can mean no text was selected. Cancelled OCR is kept separate. Reason codes describe failed requests and must not be added to translation_failed totals. Panics are reported on the next launch; native crashes are not captured.</p>
-      <table><tr><th>Version / OS</th><th>Stage / outcome</th><th>Count</th><th>Users</th></tr>${failures || '<tr><td colspan="4">No errors reported.</td></tr>'}</table></section>
+      <div class="scroll"><table><tr><th>Version / OS</th><th>Stage / outcome</th><th>Count</th><th>Users</th></tr>${failures || '<tr><td colspan="4">No errors reported.</td></tr>'}</table></div></section>
       <section class="card" id="remote-config"><p class="label">Remote configuration</p>
       <p class="sub">Refreshes every five minutes. Overrides expire after 24 hours without a successful refresh. Local settings stay saved. Use {} to clear a scope. Specific platform and channel overrides win.</p>
       ${configs.results.map(r => `<p><b>${e(r.scope)}</b> <code>${e(r.settings)}</code></p>`).join("")}
