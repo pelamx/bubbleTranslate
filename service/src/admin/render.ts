@@ -11,6 +11,7 @@ import { credit, haikuCard, wordUse } from "./haiku";
 import { channels, channelsCard, churn, conversionByCountry, conversionCard } from "./growth";
 import { observabilityCard } from "../observability";
 import { screenCard, screenUse } from "./screen";
+import { siteVisits, visitsCard } from "./visits";
 import { installCard, installUse, translateUse, usageCard } from "./usage";
 import { COUNTRY_POINTS, LAND_ROWS, MAP_NORTH, MAP_STEP } from "./world";
 import { DAY, LOCAL_OFFSET, PAGE_SIZE, cached, date, startOfToday } from "./shared";
@@ -1382,7 +1383,7 @@ export function delta(today: number, yesterday: number): string {
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
   const observability = await observabilityCard(env);
-  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, licCountry, refunds, balance, licBySub, whyCancel, claudeUse, claudeBill, deeplDays, deeplMonth, screen, byChannel, payByCountry, churnMonths, words, haikuCredit, translations, perInstall] = await Promise.all([
+  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, licCountry, refunds, balance, licBySub, whyCancel, claudeUse, claudeBill, deeplDays, deeplMonth, screen, byChannel, payByCountry, churnMonths, words, haikuCredit, translations, perInstall, visits] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -1427,6 +1428,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     credit(env),
     translateUse(env),
     installUse(env),
+    siteVisits(env),
   ]);
   const dl = downloadsNow?.total ?? null;
 
@@ -1696,6 +1698,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
      ${updatesCard(ups, pub)}
 
      ${limitCard(hits)}
+
+     ${visitsCard(visits)}
 
      ${funnelCard(funnel)}
 

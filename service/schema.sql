@@ -398,6 +398,22 @@ CREATE TABLE IF NOT EXISTS download_clicks (
 
 CREATE INDEX IF NOT EXISTS download_clicks_by_at ON download_clicks (at);
 
+-- Every page opened on the website, sent by the page itself as a beacon, so a
+-- crawler that runs no script is not counted. The page's path, where the
+-- visitor came from -- the same tag as a download click, or 'internal' when
+-- it was another page of the site -- and the country Cloudflare already
+-- worked out. No address, no cookie, no identifier: a visit is a view whose
+-- source is not 'internal'. Kept for 90 days. Added on 2026-11-04.
+CREATE TABLE IF NOT EXISTS page_views (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  at       INTEGER NOT NULL,
+  path     TEXT NOT NULL,
+  src      TEXT NOT NULL,
+  country  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS page_views_by_at ON page_views (at);
+
 -- What each install spent of the DeepL fallback on a UTC day (see
 -- `deepl.ts`): requests and characters, never the text. Both limits are read
 -- from here -- per install, and the day's total across all installs. Rows
