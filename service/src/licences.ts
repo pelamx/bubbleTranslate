@@ -142,8 +142,12 @@ export interface IssueOptions {
   email?: string | null;
   providerRef?: string | null;
   seats?: number;
-  /** Overrides the term length. Only the dev route uses it. */
+  /** Overrides the term length. The dev route and the day pass use it. */
   termSeconds?: number;
+  /** What to write in the `cycle` column, when it isn't one of the two paid
+   *  cycles — e.g. "day" for the free day pass. The client doesn't recognise
+   *  it, so the account panel shows plain "Pro" with no "(monthly)". */
+  cycleStored?: string;
 }
 
 export async function issueLicence(env: Env, opts: IssueOptions) {
@@ -160,7 +164,7 @@ export async function issueLicence(env: Env, opts: IssueOptions) {
     .bind(
       id,
       await sha256Hex(key),
-      opts.cycle,
+      opts.cycleStored ?? opts.cycle,
       opts.seats ?? DEFAULT_SEATS,
       expiresAt,
       asDate(expiresAt),
@@ -391,7 +395,7 @@ export async function claimOrderAndIssue(
     ).bind(
       id,
       await sha256Hex(key),
-      opts.cycle,
+      opts.cycleStored ?? opts.cycle,
       opts.seats ?? DEFAULT_SEATS,
       expiresAt,
       asDate(expiresAt),

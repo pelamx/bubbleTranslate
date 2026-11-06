@@ -220,6 +220,35 @@ pub(super) fn account(
             }
         });
     } else {
+        // First thing a free user sees: the free day, claimed with PLX on
+        // pelamx. They come back with a BT key for the box just below.
+        ui.label(
+            egui::RichText::new(t(
+                "🎁 Get a free day of Pro — unlimited for 24 hours.",
+                "🎁 Bir günlük ücretsiz Pro — 24 saat sınırsız.",
+                "🎁 Un día de Pro gratis — ilimitado por 24 horas.",
+            ))
+            .size(12.5),
+        );
+        ui.add_space(3.0);
+        ui.horizontal(|ui| {
+            if ui
+                .button(t("Claim free day", "Ücretsiz günü al", "Reclamar día gratis"))
+                .clicked()
+            {
+                crate::shell::open_url(&license::day_pass_url("window"));
+            }
+            ui.label(
+                egui::RichText::new(t(
+                    "with PLX at pelamx.com — paste the key below.",
+                    "pelamx.com'da PLX ile — anahtarı aşağıya yapıştır.",
+                    "con PLX en pelamx.com — pega la clave abajo.",
+                ))
+                .size(11.0)
+                .color(TEXT_MUTED),
+            );
+        });
+        ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut state.key_input)

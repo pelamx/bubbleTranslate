@@ -712,6 +712,25 @@ async function checkoutPlxBalance(env: Env, request: Request): Promise<Response>
   return json({ ref, url });
 }
 
+/** A free one-day Pro pass: the user claims it on pelamx (which gifts the PLX it
+ *  costs and spends it, net zero), then pelamx calls the same signed callback
+ *  with plan "day_pass" and we issue a 24-hour licence. Onboarding, not a sale. */
+/** Makes a day-pass order and returns the pelamx claim URL for it. The order's
+ *  stored cycle is cosmetic — the callback issues a 1-day licence regardless. */
+async function makeDayPassClaim(env: Env, src: unknown): Promise<{ ref: string; url: string }> {
+  const ref = newOrderRef();
+  await createOrder(env, { ref, provider: "pelamx", cycle: "monthly", email: null, amount: 0, currency: "PLX", src: buySource(src) });
+  const base = env.PELAMX_BASE ?? "https://pelamx.com";
+  const ret = "https://bubbletranslate.app/";
+  return { ref, url: `${base}/claim?app=bubbletranslate&order=${ref}&return=${encodeURIComponent(ret)}` };
+}
+
+async function checkoutDayPass(env: Env, request: Request): Promise<Response> {
+  if (!env.PARTNER_BT_SECRET) return json({ error: "PLX balance is not configured." }, 503);
+  const body: any = await request.json().catch(() => ({}));
+  return json(await makeDayPassClaim(env, body.src));
+}
+
 /** pelamx's signed callback: it charged the buyer's PLX, so issue the Pro
  *  licence for the order and hand the key back for pelamx to show. Verified
  *  over the raw body with the shared secret, as the Paddle webhook trusts its
@@ -733,14 +752,18 @@ async function plxBalanceCallback(env: Env, request: Request): Promise<Response>
   if (diff !== 0) return json({ error: "Bad signature." }, 401);
 
   const p: any = JSON.parse(raw);
-  const cycle = PLAN_CYCLE[String(p.plan)];
-  if (!isCycle(cycle) || typeof p.order !== "string") return json({ error: "Bad payload." }, 400);
+  if (typeof p.order !== "string") return json({ error: "Bad payload." }, 400);
+  // A day pass is a free 1-day Pro licence; everything else is a full cycle.
+  const dayPass = String(p.plan) === "day_pass";
+  const cycle = dayPass ? "monthly" : PLAN_CYCLE[String(p.plan)];
+  if (!isCycle(cycle)) return json({ error: "Bad payload." }, 400);
 
   const outcome = await claimOrderAndIssue(env, p.order, {
     provider: "pelamx",
     cycle,
     email: p.user ?? null,
     providerRef: String(p.charge_ref ?? ""),
+    ...(dayPass ? { termSeconds: 86_400, cycleStored: "day" } : {}),
   });
   if (outcome.issued && outcome.key) return json({ licence_key: outcome.key, expires_at: outcome.expiresAt });
   // A retry after a successful issue: the order row still holds the key for its reveal window.
@@ -1365,6 +1388,13 @@ async function route(request: Request, env: Env): Promise<Response> {
       if (pathname === "/account") {
         return accountPage(pageContext(request, url), null, supportEmail(env));
       }
+      // The app's "Claim free day" button lands here: make the order and send
+      // the visitor to pelamx to claim it with PLX.
+      if (pathname === "/day-pass") {
+        if (!env.PARTNER_BT_SECRET) return redirect(withLang("/buy", pageContext(request, url).lang));
+        const { url: claim } = await makeDayPassClaim(env, url.searchParams.get("src"));
+        return redirect(claim);
+      }
       // /welcome is where Paddle returns the buyer. It polls for the licence
       // key using the ref in the query string.
       if (pathname === "/welcome") {
@@ -1412,6 +1442,8 @@ async function route(request: Request, env: Env): Promise<Response> {
         return await checkoutPlx(env, request);
       case "/checkout/plx-balance":
         return await checkoutPlxBalance(env, request);
+      case "/checkout/day-pass":
+        return await checkoutDayPass(env, request);
       case "/v1/plx-balance/callback":
         return await plxBalanceCallback(env, request);
       case "/account":

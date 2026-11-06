@@ -68,6 +68,18 @@ pub fn buy_url(src: &str) -> String {
         crate::i18n::lang().code().to_ascii_lowercase()
     )
 }
+/// The one free day of Pro. The service makes a day-pass order and sends the
+/// visitor to pelamx to claim it with PLX; they come back with a BT key to
+/// paste in the box above. Same `src`/`lang` shape as [`buy_url`].
+pub const DAY_PASS_URL: &str = "https://api.bubbletranslate.app/day-pass";
+
+pub fn day_pass_url(src: &str) -> String {
+    format!(
+        "{DAY_PASS_URL}?src={src}&lang={}",
+        crate::i18n::lang().code().to_ascii_lowercase()
+    )
+}
+
 pub const MANAGE_URL: &str = "https://api.bubbletranslate.app/account";
 
 /// The licence service. Overridable in debug builds so the client can be

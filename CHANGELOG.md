@@ -15,6 +15,11 @@ days before the others.
 
 ## Unreleased
 
+**A free day of Pro to try, no card needed.** Claim one free day of unlimited
+Pro from pelamx with PLX we gift you — it hands back a 24-hour licence key you
+paste in like any other. One free day per account; after it, keep going by
+paying with PLX or a card as usual.
+
 **Pro can be paid in PLX.** The buy page has a "Pay with PLX" button next to
 the card checkout. It shows the price in PLX and a code to scan with a Solana
 wallet such as Phantom or Solflare, and the licence key appears as soon as
