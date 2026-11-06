@@ -161,7 +161,7 @@ export function haikuCard(days: WordDay[], c: Credit | null, bill: { day: string
        <div class="bars-axis"><span>${escapeHtml(days[days.length - 1].day)}</span><span>today</span></div>
        <div class="scroll" style="margin-top:14px"><table>
          <tr><th>Day (UTC)</th><th class="num">Installs</th><th class="num">Words</th>
-             <th class="num">Tokens in / out</th><th class="num">Cost</th><th class="num">Hit own limit</th></tr>
+             <th class="num">Tokens in / out</th><th class="num">Cost</th><th class="num">Used up share</th></tr>
          ${rows}
        </table></div>`
            : `<p class="sub">No word has been translated through the service yet.</p>`

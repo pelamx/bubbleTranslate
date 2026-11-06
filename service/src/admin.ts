@@ -55,7 +55,10 @@ async function authorised(env: Env, request: Request): Promise<boolean> {
   // a lockout must not cost a hash, and must not be answered faster than the
   // lockout says. A request with no credentials is not a guess and does not
   // feed it: that is how every browser asks for the login prompt.
-  const address = request.headers.get("CF-Connecting-IP") ?? "";
+  const raw = request.headers.get("CF-Connecting-IP") ?? "";
+  // An IPv6 connection comes with a /64 of addresses; keyed by the address,
+  // one guesser could take a fresh one for every try and never wait.
+  const address = raw.includes(":") ? raw.split(":").slice(0, 4).join(":") : raw;
   const backoff = authBackoff.get(address) ?? { failures: 0, notBefore: 0 };
   if (Date.now() < backoff.notBefore) return false;
 

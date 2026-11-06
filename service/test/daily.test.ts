@@ -97,7 +97,7 @@ it("shows the DeepL fallback against its daily cap", async () => {
   const html = await (await admin()).text();
   const card = html.slice(html.indexOf('id="deepl"'));
   expect(card).toContain("Today 7,500 of 15,000 characters");
-  expect(card).toContain("capped");
+  expect(card).toContain("share used");
 });
 
 it("counts a licence that ran out in the month as churn, and a renewed one not", async () => {

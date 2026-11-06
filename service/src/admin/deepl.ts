@@ -113,7 +113,7 @@ export function deeplCard(use: DeeplUse, account: DeeplAccount | string): string
          ${use.top
            .map(
              (t) => `<tr><td><code>${escapeHtml(t.install.slice(0, 8))}</code></td>
-               <td class="num">${t.requests}${t.requests >= DEEPL_PER_INSTALL || t.chars >= DEEPL_PER_INSTALL_CHARS ? ` <span class="badge">capped</span>` : ""}</td>
+               <td class="num">${t.requests}${t.requests >= DEEPL_PER_INSTALL || t.chars >= DEEPL_PER_INSTALL_CHARS ? ` <span class="badge">share used</span>` : ""}</td>
                <td class="num">${n(t.chars)}</td></tr>`,
            )
            .join("")}
@@ -127,7 +127,7 @@ export function deeplCard(use: DeeplUse, account: DeeplAccount | string): string
          rows
            ? `<div class="scroll"><table>
          <tr><th>Day (UTC)</th><th class="num">Installs</th><th class="num">Requests</th>
-             <th class="num">Characters</th><th class="num">Of daily cap</th><th class="num">Hit own limit</th></tr>
+             <th class="num">Characters</th><th class="num">Of daily cap</th><th class="num">Used up share</th></tr>
          ${rows}
        </table></div>`
            : `<p class="sub">Nobody has needed the fallback in the last week.</p>`

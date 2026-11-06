@@ -42,6 +42,9 @@ it("slows a guesser down without locking anyone else out", async () => {
   // Locked out for a second now, even with the right password.
   expect((await from("203.0.113.9", "letmein")).status).toBe(401);
   expect((await from("198.51.100.4", "letmein")).status).toBe(200);
+  // A new address in the same IPv6 /64 is the same guesser.
+  expect((await from("2001:db8:1:2::a", "guess")).status).toBe(401);
+  expect((await from("2001:db8:1:2::b", "letmein")).status).toBe(401);
 });
 
 it("renders the dashboard and finds a licence by email", async () => {

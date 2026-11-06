@@ -45,7 +45,10 @@ if ($changelog -notmatch "(?m)^## $([regex]::Escape($version))(\s|$)" -and
 # Refused rather than warned: a checkout that is behind builds an older version,
 # and publishing it would announce it over the newer one and prune that away.
 if (-not $PrepareOnly) {
-    $live = (Invoke-RestMethod 'https://raw.githubusercontent.com/pelamx/downloads/main/latest.json').windows.version
+    # Parsed by hand: GitHub serves the file as plain text, which Invoke-RestMethod
+    # may hand back as a string rather than as JSON.
+    $live = ((Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/pelamx/downloads/main/latest.json').Content |
+        ConvertFrom-Json).windows.version
     if ([version]$version -lt [version]$live) {
         Write-Host "error: Cargo.toml says $version, older than the $live already published." -ForegroundColor Red
         Write-Host "       Pull first: this checkout is behind."
