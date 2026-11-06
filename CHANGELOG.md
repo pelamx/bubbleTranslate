@@ -13,6 +13,22 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**Pro can be paid in PLX.** The buy page has a "Pay with PLX" button next to
+the card checkout. It shows the price in PLX and a code to scan with a Solana
+wallet such as Phantom or Solflare, and the licence key appears as soon as
+the payment is confirmed, usually in under a minute. You pay from your own
+wallet; nothing about it is stored here. A PLX payment covers one month or
+one year and does not renew, so there is nothing to cancel. Paying by card
+works as before.
+
+**Pro can also be paid from a pelamx PLX balance.** If you already hold PLX at
+pelamx.com — bought there or earned by using the apps — you can spend it on
+Pro without a card and without a crypto wallet: a second option sends you to
+pelamx to confirm, and your licence key comes straight back. The "pay from
+your own wallet" PLX option above is unchanged.
+
 ## 0.4.23 — 2026-10-28
 
 **The free version now has three of each a day: three translations of

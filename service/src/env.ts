@@ -42,6 +42,26 @@ export interface Env {
   PADDLE_PRICE_MONTHLY?: string;
   PADDLE_PRICE_YEARLY?: string;
 
+  // -- PLX (see plx.ts) -------------------------------------------------------
+  /** PLX's mint and the wallet that receives payments, both base58 public
+   *  keys. Public, not secrets. Without both, PLX is not offered. */
+  PLX_MINT?: string;
+  PLX_TREASURY?: string;
+  /** US dollars per PLX, the rate a dollar price is quoted at. */
+  PLX_USD?: string;
+  /** A provider's Solana RPC URL (Helius, Triton, QuickNode...). Required:
+   *  Solana's public endpoints answer every Worker with 403, because Cloudflare
+   *  stamps each subrequest with a CF-Worker header. The URL usually carries
+   *  the provider's API key, so it is a secret. */
+  SOLANA_RPC_URL?: string;
+
+  // -- PLX balance (custodial, via pelamx) -----------------------------------
+  /** A second PLX path: the buyer pays from the PLX balance they hold at
+   *  pelamx.com, which charges them and calls us back. This shared secret
+   *  signs that callback; the base is where the buyer is sent to pay. */
+  PARTNER_BT_SECRET?: string;
+  PELAMX_BASE?: string;
+
   // -- Delivering the key ----------------------------------------------------
   /** Optional. Without it the key is shown on the success page and logged,
    *  which is enough to buy and use the app but leaves the customer nothing

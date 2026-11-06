@@ -78,6 +78,7 @@ import {
 } from "./mirror";
 import { isLang, pickLang, t, withLang } from "./i18n";
 import { SITE, type PageContext, accountPage, buyPage, donePage } from "./pages";
+import { findPlxPayment, formatPlx, plxConfigured, plxPayUrl, plxQuote } from "./plx";
 import { keys, now, open } from "./tokens";
 
 // -- replies -----------------------------------------------------------------
@@ -630,6 +631,7 @@ async function buy(env: Env, request: Request, url: URL): Promise<Response> {
     country: visitorCountry(request, url),
     successUrl: `${base}/welcome`,
     freeDaily,
+    plx: plxConfigured(env),
   });
 }
 
@@ -687,6 +689,117 @@ async function checkoutPaddle(env: Env, request: Request): Promise<Response> {
     src: buySource(body.src),
   });
   return json({ ref });
+}
+
+const PLAN_CYCLE: Record<string, Cycle> = { pro_monthly: "monthly", pro_yearly: "yearly" };
+const CYCLE_PLAN: Record<Cycle, string> = { monthly: "pro_monthly", yearly: "pro_yearly" };
+
+/** Pro paid from the buyer's pelamx PLX balance — money they hold inside the
+ *  apps, valued by using them. pelamx holds the identity and the balance: it
+ *  charges and then calls us back, signed, the same shape as a payment webhook.
+ *  We make the order here and issue the licence on the callback. The on-chain
+ *  Solana Pay path below is untouched; this is a second way to pay in PLX. */
+async function checkoutPlxBalance(env: Env, request: Request): Promise<Response> {
+  const body: any = await request.json().catch(() => ({}));
+  const cycle = String(body.cycle ?? "");
+  if (!isCycle(cycle)) return json({ error: "Unknown plan." }, 400);
+  if (!env.PARTNER_BT_SECRET) return json({ error: "PLX balance is not configured." }, 503);
+  const ref = newOrderRef();
+  await createOrder(env, { ref, provider: "pelamx", cycle, email: null, amount: 0, currency: "PLX", src: buySource(body.src) });
+  const base = env.PELAMX_BASE ?? "https://pelamx.com";
+  const ret = "https://bubbletranslate.app/";
+  const url = `${base}/pay-pro?app=bubbletranslate&plan=${CYCLE_PLAN[cycle]}&order=${ref}&return=${encodeURIComponent(ret)}`;
+  return json({ ref, url });
+}
+
+/** pelamx's signed callback: it charged the buyer's PLX, so issue the Pro
+ *  licence for the order and hand the key back for pelamx to show. Verified
+ *  over the raw body with the shared secret, as the Paddle webhook trusts its
+ *  own payload. */
+async function plxBalanceCallback(env: Env, request: Request): Promise<Response> {
+  const raw = await request.text();
+  const given = request.headers.get("x-plx-signature") ?? "";
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(env.PARTNER_BT_SECRET ?? ""),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(raw));
+  const want = [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  let diff = given.length ^ want.length;
+  for (let i = 0; i < given.length && i < want.length; i++) diff |= given.charCodeAt(i) ^ want.charCodeAt(i);
+  if (diff !== 0) return json({ error: "Bad signature." }, 401);
+
+  const p: any = JSON.parse(raw);
+  const cycle = PLAN_CYCLE[String(p.plan)];
+  if (!isCycle(cycle) || typeof p.order !== "string") return json({ error: "Bad payload." }, 400);
+
+  const outcome = await claimOrderAndIssue(env, p.order, {
+    provider: "pelamx",
+    cycle,
+    email: p.user ?? null,
+    providerRef: String(p.charge_ref ?? ""),
+  });
+  if (outcome.issued && outcome.key) return json({ licence_key: outcome.key, expires_at: outcome.expiresAt });
+  // A retry after a successful issue: the order row still holds the key for its reveal window.
+  const row: any = await env.DB.prepare("SELECT licence_key FROM orders WHERE ref = ?").bind(p.order).first();
+  return json({ licence_key: row?.licence_key ?? null, already: true });
+}
+
+/** A PLX order, quoted in PLX at the configured rate and fixed at that amount:
+ *  the buyer pays what the page showed, whatever the rate does afterwards. */
+async function checkoutPlx(env: Env, request: Request): Promise<Response> {
+  const body: any = await request.json().catch(() => ({}));
+  const cycle = String(body.cycle ?? "");
+  const email = String(body.email ?? "").trim();
+
+  if (!isCycle(cycle)) return json({ error: "Unknown plan." }, 400);
+  if (!plxConfigured(env)) return json({ error: "PLX is not configured." }, 503);
+
+  const ref = newOrderRef();
+  const units = plxQuote(env, cycle);
+  await createOrder(env, {
+    ref,
+    provider: "plx",
+    cycle,
+    email: email || null,
+    // PLX base units (1e-9 PLX), not cents: this is the amount the chain is
+    // checked against.
+    amount: units,
+    currency: "PLX",
+    src: buySource(body.src),
+  });
+  return json({ ref, url: await plxPayUrl(env, ref, units), plx: formatPlx(units) });
+}
+
+/** What the PLX checkout polls. It asks the chain whether the order's
+ *  reference has been paid and, the first time it has, issues the licence the
+ *  same way a Paddle webhook does; the success page then reveals the key. */
+async function plxStatus(env: Env, ref: string): Promise<Response> {
+  if (!/^[0-9a-f]{32}$/.test(ref)) return json({ error: "Unknown order." }, 404);
+  const order = await orderByRef(env, ref);
+  if (!order || order.provider !== "plx" || !isCycle(order.cycle) || !order.amount) {
+    return json({ error: "Unknown order." }, 404);
+  }
+  if (order.status === "paid") return json({ status: "paid" });
+  if (!plxConfigured(env)) return json({ error: "PLX is not configured." }, 503);
+
+  const signature = await findPlxPayment(env, ref, order.amount);
+  if (!signature) return json({ status: "pending" });
+  // One transaction can carry several references; claiming its signature is
+  // what stops a single payment from paying two orders. Same ledger as Paddle's
+  // transactions, kept apart by the prefix.
+  const claim = `sol:${signature}`;
+  if (!(await claimTransaction(env, claim))) return json({ status: "pending" });
+  try {
+    await fulfil(env, ref, { provider: "plx", cycle: order.cycle, email: null, providerRef: signature });
+  } catch (err) {
+    await releaseTransaction(env, claim);
+    throw err;
+  }
+  return json({ status: "paid" });
 }
 
 /** What the success page polls. The key is returned for as long as the reveal
@@ -1276,6 +1389,9 @@ async function route(request: Request, env: Env): Promise<Response> {
       if (pathname.startsWith("/v1/order/")) {
         return orderStatus(env, pathname.slice("/v1/order/".length));
       }
+      if (pathname.startsWith("/v1/plx/")) {
+        return plxStatus(env, pathname.slice("/v1/plx/".length));
+      }
       if (pathname === "/v1/pubkey" && dev) {
         return json({ public_key_hex: (await keys(env)).publicHex });
       }
@@ -1292,6 +1408,12 @@ async function route(request: Request, env: Env): Promise<Response> {
         return await paddleWebhook(env, request);
       case "/checkout/paddle":
         return await checkoutPaddle(env, request);
+      case "/checkout/plx":
+        return await checkoutPlx(env, request);
+      case "/checkout/plx-balance":
+        return await checkoutPlxBalance(env, request);
+      case "/v1/plx-balance/callback":
+        return await plxBalanceCallback(env, request);
       case "/account":
         return await account(env, request, url);
       case "/account/portal":
