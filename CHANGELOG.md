@@ -13,26 +13,13 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
-## Unreleased
+## 0.4.24 — 2026-11-06
 
 **A free day of Pro to try, no card needed.** Claim one free day of unlimited
 Pro from pelamx with PLX we gift you — it hands back a 24-hour licence key you
-paste in like any other. One free day per account; after it, keep going by
-paying with PLX or a card as usual.
-
-**Pro can be paid in PLX.** The buy page has a "Pay with PLX" button next to
-the card checkout. It shows the price in PLX and a code to scan with a Solana
-wallet such as Phantom or Solflare, and the licence key appears as soon as
-the payment is confirmed, usually in under a minute. You pay from your own
-wallet; nothing about it is stored here. A PLX payment covers one month or
-one year and does not renew, so there is nothing to cancel. Paying by card
-works as before.
-
-**Pro can also be paid from a pelamx PLX balance.** If you already hold PLX at
-pelamx.com — bought there or earned by using the apps — you can spend it on
-Pro without a card and without a crypto wallet: a second option sends you to
-pelamx to confirm, and your licence key comes straight back. The "pay from
-your own wallet" PLX option above is unchanged.
+paste in like any other. A new install offers it once when it starts, and the
+Account tab keeps the button. One free day per account; after it, Pro is paid
+by card as usual.
 
 ## 0.4.23 — 2026-10-28
 
