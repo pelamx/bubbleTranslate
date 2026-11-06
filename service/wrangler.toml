@@ -72,6 +72,21 @@ PADDLE_PRICE_YEARLY = "pri_01m20ka0z5q29jekndxfxw5z16"
 # it appears in the page source — and not a secret.
 PADDLE_CLIENT_TOKEN = "live_b16bde0d516696e5290039b41e4"
 
+# -- PLX ----------------------------------------------------------------------
+#
+# Pro paid on-chain in PLX, beside Paddle (src/plx.ts). The buyer pays from
+# their own wallet; this service holds no wallet key and only reads the chain.
+# Until all four are set the buy page does not offer PLX. Mint and treasury
+# are base58 public keys -- public, not secrets. PLX_USD is dollars per PLX.
+#
+#   PLX_MINT      = "<the PLX mint address>"
+#   PLX_TREASURY  = "<the wallet that receives payments>"
+#   PLX_USD       = "1.0"
+#
+# And the secret SOLANA_RPC_URL, a provider's mainnet RPC (Helius, Triton,
+# QuickNode...). Solana's public endpoint will not do: it answers every Worker
+# with 403, because Cloudflare marks each outbound request with CF-Worker.
+
 # -- Ad conversion attribution ------------------------------------------------
 #
 # The Google Ads tag and the "Purchase" conversion's label, from the event

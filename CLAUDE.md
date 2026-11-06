@@ -209,7 +209,10 @@ restricted capability on a first submission.
 
 ## Paddle
 
-Paddle is how everyone pays — it is the only processor. Paddle is the
+Paddle is how everyone pays by card — it is the only card processor. The one
+other way to pay is PLX, on-chain (`service/src/plx.ts`): the buyer pays from
+their own Solana wallet, the service holds no wallet key, and it issues the
+same licence once the chain shows the payment. Paddle is the
 **merchant of record**: it sells the licence to the customer and we sell it to
 Paddle, which is why VAT and invoicing are Paddle's problem rather than ours in
 every country at once.

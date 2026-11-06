@@ -96,6 +96,13 @@ const en = {
     "Card details go to Paddle, not to this server. Paddle is the merchant of record and handles VAT and invoicing.",
   planUnavailable: "That plan is not available yet.",
   checkoutFailed: "Could not start checkout.",
+  payWithPlx: "Pay with PLX",
+  plxAmount: (plx: string) => `Send exactly ${plx} PLX from your Solana wallet.`,
+  plxScan: "Scan it with a Solana wallet such as Phantom or Solflare, or open the link on this device.",
+  plxOpen: "Open in wallet",
+  plxWaiting: "Waiting for the payment to be confirmed on Solana. It takes under a minute — keep this page open.",
+  plxNote:
+    "PLX is paid straight from your own wallet on Solana; this server never sees a wallet key. A PLX payment covers one term and does not renew.",
   // The three things a buyer weighs in the second before typing a card
   // number, said once, next to the button.
   trustPlatforms: "macOS, Windows and Linux",
@@ -200,6 +207,13 @@ const tr: Strings = {
   paddleNote:
     "Kart bilgileriniz Paddle'a gider, bu sunucuya değil. Satıcı Paddle'dır; KDV ve faturayı o düzenler.",
   planUnavailable: "Bu plan henüz kullanılamıyor.",
+  payWithPlx: "PLX ile öde",
+  plxAmount: (plx: string) => `Solana cüzdanınızdan tam olarak ${plx} PLX gönderin.`,
+  plxScan: "Phantom veya Solflare gibi bir Solana cüzdanıyla tarayın ya da bağlantıyı bu cihazda açın.",
+  plxOpen: "Cüzdanda aç",
+  plxWaiting: "Ödemenin Solana'da onaylanması bekleniyor. Bir dakikadan kısa sürer — bu sayfayı açık tutun.",
+  plxNote:
+    "PLX doğrudan Solana'daki kendi cüzdanınızdan ödenir; bu sunucu hiçbir cüzdan anahtarını görmez. Bir PLX ödemesi tek bir dönemi kapsar ve yenilenmez.",
   checkoutFailed: "Ödeme başlatılamadı.",
   trustPlatforms: "macOS, Windows ve Linux",
   trustDevices: "Tek lisans, üç cihaz",
@@ -298,6 +312,13 @@ const es: Strings = {
   paddleNote:
     "Los datos de la tarjeta van a Paddle, no a este servidor. Paddle es el vendedor registrado y se encarga del IVA y la facturación.",
   planUnavailable: "Ese plan aún no está disponible.",
+  payWithPlx: "Pagar con PLX",
+  plxAmount: (plx: string) => `Envía exactamente ${plx} PLX desde tu monedero de Solana.`,
+  plxScan: "Escanéalo con un monedero de Solana como Phantom o Solflare, o abre el enlace en este dispositivo.",
+  plxOpen: "Abrir en el monedero",
+  plxWaiting: "Esperando a que el pago se confirme en Solana. Tarda menos de un minuto; mantén esta página abierta.",
+  plxNote:
+    "PLX se paga directamente desde tu propio monedero en Solana; este servidor nunca ve ninguna clave del monedero. Un pago con PLX cubre un periodo y no se renueva.",
   checkoutFailed: "No se pudo iniciar el pago.",
   trustPlatforms: "macOS, Windows y Linux",
   trustDevices: "Tres dispositivos, una licencia",

@@ -430,6 +430,67 @@ export interface BuyOptions {
    *  IP, which is both more accurate than our guess and the documented
    *  behaviour. */
   country?: string;
+  /** Whether PLX is offered beside Paddle (see plx.ts). */
+  plx?: boolean;
+}
+
+/** The PLX option: one more button in the pay card, and a panel with the
+ *  Solana Pay QR and link that replaces nothing until it is pressed. */
+function plxCheckout(s: Strings, src: string, successUrl: string): { html: string; head: string } {
+  const words = {
+    amount: s.plxAmount("{plx}"),
+    checkoutFailed: s.checkoutFailed,
+    qrAlt: s.plxScan,
+  };
+  return {
+    head: `<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>`,
+    html: `
+      <button id="plx" type="button" class="quiet">${s.payWithPlx}</button>
+      <div id="plxbox" hidden>
+        <p id="plxamount"></p>
+        <div id="plxqr" style="display:flex;justify-content:center;margin:8px 0"></div>
+        <p class="muted">${s.plxScan}</p>
+        <p><a id="plxopen" href="#">${s.plxOpen}</a></p>
+        <p class="muted" aria-live="polite">${s.plxWaiting}</p>
+      </div>
+      <script>
+        (() => {
+          const words = ${jsonForScript(words)};
+          document.getElementById('plx').addEventListener('click', async () => {
+            const email = document.getElementById('email');
+            if (!email.reportValidity()) return;
+            const cycle = document.querySelector('.plan input:checked').value;
+            const created = await fetch('/checkout/plx', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ cycle, email: email.value, src: ${jsonForScript(src)} }),
+            }).then((r) => r.json()).catch(() => ({}));
+            if (!created.ref) { alert(created.error || words.checkoutFailed); return; }
+            document.getElementById('plxamount').textContent = words.amount.replace('{plx}', created.plx);
+            document.getElementById('plxopen').href = created.url;
+            if (window.qrcode) {
+              const qr = qrcode(0, 'M');
+              qr.addData(created.url);
+              qr.make();
+              document.getElementById('plxqr').innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2, alt: words.qrAlt });
+            }
+            document.getElementById('plxbox').hidden = false;
+            document.getElementById('plx').disabled = true;
+            // Finalization on Solana takes about half a minute; a few seconds
+            // between asks is quick enough and spares the RPC.
+            const poll = async () => {
+              const status = await fetch('/v1/plx/' + created.ref).then((r) => r.json()).catch(() => ({}));
+              if (status.status === 'paid') {
+                location.href = ${jsonForScript(successUrl)} + '&ref=' + created.ref;
+              } else {
+                setTimeout(poll, 5000);
+              }
+            };
+            setTimeout(poll, 5000);
+          });
+        })();
+      </script>`,
+  };
 }
 
 export function buyPage(opts: BuyOptions): Response {
@@ -473,6 +534,9 @@ export function buyPage(opts: BuyOptions): Response {
   // which licence to reveal.
   const paddleScript = `
     <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>`;
+  const plx = opts.plx
+    ? plxCheckout(s, opts.src, withLang(opts.successUrl ?? "", ctx.lang))
+    : null;
   // Everything that takes money sits inside one raised panel: the cycle, the
   // address the key is sent to, and the button. A checkout that looks like a
   // discrete instrument is read as one, where the same controls loose on the
@@ -485,11 +549,13 @@ export function buyPage(opts: BuyOptions): Response {
       <label class="field" for="email">${s.emailLabel}</label>
       <input id="email" type="email" required autocomplete="email" placeholder="${escapeHtml(s.emailPlaceholder)}">
       <button id="pay" type="button">${s.continueToPayment}</button>
+      ${plx ? plx.html : ""}
       <div class="trust">
         <span>${s.trustPlatforms}</span><span>${s.trustDevices}</span><span>${s.trustCancel}</span>
       </div>
     </section>
     <p class="muted fineprint">${s.paddleNote}</p>
+    ${plx ? `<p class="muted fineprint">${s.plxNote}</p>` : ""}
     <script>
       ${PLAN_SCRIPT}
       Paddle.Environment.set(${jsonForScript(opts.paddleEnv)});
@@ -589,7 +655,7 @@ export function buyPage(opts: BuyOptions): Response {
   // ?src=... (to measure where buyers come from), and without this every
   // such link reached Google as a separate copy of the page.
   const canonical = `<link rel="canonical" href="${escapeHtml(ctx.url.origin + withLang("/buy", ctx.lang))}">`;
-  return page(s.proTitle, body, canonical + paddleScript, false, ctx);
+  return page(s.proTitle, body, canonical + paddleScript + (plx ? plx.head : ""), false, ctx);
 }
 
 
