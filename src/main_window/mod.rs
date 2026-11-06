@@ -176,6 +176,84 @@ pub fn draw(
         .unwrap_or_else(|| ui.max_rect());
     paint_background(ui, window_rect);
 
+    // On launch, offer a free day of Pro once — the door into pelamx and PLX.
+    // Shown to a free install until it is claimed or dismissed, then never again.
+    if !cfg.day_pass_offer_seen && state.readiness.ok {
+        let is_pro = licensing.license.lock().unwrap().entitlement.is_pro();
+        if !is_pro {
+            let mut seen = false;
+            egui::Window::new(t(
+                "Your free day of Pro",
+                "Ücretsiz Pro günün",
+                "Tu día de Pro gratis",
+            ))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ui.ctx(), |ui| {
+                ui.set_max_width(320.0);
+                ui.label(
+                    egui::RichText::new(t(
+                        "🎁 Get a free day of unlimited Pro.",
+                        "🎁 Bir günlük sınırsız Pro hediye.",
+                        "🎁 Un día de Pro ilimitado, gratis.",
+                    ))
+                    .size(15.0)
+                    .strong(),
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(t(
+                        "Claim it on pelamx.com with PLX, the pelamx token: make a \
+                         free account, we gift you the PLX, and you get a 1-day key \
+                         to paste in below.",
+                        "pelamx.com'da PLX (pelamx jetonu) ile al: ücretsiz hesap aç, \
+                         PLX'i hediye edelim, aşağıya yapıştıracağın 1 günlük anahtarı al.",
+                        "Reclámalo en pelamx.com con PLX, el token de pelamx: crea una \
+                         cuenta gratis, te regalamos los PLX y recibes una clave de 1 día \
+                         para pegar abajo.",
+                    ))
+                    .size(12.5)
+                    .weak(),
+                );
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .button(t(
+                            "Claim at pelamx.com",
+                            "pelamx.com'da al",
+                            "Reclamar en pelamx.com",
+                        ))
+                        .clicked()
+                    {
+                        crate::shell::open_url(&license::day_pass_url("popup"));
+                        seen = true;
+                    }
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(t(
+                                    "Maybe later",
+                                    "Belki sonra",
+                                    "Quizás luego",
+                                ))
+                                .size(12.0),
+                            )
+                            .frame(false),
+                        )
+                        .clicked()
+                    {
+                        seen = true;
+                    }
+                });
+            });
+            if seen {
+                cfg.day_pass_offer_seen = true;
+                dirty = true;
+            }
+        }
+    }
+
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {

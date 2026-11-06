@@ -348,6 +348,10 @@ pub struct Config {
     /// text is selected somewhere else, and a first run that shows no sign of
     /// working is where most people stop.
     pub onboarded: bool,
+    /// Whether the one-time "claim a free day of Pro with PLX" popup has been
+    /// shown. Set once it is claimed or dismissed, so it greets a new install
+    /// on launch but never nags after that.
+    pub day_pass_offer_seen: bool,
     /// Seconds of no interaction before the bubble hides itself. 0 keeps it up
     /// until it is closed or replaced. The countdown pauses while the pointer
     /// is over the bubble.
@@ -413,6 +417,7 @@ impl Default for Config {
             start_in_background: false,
             start_at_login: true,
             onboarded: false,
+            day_pass_offer_seen: false,
             auto_hide_secs: 12,
             font_size: 16.0,
             // The type scale here was drawn against macOS, whose system
