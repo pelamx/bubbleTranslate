@@ -11,6 +11,7 @@ import { credit, haikuCard, wordUse } from "./haiku";
 import { channels, channelsCard, churn, conversionByCountry, conversionCard } from "./growth";
 import { observabilityCard } from "../observability";
 import { screenCard, screenUse } from "./screen";
+import { siteVisits, visitsCard } from "./visits";
 import { installCard, installUse, translateUse, usageCard } from "./usage";
 import { COUNTRY_POINTS, LAND_ROWS, MAP_NORTH, MAP_STEP } from "./world";
 import { DAY, LOCAL_OFFSET, PAGE_SIZE, cached, date, startOfToday } from "./shared";
@@ -565,15 +566,29 @@ export const ADMIN_STYLE = `
     .side a .count { position: absolute; top: 2px; right: 2px; margin: 0; font-size: 10px; }
   }
   @media (max-width: 900px) {
-    .shell { grid-template-columns: minmax(0, 1fr); padding: 0 14px; }
-    .side { flex-direction: row; overflow-x: auto; top: 58px; z-index: 4; background: var(--bg); padding: 8px 0; }
+    .shell { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0 10px; }
+    .side { flex-direction: row; overflow-x: auto; top: 46px; z-index: 4; background: var(--bg); padding: 8px 0; }
     .side a { white-space: nowrap; padding: 7px 10px; }
     .side .hint { display: none; }
-    .appbar { padding: 10px 14px; flex-wrap: wrap; }
     .appbar a.btn span { display: none; }
     .places .split { grid-template-columns: minmax(0, 1fr); }
     svg.world { width: 100%; height: auto; }
+    /* A phone: the header stays one row, and the nav sits right under it. */
+    .main { padding-bottom: 8px; }
+    .appbar { flex-wrap: nowrap; gap: 6px; padding: 8px 12px; }
+    .appbar .tag { display: none; }
+    .appbar .brand { font-size: 17px; gap: 8px; }
+    .appbar .brand svg { width: 26px; height: 26px; }
+    .appbar a.btn, .appbar .env { padding: 5px 8px; font-size: 12px; }
+    .card { padding: 14px 12px; }
+    details.card > summary { padding: 13px 12px; }
+    details.card > .body { padding: 0 12px 14px; }
+    /* Tables scroll sideways instead of wrapping every header into a tower. */
+    th, td:not([colspan]) { white-space: nowrap; }
+    .places .title { flex-wrap: wrap; gap: 2px 10px; }
   }
+  /* The remote-config example is one long JSON line. */
+  .main p { overflow-wrap: anywhere; }
 `;
 
 /** Line icons for the panel, drawn inline so the page fetches nothing. */
@@ -1368,7 +1383,7 @@ export function delta(today: number, yesterday: number): string {
 
 export async function dashboard(env: Env, query: string, notice: Notice = {}): Promise<Response> {
   const observability = await observabilityCard(env);
-  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, licCountry, refunds, balance, licBySub, whyCancel, claudeUse, claudeBill, deeplDays, deeplMonth, screen, byChannel, payByCountry, churnMonths, words, haikuCredit, translations, perInstall] = await Promise.all([
+  const [s, u, p, byOs, mineOs, licOs, rows, failures, people, hl, vers, downloadsNow, pub, log, hooks, ending, money, share, backends, byCountry, hits, funnel, bySource, ups, versCountry, licCountry, refunds, balance, licBySub, whyCancel, claudeUse, claudeBill, deeplDays, deeplMonth, screen, byChannel, payByCountry, churnMonths, words, haikuCredit, translations, perInstall, visits] = await Promise.all([
     stats(env),
     usage(env),
     pulse(env),
@@ -1413,6 +1428,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
     credit(env),
     translateUse(env),
     installUse(env),
+    siteVisits(env),
   ]);
   const dl = downloadsNow?.total ?? null;
 
@@ -1682,6 +1698,8 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
      ${updatesCard(ups, pub)}
 
      ${limitCard(hits)}
+
+     ${visitsCard(visits)}
 
      ${funnelCard(funnel)}
 

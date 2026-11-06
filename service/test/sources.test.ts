@@ -74,3 +74,15 @@ it("keeps a source to a short plain word", () => {
   expect(cleanSource("<script>")).toBe("other");
   expect(cleanSource("x".repeat(80))).toBe("other");
 });
+
+it("records a page view, and keeps junk out of the path and source", async () => {
+  await post("/v1/view", { path: "/TR/pricing.html", src: "internal" }, "TR", "text/plain;charset=UTF-8");
+  await post("/v1/view", { path: "/blog?post=hello-world", src: "Reddit" });
+  await post("/v1/view", { path: "https://evil.example/<x>", src: "<script>" });
+  const rows = await env.DB.prepare("SELECT path, src, country FROM page_views ORDER BY id").all();
+  expect(rows.results).toEqual([
+    { path: "/tr/pricing", src: "internal", country: "TR" },
+    { path: "/blog?post=hello-world", src: "reddit", country: null },
+    { path: "other", src: "other", country: null },
+  ]);
+});

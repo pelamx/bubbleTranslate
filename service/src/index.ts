@@ -199,6 +199,7 @@ export async function forgetOld(env: Env) {
     env.DB.prepare("DELETE FROM screen_usage WHERE day < ?").bind(forgotten),
     env.DB.prepare("DELETE FROM translate_usage WHERE day < ?").bind(forgotten),
     env.DB.prepare("DELETE FROM orders WHERE status != 'paid' AND created_at < ?").bind(t - 90 * 86_400),
+    env.DB.prepare("DELETE FROM page_views WHERE at < ?").bind(t - 90 * 86_400),
   ]);
 }
 
@@ -285,6 +286,30 @@ async function downloadClick(env: Env, body: any, request: Request): Promise<Res
     ]);
   } catch (err) {
     console.error("could not log a download click", err);
+  }
+  return new Response(null, { status: 204 });
+}
+
+/** The path a page view arrives with: lowercase, one `?post=` kept for a blog
+ *  post, anything else that is not a short plain path is `other`. */
+export function cleanPath(raw: unknown): string {
+  const p = String(raw ?? "").trim().toLowerCase().replace(/\/index\.html$/, "/").replace(/\.html$/, "");
+  return /^\/[a-z0-9/_.-]{0,60}(\?post=[a-z0-9_-]{1,80})?$/.test(p) ? p : "other";
+}
+
+/** One page opened on the website, sent with `sendBeacon` by the page itself.
+ *  Answers 204 whatever it is sent, like a download click. */
+async function pageView(env: Env, body: any, request: Request): Promise<Response> {
+  try {
+    const cf = (request as { cf?: { country?: unknown } }).cf;
+    const country =
+      typeof cf?.country === "string" && /^[A-Z0-9]{2}$/.test(cf.country) ? cf.country : null;
+    const src = body.src === "internal" ? "internal" : cleanSource(body.src);
+    await env.DB.prepare("INSERT INTO page_views (at, path, src, country) VALUES (?, ?, ?, ?)")
+      .bind(now(), cleanPath(body.path), src, country)
+      .run();
+  } catch (err) {
+    console.error("could not log a page view", err);
   }
   return new Response(null, { status: 204 });
 }
@@ -1466,6 +1491,8 @@ async function route(request: Request, env: Env): Promise<Response> {
         return await wordRelay(env, body);
       case "/v1/download":
         return await downloadClick(env, body, request);
+      case "/v1/view":
+        return await pageView(env, body, request);
       case "/v1/activate":
         return await activate(env, body);
       case "/v1/refresh":
