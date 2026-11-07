@@ -1559,6 +1559,9 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
        </table></div></details>`
     : "";
 
+  // `days` is keyed by the same local day as `startOfToday`.
+  const visitsOn = (ago: number) =>
+    visits.days.find((d) => d.day === date(startOfToday() + LOCAL_OFFSET - ago * DAY))?.visits ?? 0;
   const online = byOs.reduce((a, o) => a + (o.online ?? 0), 0);
   const today = new Date((startOfToday() + LOCAL_OFFSET) * 1000).toLocaleDateString("en-GB", {
     weekday: "long", day: "numeric", month: "long", timeZone: "UTC",
@@ -1603,7 +1606,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
      <div class="zone" id="overview">
      <section class="card">
        <p class="label">Today <span class="aside">· ${escapeHtml(today)} (Turkey time, vs yesterday)</span></p>
-       <div class="grid">
+       <div class="grid five">
          ${tile({ icon: "userPlus", tone: "t-blue", title: "New users", hint: "Downloaded &amp; opened",
            value: p.installs_today, extra: delta(p.installs_today, p.installs_yesterday), rows: osChips((o) => o.today) })}
          ${tile({ icon: "cart", tone: "t-red", title: "New paying customers",
@@ -1612,6 +1615,9 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
            value: online, rows: osChips((o) => o.online ?? 0) })}
          ${tile({ icon: "users", tone: "t-teal", title: "Active users", hint: "Opened the app today",
            value: p.active_today, rows: osChips((o) => o.active_today) })}
+         ${tile({ icon: "globe", tone: "t-violet", title: "Website visits", hint: "bubbletranslate.app, from outside the site",
+           value: visitsOn(0), extra: delta(visitsOn(0), visitsOn(1)), rows: "", footIcon: "chart",
+           foot: `<a href="#visits">${visits.days.reduce((a, d) => a + d.visits, 0)} in 30 days</a>` })}
        </div>
        ${placesPanel(byCountry, p.active_today)}
      </section>
