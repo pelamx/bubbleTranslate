@@ -54,6 +54,7 @@ const TEXT_MUTED: egui::Color32 = egui::Color32::from_gray(155);
 const OK_GREEN: egui::Color32 = egui::Color32::from_rgb(120, 210, 140);
 const WARN_AMBER: egui::Color32 = egui::Color32::from_rgb(245, 195, 130);
 const ERR_RED: egui::Color32 = egui::Color32::from_rgb(255, 150, 150);
+const MESSAGE_GOLD: egui::Color32 = egui::Color32::from_rgb(255, 200, 60);
 
 pub struct MainState {
     /// Whether the window should currently exist.
@@ -458,8 +459,13 @@ fn footer(ui: &mut egui::Ui) {
 /// or it tried and failed, the button opens the download instead.
 fn update_banner(ui: &mut egui::Ui) {
     if let Some(message) = crate::remote::update_message() {
-        ui.label(message);
-        ui.add_space(6.0);
+        // Large and bright so a note from us is seen, not scrolled past.
+        ui.label(
+            egui::RichText::new(message)
+                .font(egui::FontId::new(17.0, crate::ui::theme::emphasis_family()))
+                .color(MESSAGE_GOLD),
+        );
+        ui.add_space(8.0);
     }
     let Some(newer) = crate::update::available() else {
         return;

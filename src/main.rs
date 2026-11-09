@@ -325,17 +325,18 @@ fn main() -> eframe::Result<()> {
                             .user_agent(concat!("bubbleTranslate/", env!("CARGO_PKG_VERSION")))
                             .build(),
                     );
-                    // Flush cumulative metrics every five minutes, including during day one.
-                    loop {
+                    // Remote settings (and the message at the top of the window) every
+                    // minute; cumulative metrics every five, including during day one.
+                    for turn in 0u64.. {
                         remote::refresh(&agent);
                         ctx.request_repaint();
                         let enabled = config.lock().unwrap().usage_ping;
                         telemetry::enable(enabled);
-                        if enabled {
+                        if enabled && turn % 5 == 0 {
                             let pro = license.lock().unwrap().entitlement.is_pro();
                             license::ping(&agent, pro);
                         }
-                        std::thread::sleep(std::time::Duration::from_secs(300));
+                        std::thread::sleep(std::time::Duration::from_secs(60));
                     }
                 });
             }

@@ -13,6 +13,13 @@ Where a change only affects one system, the entry says so. macOS, Windows and
 Linux are released separately, so a version number can appear on one of them
 days before the others.
 
+## Unreleased
+
+**Notes from us are easier to see and arrive sooner.** The message at the top
+of the main window — news about a new pelamx app, an offer, or a reminder to
+update — is now larger and in gold, so it does not read like the rest of the
+settings, and a new one shows up within a minute instead of five.
+
 ## 0.4.24 — 2026-11-06
 
 **A free day of Pro to try, no card needed.** Claim one free day of unlimited
