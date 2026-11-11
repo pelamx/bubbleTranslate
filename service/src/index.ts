@@ -261,6 +261,8 @@ async function attributeInstall(
 export function cleanSource(raw: unknown): string {
   const s = String(raw ?? "").trim().toLowerCase().replace(/^www\./, "");
   if (!s) return "direct";
+  // google.com, google.com.tr, … are all a Google search.
+  if (/^google\.[a-z.]+$/.test(s)) return "google";
   return /^[a-z0-9][a-z0-9._-]{0,39}$/.test(s) ? s : "other";
 }
 

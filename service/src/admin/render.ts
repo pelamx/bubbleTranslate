@@ -11,7 +11,7 @@ import { credit, haikuCard, wordUse } from "./haiku";
 import { channels, channelsCard, churn, conversionByCountry, conversionCard } from "./growth";
 import { observabilityCard } from "../observability";
 import { screenCard, screenUse } from "./screen";
-import { siteVisits, visitsCard } from "./visits";
+import { siteVisits, sourceName, visitsCard } from "./visits";
 import { installCard, installUse, translateUse, usageCard } from "./usage";
 import { COUNTRY_POINTS, LAND_ROWS, MAP_NORTH, MAP_STEP } from "./world";
 import { DAY, LOCAL_OFFSET, PAGE_SIZE, cached, date, startOfToday } from "./shared";
@@ -819,9 +819,7 @@ function sourcesCard(rows: SourceRow[]): string {
   const name = (src: string) =>
     src === "unmatched"
       ? `<span class="muted">Not from a website click</span>`
-      : src === "direct"
-        ? `direct <span class="muted">— typed in, or no referrer</span>`
-        : `<b>${escapeHtml(src)}</b>`;
+      : sourceName(src);
   const body = rows.length
     ? rows
         .map(
@@ -1616,7 +1614,9 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
          ${tile({ icon: "users", tone: "t-teal", title: "Active users", hint: "Opened the app today",
            value: p.active_today, rows: osChips((o) => o.active_today) })}
          ${tile({ icon: "globe", tone: "t-violet", title: "Website visits", hint: "bubbletranslate.app, from outside the site",
-           value: visitsOn(0), extra: delta(visitsOn(0), visitsOn(1)), rows: "", footIcon: "chart",
+           value: visitsOn(0), extra: delta(visitsOn(0), visitsOn(1)), footIcon: "chart",
+           rows: `<div>${visits.sources.filter((s) => s.today).sort((a, b) => b.today - a.today)
+             .map((s) => `<span class="os">${s.src === "direct" ? "direct" : sourceName(s.src)} ${s.today}</span>`).join("")}</div>`,
            foot: `<a href="#visits">${visits.days.reduce((a, d) => a + d.visits, 0)} in 30 days</a>` })}
        </div>
        ${placesPanel(byCountry, p.active_today)}

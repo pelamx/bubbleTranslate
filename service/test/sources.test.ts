@@ -71,6 +71,8 @@ it("leaves a click older than the window unclaimed", async () => {
 it("keeps a source to a short plain word", () => {
   expect(cleanSource("www.Reddit.com")).toBe("reddit.com");
   expect(cleanSource("")).toBe("direct");
+  expect(cleanSource("www.google.com.tr")).toBe("google");
+  expect(cleanSource("google-ads")).toBe("google-ads");
   expect(cleanSource("<script>")).toBe("other");
   expect(cleanSource("x".repeat(80))).toBe("other");
 });
