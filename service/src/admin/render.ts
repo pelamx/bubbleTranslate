@@ -491,7 +491,7 @@ export const ADMIN_STYLE = `
   #overview .stat .head { display: contents; }
   #overview .stat .v { grid-column: 3; grid-row: 1; margin: 0; text-align: right; align-self: start; }
   #overview .stat > .d { grid-column: 2 / -1; margin: 2px 0 0; font-size: 12px; }
-  #overview .stat .osbars, #overview .stat .foot-line { grid-column: 1 / -1; }
+  #overview .stat .osbars, #overview .stat .chips, #overview .stat .foot-line { grid-column: 1 / -1; }
   #overview .stat .foot-line { margin-top: 8px; align-self: end; }
   #overview .grid.five { grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); }
   .zone { scroll-margin-top: 76px; }
@@ -559,6 +559,11 @@ export const ADMIN_STYLE = `
 
   /* Below a wide screen the side list folds to its icons, so the tiles keep
      their width; each name is still there on hover. */
+  /* Below a wide screen five tiles side by side crush each title into a
+     column of single letters; a tile keeps room for icon, title and figure. */
+  @media (max-width: 1399px) {
+    #overview .grid, #overview .grid.five { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+  }
   @media (min-width: 901px) and (max-width: 1399px) {
     .shell { grid-template-columns: 52px minmax(0, 1fr); gap: 16px; }
     .side a { justify-content: center; padding: 10px 0; position: relative; }
@@ -587,6 +592,8 @@ export const ADMIN_STYLE = `
     th, td:not([colspan]) { white-space: nowrap; }
     .places .title { flex-wrap: wrap; gap: 2px 10px; }
   }
+  /* A small phone: the environment pill keeps only its dot, so the header fits. */
+  @media (max-width: 400px) { .appbar .env { font-size: 0; gap: 0; padding: 8px; } }
   /* The remote-config example is one long JSON line. */
   .main p { overflow-wrap: anywhere; }
 `;
@@ -1615,7 +1622,7 @@ export async function dashboard(env: Env, query: string, notice: Notice = {}): P
            value: p.active_today, rows: osChips((o) => o.active_today) })}
          ${tile({ icon: "globe", tone: "t-violet", title: "Website visits", hint: "bubbletranslate.app, from outside the site",
            value: visitsOn(0), extra: delta(visitsOn(0), visitsOn(1)), footIcon: "chart",
-           rows: `<div>${visits.sources.filter((s) => s.today).sort((a, b) => b.today - a.today)
+           rows: `<div class="chips">${visits.sources.filter((s) => s.today).sort((a, b) => b.today - a.today)
              .map((s) => `<span class="os">${s.src === "direct" ? "direct" : sourceName(s.src)} ${s.today}</span>`).join("")}</div>`,
            foot: `<a href="#visits">${visits.days.reduce((a, d) => a + d.visits, 0)} in 30 days</a>` })}
        </div>
